@@ -1,0 +1,17 @@
+{
+  "name": "pstack",
+  "owner": {
+    "name": "pstack mirror"
+  },
+  "metadata": {
+    "description": "Mirror of cursor/plugins/pstack for Claude Code and Codex."
+  },
+  "plugins": [
+    {
+      "name": "pstack",
+      "description": "poteto's rigorous agent workflows as Agent Skills.",
+      "source": "./",
+      "category": "Productivity"
+    }
+  ]
+}
