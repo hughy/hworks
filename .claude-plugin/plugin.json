@@ -1,0 +1,7 @@
+{
+  "name": "pstack",
+  "description": "Mirror of cursor/plugins/pstack: poteto's rigorous agent workflows as Agent Skills.",
+  "author": { "name": "Lauren Tan" },
+  "homepage": "https://github.com/cursor/plugins/tree/main/pstack",
+  "license": "MIT"
+}
