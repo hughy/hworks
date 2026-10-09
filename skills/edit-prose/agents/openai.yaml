@@ -1,0 +1,4 @@
+interface:
+  display_name: "Edit Prose"
+  short_description: "Tighten prose without changing meaning"
+  default_prompt: "Use $edit-prose to tighten this draft while preserving technical terms."

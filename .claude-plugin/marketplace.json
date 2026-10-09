@@ -1,0 +1,17 @@
+{
+  "name": "hworks",
+  "owner": {
+    "name": "hworks"
+  },
+  "metadata": {
+    "description": "hworks for Claude Code and Codex. Re-exports the pstack skills it keeps."
+  },
+  "plugins": [
+    {
+      "name": "hworks",
+      "description": "A pruned personal layer over pstack.",
+      "source": "./",
+      "category": "Productivity"
+    }
+  ]
+}
