@@ -1,6 +1,6 @@
 {
   "name": "hworks",
   "description": "A pruned personal layer over pstack: a short router and an allowlist of kept skills. Agent roles load on pi only.",
-  "author": { "name": "Hugh Yeung" },
+  "author": { "name": "Hugh Cunningham" },
   "license": "MIT"
 }

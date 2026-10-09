@@ -9,6 +9,7 @@ A personal layer over the [pstack](./pstack/) mirror. `pstack/` is a git subtree
 - `adapters/pi.md` maps Cursor-specific terms in pstack skills to pi.
 - `models.conf` and `scripts/models.sh` hold the model roster. A profile names a model for each agent role and sets two slots that hughy-mode reads for per-call overrides: `review2` (the second reviewer) and `exhaustive` (the `coder` model at exhaustive effort). `models.sh <profile>` writes the role models to pi settings as `subagents.agentOverrides.<role>.model` and leaves the agent files untouched; `models.sh show` prints the active profile. Profiles: `inherit` (session model, the default) and `anthropic`.
 - `DIVERGENCE.md` records every skill not linked, with the reason and the pstack mirror commit.
+- `CUSTOMIZING.md` covers forking hworks into your own layer, adding agent roles and model profiles, and writing an overlay repo.
 
 ## Rationale
 
@@ -46,10 +47,12 @@ Two gitignored paths hold machine- or employer-specific setup without changing t
 - `models.d/*.conf`: extra profiles in the `models.conf` format. `models.sh` reads them alongside `models.conf`.
 - `adapters/local/`: extra adapter notes, for example a mapping from the generic terms in hughy-mode ("a PR-tracking tool", "the closest available model") to one harness's tool names. hughy-mode reads every file here after `adapters/pi.md`.
 
+[`CUSTOMIZING.md`](./CUSTOMIZING.md#overlays) lists the terms an adapter maps and the layout of an overlay repo.
+
 ## Resync
 
 ```bash
-git subtree pull --squash --prefix pstack ~/dev/pstack main
+git subtree pull --squash --prefix pstack https://github.com/hughy/pstack main
 ```
 
 Then, for each row in `DIVERGENCE.md`, diff the mirror between the recorded commit and the new one for that skill and decide whether the reason still holds. `scripts/skill.sh list` shows what is linked.

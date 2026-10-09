@@ -13,7 +13,7 @@ One line per pstack skill or principle that hworks does not link. `scripts/skill
 | `automate-me` | mines Cursor transcripts; path not available on pi | fa9a0ed |
 | `recall` | mines Cursor transcripts; path not available on pi | fa9a0ed |
 | `reflect` | mines Cursor transcripts; files backlog items externally by default | fa9a0ed |
-| `setup-pstack` | writes pstack-models.mdc; agents/*.md pin models instead | fa9a0ed |
+| `setup-pstack` | writes pstack-models.mdc; models.conf and scripts/models.sh set each role's model instead | fa9a0ed |
 | `figure-it-out` | bespoke-playbook designer; issue planning belongs to an issue-planning skill | fa9a0ed |
 | `show-me-your-work` | TSV trail with mandatory transcript audit and cross-model review; too heavy by default | fa9a0ed |
 | `typescript-best-practices` | paths: trigger is Cursor-only; re-enable on demand | fa9a0ed |
