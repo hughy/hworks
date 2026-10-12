@@ -91,7 +91,7 @@
   "argsDigest": "43f22f4c225e0269d7e252a8fda9cb2adaa824ff63e8899fec3bf43c4e745d9c",
   "workflowChildren": {
     "version": 1,
-    "parentToolCallId": "toolu_0115SLp87rroZZS3ekEMRcA5",
+    "parentToolCallId": "call-unresolved-0001",
     "workflowRunId": "bfb7a476-3f2d-4d69-8cde-832344377bfb",
     "inventoryComplete": true,
     "workflowState": "completed",

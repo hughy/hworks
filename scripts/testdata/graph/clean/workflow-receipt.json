@@ -36,7 +36,7 @@
   "argsDigest": "bce86b9149c4c718e1f2df2af62f08ff8de6bc623a916a9581dbdb85bad5e988",
   "workflowChildren": {
     "version": 1,
-    "parentToolCallId": "toolu_017wpcdFG814iNVkt8vcnaLU",
+    "parentToolCallId": "call-clean-0001",
     "workflowRunId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
     "inventoryComplete": true,
     "workflowState": "completed",

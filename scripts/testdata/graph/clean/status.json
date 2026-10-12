@@ -1,6 +1,6 @@
 {
   "runId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
-  "toolCallId": "toolu_017wpcdFG814iNVkt8vcnaLU",
+  "toolCallId": "call-clean-0001",
   "sessionId": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68.jsonl",
   "completionOwnerId": "17d2f3a4-9ff5-4ee4-909a-52589d7ef989",
   "mode": "workflow",
@@ -107,7 +107,7 @@
   },
   "workflowChildren": {
     "version": 1,
-    "parentToolCallId": "toolu_017wpcdFG814iNVkt8vcnaLU",
+    "parentToolCallId": "call-clean-0001",
     "workflowRunId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
     "inventoryComplete": true,
     "workflowState": "completed",
@@ -144,5 +144,5 @@
     "outputTokens": 3572,
     "costUsd": 0.25169410000000003
   },
-  "workflowReceiptPath": "/tmp/pi-subagents-uid-501/async-subagent-runs/cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8/workflow-receipt.json"
+  "workflowReceiptPath": "/tmp/pi-subagents-user/async-subagent-runs/cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8/workflow-receipt.json"
 }

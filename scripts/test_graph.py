@@ -1,6 +1,7 @@
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -533,6 +534,13 @@ class GraphTest(unittest.TestCase):
                                env=self.env, timeout=1)
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         self.g("status")
+
+    def test_fixtures_carry_no_runtime_identifiers(self):
+        pattern = re.compile("tool" + r"u_[A-Za-z0-9]+|uid-[0-9]+")
+        for root, _, files in os.walk(FIXTURES):
+            for fn in files:
+                with open(os.path.join(root, fn)) as f:
+                    self.assertEqual(pattern.findall(f.read()), [], os.path.join(root, fn))
 
     def test_atomic_write_leaves_no_partial_file(self):
         path = os.path.join(self.tmp, "d", "units.tsv")
