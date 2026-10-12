@@ -32,7 +32,9 @@ WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "block
 RETRYABLE = {"unresolved", "gate-failed", "review-failed", "run-failed"}
 ACCEPTED_UNMERGED = {"clean", "stale", "pr-open"}
 SET_TARGETS = {"parked", "abandoned", "queued", "pr-open", "merged"}
-EFFORTS = {"quick", "standard", "exhaustive"}
+# quick runs no reviewer and can return a result whose gate nobody verified, so the graph never uses it.
+EFFORTS = {"standard", "exhaustive"}
+EFFORT_ERROR = "effort must be standard or exhaustive (quick runs no reviewer)"
 RUNTIME_TERMINAL = {"complete", "completed", "failed", "stopped", "cancelled", "canceled", "error",
                     "timeout", "timed-out", "aborted"}
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -239,7 +241,7 @@ def validate_units(data):
             raise BadInput("%s: branch %r is not usable" % (where, b))
         e = u.get("effort")
         if e is not None and e not in EFFORTS:
-            raise BadInput("%s: effort must be one of %s" % (where, ", ".join(sorted(EFFORTS))))
+            raise BadInput("%s: %s" % (where, EFFORT_ERROR))
 
 
 def cmd_import(store, a):
@@ -292,7 +294,7 @@ STANDING_HEADER = """# Standing orders
 
 def cmd_init(store, a):
     if a.effort not in EFFORTS:
-        raise BadInput("effort must be one of %s" % ", ".join(sorted(EFFORTS)))
+        raise BadInput(EFFORT_ERROR)
     if a.max_attempts < 1:
         raise BadInput("--max-attempts must be at least 1")
     repo = os.path.abspath(a.repo)

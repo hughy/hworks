@@ -802,6 +802,20 @@ class GraphTest(unittest.TestCase):
             self.g("import", path, code=2)
         self.assertEqual(self.rows(), {})
 
+    def test_quick_effort_is_rejected_because_it_runs_no_reviewers(self):
+        self.g("init", "--repo", self.repo, "--base", "main", "--worktrees", os.path.join(self.tmp, "wt"),
+               "--effort", "quick", code=2)
+        self.assertFalse(os.path.exists(os.path.join(self.store, "config.json")))
+        self.init()
+        path = os.path.join(self.tmp, "quick.json")
+        with open(path, "w") as f:
+            json.dump([{"id": "A", "title": "t", "effort": "quick"}], f)
+        p = subprocess.run([sys.executable, GRAPH, "--store", self.store, "import", path], capture_output=True,
+                           text=True, env=self.env)
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("standard or exhaustive", p.stderr)
+        self.assertEqual(self.rows(), {})
+
     def test_init_grant_records_exact_text(self):
         self.init("--grant", "push branches and open draft PRs")
         with open(os.path.join(self.store, "standing.md")) as f:
