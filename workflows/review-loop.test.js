@@ -205,6 +205,8 @@ test("two gate failures in a row stop with gate-failed", async () => {
   assert.equal(out.state, "gate-failed");
   assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry"]);
   assert.match(calls[1].task, /gate failed: 2 tests/);
+  assert.match(calls[1].task, /git log 0123abc\.\.HEAD/);
+  assert.match(calls[1].task, /make no new commit/);
   assert.deepEqual(out.runs.map((r) => r.ok), [false, false]);
 });
 

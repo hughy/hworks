@@ -76,6 +76,8 @@ test("effort sets the coder model", () => {
   const quick = runArgs(fx, [fx.brief, "true", "main", "quick", fx.repo], { models: { ...pinned, coder: "p/coder:high" } });
   assert.equal(quick.json.coderModel, "p/coder:low");
   assert.equal(quick.json.reviewers, 0);
+  const quickMax = runArgs(fx, [fx.brief, "true", "main", "quick", fx.repo], { models: { ...pinned, coder: "p/coder:max" } });
+  assert.equal(quickMax.json.coderModel, "p/coder:low");
   const standard = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo], { models: pinned });
   assert.equal("coderModel" in standard.json, false);
   const exhaustive = runArgs(fx, [fx.brief, "true", "main", "exhaustive", fx.repo], { models: pinned });
@@ -111,6 +113,11 @@ test("the equality warning compares the models both reviewers run", () => {
     env: { PI_PROVIDER: "s", PI_MODEL: "sess" },
   });
   assert.match(sameViaSession.stderr, /both reviews run on one model/);
+  const sameIgnoringThinking = runArgs(fx, [fx.brief, "true", "main", "exhaustive", fx.repo], {
+    models: { ...pinned, reviewer: "s/sess:high", review2: "" },
+    env: { PI_PROVIDER: "s", PI_MODEL: "sess" },
+  });
+  assert.match(sameIgnoringThinking.stderr, /both reviews run on one model/);
   const differ = runArgs(fx, [fx.brief, "true", "main", "exhaustive", fx.repo], {
     models: { ...pinned, reviewer: "", review2: "q/rev2" },
     env: { PI_PROVIDER: "s", PI_MODEL: "sess" },

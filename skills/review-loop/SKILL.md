@@ -19,7 +19,7 @@ Paths below are relative to this file: the workflow is `../../workflows/review-l
    - `clean`: the gate passed and the last review had no blocking findings. Weigh `nonBlocking` and continue to the next step of the route.
    - `unresolved`: `maxRounds` review rounds (the first review counts as one) left `blocking` open. Read each finding, then fix, dismiss with a reason, or re-brief.
    - `blocked`: the coder needs a decision. Read its summary in the run output.
-   - `gate-failed`: two coder runs in a row failed the gate. Read the failing run's error before re-briefing.
+   - `gate-failed`: two coder runs in a row failed, by gate or by a runner that ended without a result. Check `git log` for work the failed runs committed, then read the error before re-briefing.
    - `review-failed`: a reviewer failed or returned no structured findings. Rerun the review by hand.
 
 The result also carries `rounds`, `head` (the coder's last reported commit), and `runs` (key, runId, ok) for inspecting any child. With mission state, each round writes a progress record under the key `review-loop` or `review-loop.<label>`.

@@ -63,7 +63,11 @@ function coderTask(round, findings, gateFailure) {
       "For any that do not hold, say why in summary.\n" + JSON.stringify(findings, null, 2);
   }
   if (gateFailure) {
-    task += "\n\nThe previous attempt failed its gate or did not finish. Find the cause and fix it. Failure:\n" + gateFailure;
+    task +=
+      "\n\nThe previous attempt failed its gate or did not finish. It may still have committed work: a run can fail after it finished. " +
+      "Before editing, read `git status`, `git log " + args.base + "..HEAD`, and `git diff " + args.base + "...HEAD`. " +
+      "If the brief is already met and the gate passes, return status `done` with the current head and make no new commit. " +
+      "Otherwise find the cause and fix it. Failure:\n" + gateFailure;
   }
   return task;
 }

@@ -44,12 +44,14 @@ model_of() {
   printf '%s' "$m"
 }
 
+bare() { sed -E 's/:(off|minimal|low|medium|high|xhigh|max)$//' <<< "$1"; }
+
 coder_model=""
 case "$effort" in
   quick)
     coder_model=$(model_of coder)
     if [ -n "$coder_model" ]; then
-      coder_model="$(sed -E 's/:(off|minimal|low|medium|high|xhigh)$//' <<< "$coder_model"):low"
+      coder_model="$(bare "$coder_model"):low"
     else
       echo "warning: coder runs on the session model and PI_PROVIDER/PI_MODEL are unset; quick effort runs it without :low" >&2
     fi
@@ -69,7 +71,7 @@ if [ "$reviewers" -eq 2 ]; then
   if [ -z "$review2" ]; then
     echo "warning: review2 slot is the session model and PI_PROVIDER/PI_MODEL are unset; the second reviewer runs on the reviewer model" >&2
   fi
-  if [ "${review2:-$reviewer}" = "$reviewer" ]; then
+  if [ "$(bare "${review2:-$reviewer}")" = "$(bare "$reviewer")" ]; then
     echo "warning: review2 runs the reviewer model (${reviewer:-session model}); both reviews run on one model" >&2
   fi
 fi
