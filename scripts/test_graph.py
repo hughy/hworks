@@ -64,7 +64,7 @@ class GraphTest(unittest.TestCase):
         return {r["id"]: r for r in graph.read_rows(self.store)}
 
     def next(self, n=3):
-        return json.loads(self.g("next", "--max", str(n), "--json"))
+        return json.loads(self.g("next", "--max", str(n), "--json"))["selected"]
 
     def launch(self, uid, *extra, code=0):
         out = self.g("launch", uid, *extra, code=code)
@@ -411,6 +411,20 @@ class GraphTest(unittest.TestCase):
         head = self.commit("A")
         self.g("record", "A", "1", self.workflow("clean", "wf-1", head))
         self.assertEqual(self.next(), [])
+
+    def test_next_json_gives_a_reason_for_each_unit_left_out(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "priority": 1, "paths": ["src/*"]},
+                   {"id": "B", "title": "b", "priority": 2, "paths": ["src/x.py"]},
+                   {"id": "C", "title": "c", "priority": 3, "paths": ["c/*"]},
+                   {"id": "D", "title": "d", "blockedBy": ["A"], "paths": ["d/*"]}])
+        out = json.loads(self.g("next", "--max", "1", "--json"))
+        self.assertEqual(out["selected"], ["A"])
+        self.assertEqual(sorted(out["refused"]), ["B", "C", "D"])
+        self.assertEqual(out["refused"]["B"], "paths overlap A (picked)")
+        self.assertEqual(out["refused"]["C"], "window full")
+        self.assertIn("dependency A is queued", out["refused"]["D"])
+        self.assertEqual(self.g("next", "--max", "1"), "A\n")
 
     def test_priority_order_puts_none_and_zero_last(self):
         self.init()

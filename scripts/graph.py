@@ -414,9 +414,9 @@ def plan(cfg, rows, units, window):
 def cmd_next(store, a):
     with locked(store):
         cfg = load_config(store)
-        ids, _ = plan(cfg, read_rows(store), load_units(store), a.max)
+        ids, why = plan(cfg, read_rows(store), load_units(store), a.max)
     if a.json:
-        print(json.dumps(ids))
+        print(json.dumps({"selected": ids, "refused": why}))
     else:
         for i in ids:
             print(i)
