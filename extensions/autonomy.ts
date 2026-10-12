@@ -1,17 +1,30 @@
 // Keeps the agent from stalling on mid-task questions or running commands git cannot undo.
 // The block reason is returned to the model as the tool result, so it doubles as the redirect.
 // `/autonomy off` relaxes both checks for the current session; `/autonomy on` restores them.
+// Every block, and every ask or supervisor decision request, is appended to a JSONL log for
+// scripts/blockers.sh. PI_AUTONOMY=0 disables the guard and the log.
+
+import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+
+const LOG = process.env.HWORKS_BLOCKERS_LOG || join(homedir(), ".local/state/agent-tasks/blockers.jsonl");
+
+const ENTRY_FORMAT =
+  "one line per entry in ~/.local/state/agent-tasks/<task>/open-questions.md: " +
+  "`- [<category>] <question> | <choice> | <evidence> | <how to reverse>`, where category is one of " +
+  "missing-info, permission, irreversible, tooling, ambiguous-brief, external-wait.";
 
 const ASK_REASON =
   "Autonomy: do not ask mid-task. Settle the question from code, docs, git history, or a quick experiment, " +
-  "pick the best-evidenced option, and record the question, your choice, the evidence, and how to reverse it " +
-  "under ~/.local/state/agent-tasks/<task>/open-questions.md. Finish the task, then list only the questions " +
-  "evidence could not settle at the end of your final reply, with options and a recommendation.";
+  "pick the best-evidenced option, and record it as " + ENTRY_FORMAT + " Finish the task, then list only the " +
+  "questions evidence could not settle at the end of your final reply, with options and a recommendation.";
 
 const DESTRUCTIVE_REASON =
   "Autonomy: blocked a command git on the working branch cannot undo. Use a reversible alternative " +
   "(commit first, `git revert`, `git stash push`, move files to a backup path) or skip this step, finish the " +
-  "rest, and list the skipped step first in your final reply. Pattern: ";
+  "rest, record it as an [irreversible] entry, " + ENTRY_FORMAT + " List the skipped step first in your final " +
+  "reply. Pattern: ";
 
 const PATTERNS: Array<[string, RegExp]> = [
   ["git reset --hard", /\bgit\s+(?:-C\s+\S+\s+)?reset\b[^;&|]*--(?:hard|merge|keep)\b/],
@@ -45,6 +58,24 @@ export function classify(command: string): string | null {
   return null;
 }
 
+function record(ctx: any, kind: string, rule: string, blocked: boolean, detail: unknown) {
+  try {
+    mkdirSync(dirname(LOG), { recursive: true });
+    const row = {
+      ts: new Date().toISOString(),
+      session: ctx?.sessionManager?.getSessionId?.() ?? process.env.PI_SESSION_ID ?? null,
+      cwd: ctx?.cwd ?? process.cwd(),
+      kind,
+      rule,
+      blocked,
+      detail: String(detail ?? "").replace(/\s+/g, " ").slice(0, 300),
+    };
+    appendFileSync(LOG, JSON.stringify(row) + "\n");
+  } catch {
+    // Logging must never change whether a call runs.
+  }
+}
+
 export default function (pi: any) {
   if (process.env.PI_AUTONOMY === "0") return;
   let enabled = true;
@@ -59,12 +90,25 @@ export default function (pi: any) {
     },
   });
 
-  pi.on("tool_call", (event: any) => {
-    if (!enabled) return;
-    if (event.toolName === "ask_user_question") return { block: true, reason: ASK_REASON };
-    if (event.toolName === "bash") {
-      const hit = classify(String(event.input?.command ?? ""));
-      if (hit) return { block: true, reason: DESTRUCTIVE_REASON + hit };
+  pi.on("tool_call", (event: any, ctx: any) => {
+    const input = event.input ?? {};
+    if (event.toolName === "ask_user_question") {
+      const qs = Array.isArray(input.questions) ? input.questions.map((q: any) => q?.question).join(" / ") : "";
+      record(ctx, "ask", "ask_user_question", enabled, qs);
+      if (enabled) return { block: true, reason: ASK_REASON };
+      return;
+    }
+    if (event.toolName === "contact_supervisor" && input.reason !== "progress_update") {
+      record(ctx, "supervisor", String(input.reason ?? "unknown"), false, input.message);
+      return;
+    }
+    if (enabled && event.toolName === "bash") {
+      const command = String(input.command ?? "");
+      const hit = classify(command);
+      if (hit) {
+        record(ctx, "destructive", hit, true, command);
+        return { block: true, reason: DESTRUCTIVE_REASON + hit };
+      }
     }
   });
 }

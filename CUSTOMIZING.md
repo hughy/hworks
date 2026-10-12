@@ -96,7 +96,7 @@ To add a role:
 hworks reads two gitignored paths that an overlay fills without changing tracked files:
 
 - `models.d/*.conf`: extra profiles in the `models.conf` format. `scripts/models.sh` reads them after `models.conf`.
-- `adapters/local/*.md`: extra adapter notes. The router reads every file there after `adapters/pi.md`. Where they conflict, the local file wins.
+- `adapters/local/*.md`: extra adapter notes. The router reads every file there after `adapters/pi.md`. Where they conflict, the local file wins. `adapters/local/blockers.env`, if present, is sourced by `scripts/blockers.sh` to point it at harness-specific logs.
 
 Keep overlay content in its own repo, so that it is versioned without becoming part of hworks:
 
