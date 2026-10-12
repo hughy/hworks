@@ -710,8 +710,8 @@ def scan_runs(runs_dir, row):
 
     Bound workflows, their children, any child whose cwd is the worktree, and any workflow whose args
     target the worktree under the unit's label (dispatched but not yet bound). A bound run without a
-    status.json is listed with liveness unknown, and so is a child a bound workflow names but did not
-    record as completed whose own status.json is missing.
+    status.json is listed with liveness unknown, and so is a child a bound workflow names, that no bound
+    workflow recorded as completed, whose own status.json is missing.
     """
     runs = split_list(row["run"])
     wt = real(row["worktree"])
@@ -746,21 +746,27 @@ def scan_runs(runs_dir, row):
             found.append({"run": r, "kind": "workflow", "bound": True, "parent": None, "state": None,
                           "liveness": "unknown", "dir": os.path.join(runs_dir, r), "status": None})
     listed = {e["run"] for e in found}
-    for e in list(found):
+    # Collected by any bound controller means the child ended, even if an older controller recorded it stopped.
+    collected, pending = set(), {}
+    for e in found:
         if e["kind"] != "workflow" or not e["bound"] or e["status"] is None:
             continue
         for child, states in child_refs(e["status"]).items():
-            if child in listed or all(s in COLLECTED for s in states):
-                continue
-            listed.add(child)
-            cdir = os.path.join(runs_dir, child)
-            st = read_json(os.path.join(cdir, "status.json"))
-            if isinstance(st, dict):
-                found.append({"run": child, "kind": "child", "bound": True, "parent": e["run"],
-                              "state": st.get("state"), "liveness": liveness(st), "dir": cdir, "status": st})
+            if all(s in COLLECTED for s in states):
+                collected.add(child)
             else:
-                found.append({"run": child, "kind": "child", "bound": True, "parent": e["run"],
-                              "state": states[0], "liveness": "unknown", "dir": cdir, "status": None})
+                pending.setdefault(child, (e["run"], states[0]))
+    for child, (parent, state) in pending.items():
+        if child in listed or child in collected:
+            continue
+        cdir = os.path.join(runs_dir, child)
+        st = read_json(os.path.join(cdir, "status.json"))
+        if isinstance(st, dict):
+            found.append({"run": child, "kind": "child", "bound": True, "parent": parent,
+                          "state": st.get("state"), "liveness": liveness(st), "dir": cdir, "status": st})
+        else:
+            found.append({"run": child, "kind": "child", "bound": True, "parent": parent,
+                          "state": state, "liveness": "unknown", "dir": cdir, "status": None})
     return found
 
 

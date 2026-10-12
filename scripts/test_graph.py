@@ -723,6 +723,25 @@ class GraphTest(unittest.TestCase):
         self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs)
         self.assertEqual(self.launch("A")["attempt"], 2)
 
+    def test_later_controller_collecting_a_child_resolves_an_older_stopped_reference(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.stopped("wf-1", child="child-shared")
+        self.g("bind", "A", "1", "wf-2")
+        head = self.commit("A")
+        status = self.workflow("unresolved", "wf-2", head)
+        doc = graph.read_json(status)
+        shared = doc["steps"][0]["runId"]
+        for ref in doc["steps"] + doc["workflowChildren"]["children"]:
+            if ref["runId"] == shared:
+                ref["runId"] = "child-shared"
+        graph.write_json(status, doc)
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "record", out)
+        self.g("record", "A", "1", status)
+        self.assertEqual(self.rows()["A"]["state"], "unresolved")
+
     def test_launching_with_unbound_live_workflow_for_the_unit_holds(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
