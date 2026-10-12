@@ -24,8 +24,10 @@ DEFAULT_WORKFLOW = os.path.normpath(os.path.join(HERE, "..", "workflows", "revie
 
 # reserved: the attempt number whose writers may still own the worktree. Set when a live attempt is parked;
 # cleared only by a requeue that finds every bound controller and child terminal.
+# created: the worktree path this store's git worktree add made for the unit; launch reuses only that
+# path without --adopt.
 COLUMNS = ["id", "state", "deps", "paths", "branch", "worktree", "effort", "attempt", "run",
-           "start_head", "head", "claim", "reason", "reserved"]
+           "start_head", "head", "claim", "reason", "reserved", "created"]
 LIVE = {"launching", "running"}
 WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "blocked"}
 # run-failed: the workflow ended without a return value (stopped, failed, cancelled) and no writer is left.
@@ -446,7 +448,10 @@ def prepare_worktree(cfg, row):
     if not os.path.lexists(wt):
         os.makedirs(os.path.dirname(wt), exist_ok=True)
         rc, _, err = git(cfg["repo"], "worktree", "add", "-q", "-b", branch, wt, cfg["base"])
-        return "" if rc == 0 else "git worktree add failed: %s" % err
+        if rc != 0:
+            return "git worktree add failed: %s" % err
+        row["created"] = wt
+        return ""
     rc, top, _ = git(wt, "rev-parse", "--show-toplevel")
     if rc != 0 or real(top) != real(wt):
         return "%s exists and is not a worktree root" % wt
@@ -468,9 +473,13 @@ def cmd_launch(store, a):
         ids, why = plan(cfg, rows, units, 10 ** 9 if a.force_window else a.max)
         if a.id not in ids:
             raise Refused("%s is not launchable: %s" % (a.id, why.get(a.id, "not selected")))
+        wt = os.path.join(cfg["worktrees"], row["id"])
+        if os.path.lexists(wt) and row["created"] != wt and not a.adopt:
+            raise Refused("%s already exists and this store did not create it, so another writer may own it; "
+                          "pass --adopt to launch in it anyway" % wt)
         prev_state, prev_reason = row["state"], row["reason"]
         row.update(state="launching", attempt=row["attempt"] + 1, run="", start_head="", head="", reason="",
-                   worktree=os.path.join(cfg["worktrees"], row["id"]))
+                   worktree=wt)
         write_rows(store, rows)
         tag = "%s-%d" % (row["id"], row["attempt"])
 
@@ -979,6 +988,8 @@ def parser():
     s.add_argument("id")
     s.add_argument("--max", type=int, default=1)
     s.add_argument("--force-window", action="store_true")
+    s.add_argument("--adopt", action="store_true",
+                   help="launch in an existing worktree this store did not create (it must be clean, on the unit branch)")
     s.add_argument("--workflow", default=DEFAULT_WORKFLOW)
 
     s = sub.add_parser("bind", parents=[common])

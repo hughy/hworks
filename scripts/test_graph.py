@@ -324,7 +324,7 @@ class GraphTest(unittest.TestCase):
         sh(self.repo, "worktree", "add", "-q", "-b", "graph/A", self.wt("A"), "main")
         with open(os.path.join(self.wt("A"), "dirt"), "w") as f:
             f.write("x")
-        out = self.launch("A", code=3)
+        out = self.launch("A", "--adopt", code=3)
         self.assertEqual(out["state"], "blocked")
         self.assertIn("uncommitted", out["reason"])
         self.assertEqual(self.rows()["A"]["state"], "blocked")
@@ -335,16 +335,44 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         sh(self.repo, "worktree", "add", "-q", "-b", "other", self.wt("A"), "main")
-        out = self.launch("A", code=3)
+        out = self.launch("A", "--adopt", code=3)
         self.assertIn("expected branch graph/A", out["reason"])
         self.assertFalse(os.path.isdir(os.path.join(self.store, "args")))
+
+    def test_existing_worktree_is_refused_without_adopt(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}, {"id": "B", "title": "b", "paths": ["b/*"]}])
+        sh(self.repo, "worktree", "add", "-q", "-b", "graph/A", self.wt("A"), "main")
+        os.makedirs(self.wt("B"))
+        with open(os.path.join(self.store, "units.tsv"), "rb") as f:
+            tsv = f.read()
+        for uid in ("A", "B"):
+            p = subprocess.run([sys.executable, GRAPH, "--store", self.store, "launch", uid, "--max", "2"],
+                               capture_output=True, text=True, env=self.env)
+            self.assertEqual((p.returncode, p.stdout), (3, ""), p.stderr)
+            self.assertIn(self.wt(uid), p.stderr)
+            self.assertIn("--adopt", p.stderr)
+        with open(os.path.join(self.store, "units.tsv"), "rb") as f:
+            self.assertEqual(f.read(), tsv)
+        self.assertFalse(os.path.isdir(os.path.join(self.store, "args")))
+        self.assertEqual(self.launch("A", "--adopt")["attempt"], 1)
+
+    def test_store_created_worktree_is_reused_by_a_later_attempt_without_adopt(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        head = self.commit("A")
+        self.g("record", "A", "1", self.workflow("unresolved", "wf-1", head))
+        spec = self.launch("A")
+        self.assertEqual(spec["attempt"], 2)
+        self.assertEqual(self.rows()["A"]["start_head"], head)
 
     def test_adopting_clean_existing_worktree_on_branch_launches(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         sh(self.repo, "worktree", "add", "-q", "-b", "graph/A", self.wt("A"), "main")
         head = self.commit("A")
-        spec = self.launch("A")
+        spec = self.launch("A", "--adopt")
         self.assertTrue(os.path.exists(spec["args_path"]))
         self.assertEqual(self.rows()["A"]["start_head"], head)
 
