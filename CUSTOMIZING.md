@@ -25,6 +25,7 @@ cursor/plugins/pstack            upstream, written for Cursor
 | `skills/<name>` symlinks | The allowlist of pstack skills that load | Choose your own with `scripts/skill.sh` |
 | `DIVERGENCE.md` | Why each pstack skill is not linked | Rewrite the reasons to match your choices |
 | `agents/` | The `coder`, `reviewer`, `explorer`, and `synthesizer` roles for pi-subagents | Keep the roles and edit the prompts |
+| `extensions/autonomy.ts` | pi guard that blocks mid-task questions and history-destroying git commands | Keep, edit the patterns, or skip the symlink |
 | `adapters/pi.md` | Maps Cursor terms in pstack to pi | Keep it unless you change harness |
 | `models.conf` | Model profiles | Replace the profiles with your own |
 | `scripts/` | `skill.sh` and `models.sh` | Keep them. They resolve paths relative to the repo, so the clone can live anywhere |

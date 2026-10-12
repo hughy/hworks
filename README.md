@@ -6,6 +6,7 @@ A personal layer over the [pstack](./pstack/) mirror. `pstack/` is a git subtree
 - `skills/edit-prose/` drafts and edits prose: a style guide that defers to the `~/AGENTS.md` prose rules, plus guides for design docs, issues, and PR descriptions.
 - `skills/<name>` symlinks are the allowlist of pstack skills and principles that load. Some serve hughy-mode routes. Others (`bro`, `teach`, `swarm`, `correct`, and the verification-skill pair) are commands to invoke directly, useful or not depending on the harness. `scripts/skill.sh enable|disable|list <name>` manages them.
 - `agents/` sets the prompt and tool scope per role for pi-subagents: `coder`, `reviewer`, `explorer`, `synthesizer`.
+- `extensions/autonomy.ts` is a pi extension that blocks `ask_user_question` and git commands that destroy history or uncommitted work, returning a redirect to the model. It enforces the Autonomy section of `~/AGENTS.md`. `/autonomy off` relaxes it for one session; `PI_AUTONOMY=0` disables it. `node --experimental-strip-types extensions/autonomy.test.mts` checks the command classifier.
 - `adapters/pi.md` maps Cursor-specific terms in pstack skills to pi.
 - `models.conf` and `scripts/models.sh` hold the model roster. A profile names a model for each agent role and sets two slots that hughy-mode reads for per-call overrides: `review2` (the second reviewer) and `exhaustive` (the `coder` model at exhaustive effort). `models.sh <profile>` writes the role models to pi settings as `subagents.agentOverrides.<role>.model` and leaves the agent files untouched; `models.sh show` prints the active profile. Profiles: `inherit` (session model, the default) and `anthropic`.
 - `DIVERGENCE.md` records every skill not linked, with the reason and the pstack mirror commit.
@@ -32,6 +33,7 @@ pstack's skills reference each other by name (`/poteto-mode` appears 120 times a
 
 ```bash
 ln -s ~/dev/hworks/agents ~/.pi/agent/agents/hworks
+ln -s ~/dev/hworks/extensions/autonomy.ts ~/.pi/agent/extensions/autonomy.ts
 ```
 
 Then `/reload` and start a task with `/skill:hughy-mode <task>`. The skills root follows symlinks, and `skillPath: ../skills` in each agent file resolves the same links.

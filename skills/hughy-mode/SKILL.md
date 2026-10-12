@@ -55,7 +55,7 @@ Open a PR: `opening-a-pr.md`. Drive a PR to merge-ready: `babysit.md`, with `../
 
 ### Long run
 
-"Run until done", "going to bed", a predicate to drive to. State the exit condition as a checkable predicate first. Each iteration: smallest change the evidence justifies, verify against the predicate, commit if it advanced, revert if it did not. Fix mid-run blockers yourself in their own commits. Never relax the predicate. Continue through plateaus. Stop at a dead end and say so.
+"Run until done", "going to bed", a predicate to drive to. State the exit condition as a checkable predicate first. Each iteration: smallest change the evidence justifies, verify against the predicate, commit if it advanced, undo it in place or with `git revert` if it did not. Fix mid-run blockers yourself in their own commits. Never relax the predicate. Continue through plateaus. Stop at a dead end and say so.
 
 Work that outlives one session goes to a multi-agent coordinator only when all of these hold:
 
@@ -79,7 +79,7 @@ These override the playbook text wherever they conflict.
 - Self-review gates every push to a PR, not only the first. Before `gh pr create` or any `git push` to a branch with an open PR: the gate passes on the head being pushed; `interrogate` runs with the effort level's reviewer count over the unpushed diff (`git diff origin/<branch> HEAD`; the full branch diff when opening; `git range-diff` after a rebase); and when the diff deletes, renames, or narrows a symbol, test, fixture, or file, `git grep` each old name and fix or justify every hit. Quick effort skips `interrogate`, never the gate or the grep. Requests to audit, tidy, or address feedback on an open PR count as pushes. This does not replace the full-branch review before merge. The reply names the gate result, review verdict, and greps, or which did not run.
 - Prose and comments follow the global `AGENTS.md`. Skip `/deslop`, `/no-comments`, `/unslop`, `/technical-writing`, `create-skill` steps.
 - Apply the linked principles (`explain-the-number`, `test-behavior-not-implementation`, `build-the-lever`, `encode-lessons-in-structure`, `attack-the-premise`, `separate-before-serializing-shared-state`, `sequence-verifiable-units`) when their trigger fires. Do not cite them in the reply.
-- Ask only what an experiment cannot settle, and only after the work is done. A behavior, timing, layout, or output question is answered by running it (`prototype.md`). A product or preference call gets the best-evidenced default, recorded in `$TASK_DIR/open-questions.md`, and goes in the final reply. Irreversible actions (force-push, deploy, data deletion, external messages) are skipped and listed first in the final reply. Where a playbook says to ask or pause, apply this instead.
+- Ask only what an experiment cannot settle, and only after the work is done. A behavior, timing, layout, or output question is answered by running it (`prototype.md`). Product calls, irreversible actions, and undoing work follow the Autonomy section of `~/AGENTS.md`, including where a playbook says to ask, pause, revert, or discard.
 - Briefs carry only facts from the child's checkout. A test count, a file name, or a line number observed elsewhere does not go in a brief. Say "find the failing tests" instead of naming the file. A wrong fact in a brief costs a supervisor round trip or a silent workaround.
 - When asked whether to do something, answer with your real view. "No" and "this does not earn its place" are valid answers.
 

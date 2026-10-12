@@ -33,6 +33,6 @@ One line per pstack skill or principle that hworks does not link. `scripts/skill
 | `principle-model-the-domain` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
 | `principle-migrate-callers-then-delete-legacy-apis` | contextual opinion (monorepo, fast CI, async human); wrong for libraries and public APIs | fa9a0ed |
 | `principle-outcome-oriented-execution` | contextual opinion (monorepo, fast CI, async human); wrong for libraries and public APIs | fa9a0ed |
-| `principle-never-block-on-the-human` | contextual opinion (monorepo, fast CI, async human); wrong for libraries and public APIs | fa9a0ed |
+| `principle-never-block-on-the-human` | replaced by the Autonomy section of `~/AGENTS.md` and `extensions/autonomy.ts`. It confirms irreversible actions mid-task; hworks skips them, defers all questions to the final reply, and must apply in every session, which a `disable-model-invocation` principle cannot | fa9a0ed |
 | `principle-exhaust-the-design-space` | contextual opinion (monorepo, fast CI, async human); wrong for libraries and public APIs | fa9a0ed |
 | `poteto-mode/scripts/orch` (not a skill) | orchestrate.md's bun store and CLI duplicate pi-subagents missions and assume a Cursor fan-out coordinator (Task tool, cloud agents, gt). Borrow only its rule that a new head SHA voids a verification | c99b881 |
