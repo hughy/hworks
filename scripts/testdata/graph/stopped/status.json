@@ -1,0 +1,87 @@
+{
+  "runId": "52db8172-4389-4c53-9edf-453f0e00a079",
+  "toolCallId": "toolu_011G6pp75TpGnQfwJruCZZnV",
+  "sessionId": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68.jsonl",
+  "completionOwnerId": "17d2f3a4-9ff5-4ee4-909a-52589d7ef989",
+  "mode": "workflow",
+  "state": "stopped",
+  "startedAt": 1791838496036,
+  "lastUpdate": 1791838777074,
+  "cwd": "/tmp/g05b",
+  "sessionRoot": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68",
+  "pid": 38904,
+  "steps": [
+    {
+      "agent": "coder",
+      "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h...",
+      "label": "unit-c: code-1",
+      "workflowKey": "code-1",
+      "parentWorkflowRunId": "52db8172-4389-4c53-9edf-453f0e00a079",
+      "status": "stopped",
+      "startedAt": 1791838496101,
+      "sessionFile": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68/5ddb99bc-6818-492f-96e4-56e00eff3727/run-0/session.jsonl",
+      "async": true,
+      "runId": "0188fd3c-2a89-4140-ad28-1125547edea9",
+      "stopped": true,
+      "error": "Workflow stopped because the extension session was replaced or reloaded."
+    }
+  ],
+  "workflow": {
+    "trace": [
+      {
+        "operation": "run",
+        "key": "code-1",
+        "state": "started",
+        "label": "unit-c: code-1",
+        "agent": "coder"
+      },
+      {
+        "operation": "run",
+        "key": "code-1",
+        "state": "stopped",
+        "agent": "coder",
+        "label": "unit-c: code-1",
+        "error": "Workflow stopped because the extension session was replaced or reloaded."
+      }
+    ],
+    "emits": [],
+    "console": [],
+    "args": {
+      "brief": "/home/user/tasks/graph/g05b-c.md",
+      "gate": "python3 -m unittest && test $(git rev-list --count main..HEAD) -ge 8",
+      "base": "993fff59fa5e5ae2e89402967ea77be6857389b1",
+      "reviewers": 1,
+      "rubricDir": "/home/user/hworks/skills/interrogate/references",
+      "cwd": "/private/tmp/g05b-c",
+      "label": "unit-c"
+    },
+    "argsDigest": "43f22f4c225e0269d7e252a8fda9cb2adaa824ff63e8899fec3bf43c4e745d9c",
+    "scriptDigest": "9d88260bdd18cddfa34dc6d7f2cb9b24fbff511c2bcb56b01997ad410fc08c64",
+    "stopCause": "runtime-replaced"
+  },
+  "workflowChildren": {
+    "version": 1,
+    "parentToolCallId": "toolu_011G6pp75TpGnQfwJruCZZnV",
+    "workflowRunId": "52db8172-4389-4c53-9edf-453f0e00a079",
+    "inventoryComplete": true,
+    "workflowState": "stopped",
+    "children": [
+      {
+        "childId": "code-1",
+        "state": "stopped",
+        "runId": "0188fd3c-2a89-4140-ad28-1125547edea9",
+        "agent": "coder",
+        "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h..."
+      }
+    ]
+  },
+  "runFanoutBudget": {
+    "used": 1,
+    "limit": 64,
+    "remaining": 63
+  },
+  "stopped": true,
+  "error": "Workflow stopped because the extension session was replaced or reloaded.",
+  "endedAt": 1791838777068,
+  "workflowReceiptPath": "/tmp/pi-subagents-uid-501/async-subagent-runs/52db8172-4389-4c53-9edf-453f0e00a079/workflow-receipt.json"
+}
