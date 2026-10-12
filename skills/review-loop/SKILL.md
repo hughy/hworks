@@ -22,6 +22,10 @@ Paths below are relative to this file: the workflow is `../../workflows/review-l
    - `gate-failed`: two coder runs in a row failed, by gate or by a runner that ended without a result. Check `git log` for work the failed runs committed, then read the error before re-briefing.
    - `review-failed`: a reviewer failed or returned no structured findings. Rerun the review by hand.
 
+Fix rounds converge: after the first review, reviewers tag each finding `prior` (an earlier finding still unfixed), `regression` (introduced by the fix), or `new`. Only `prior` and `regression` findings block; a blocking `new` finding moves to `nonBlocking` with `downgraded: true`, and an untagged blocking finding still blocks. Read downgraded findings before shipping.
+
+Keep process instructions (commit counts, pacing) out of the brief's acceptance criteria: reviewers judge the brief literally, and fix rounds add commits.
+
 The result also carries `rounds`, `head` (the coder's last reported commit), and `runs` (key, runId, ok) for inspecting any child. With mission state, each round writes a progress record under the key `review-loop` or `review-loop.<label>`.
 
 The workflow's unit tests run with `node --test workflows/*.test.js`.

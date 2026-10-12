@@ -119,6 +119,52 @@ test("maxRounds exhausted leaves the loop unresolved", async () => {
   assert.equal(calls.length, 4);
 });
 
+test("after round 1, new blocking findings are downgraded and the loop converges", async () => {
+  const fresh = { ...finding, claim: "unicode edge case", origin: "new" };
+  const { out, calls } = await run({
+    "code-1": coded("a1"),
+    "review-1-1": blocked,
+    "fix-2": coded("a2"),
+    "review-2-1": { ok: true, output: "", structuredOutput: { verdict: "blocked", findings: [fresh] } },
+  });
+  assert.equal(out.state, "clean");
+  assert.deepEqual(out.blocking, []);
+  assert.equal(out.nonBlocking.length, 1);
+  assert.equal(out.nonBlocking[0].claim, "unicode edge case");
+  assert.equal(out.nonBlocking[0].severity, "non-blocking");
+  assert.equal(out.nonBlocking[0].downgraded, true);
+  const review2 = calls.find((c) => c.key === "review-2-1");
+  assert.match(review2.task, /off by one/);
+  assert.match(review2.task, /git diff a1\.\.\.HEAD/);
+  assert.doesNotMatch(calls.find((c) => c.key === "review-1-1").task, /origin/);
+});
+
+test("after round 1, unfixed prior findings, regressions, and untagged findings still block", async () => {
+  for (const origin of ["prior", "regression", undefined]) {
+    const f = origin ? { ...finding, origin } : finding;
+    const { out } = await run(
+      {
+        "code-1": coded("a1"),
+        "review-1-1": blocked,
+        "fix-2": coded("a2"),
+        "review-2-1": { ok: true, output: "", structuredOutput: { verdict: "blocked", findings: [f] } },
+      },
+      { maxRounds: 2 },
+    );
+    assert.equal(out.state, "unresolved", String(origin));
+    assert.equal(out.blocking.length, 1, String(origin));
+  }
+});
+
+test("round 1 blocks on any blocking finding, whatever its origin", async () => {
+  const { out } = await run(
+    { "code-1": coded("a1"), "review-1-1": { ok: true, output: "", structuredOutput: { verdict: "blocked", findings: [{ ...finding, origin: "new" }] } } },
+    { maxRounds: 1 },
+  );
+  assert.equal(out.state, "unresolved");
+  assert.equal(out.blocking.length, 1);
+});
+
 test("reviewers 0 runs the gated coder only", async () => {
   const { out, calls } = await run({ "code-1": coded("abc") }, { reviewers: 0 });
   assert.equal(out.state, "clean");

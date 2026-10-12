@@ -40,6 +40,7 @@ const reviewSchema = {
           line: { type: "integer" },
           claim: { type: "string" },
           evidence: { type: "string" },
+          origin: { enum: ["prior", "regression", "new"] },
         },
         required: ["severity", "file", "claim", "evidence"],
       },
@@ -72,7 +73,7 @@ function coderTask(round, findings, gateFailure) {
   return task;
 }
 
-function reviewerTask() {
+function reviewerTask(round, prior, priorHead) {
   let task =
     "Review the change on the current branch. Intent: read the brief at " + args.brief + ". " +
     "Diff: run `git diff " + args.base + "...HEAD` in your cwd and read the surrounding code, not only the diff. " +
@@ -83,6 +84,13 @@ function reviewerTask() {
   task +=
     "Mark a finding blocking only when it is a verified defect, a gap against the brief, or a broken gate. " +
     "Return verdict `blocked` if any finding is blocking, else `ok`.";
+  if (round > 1) {
+    task +=
+      "\n\nThis is review round " + round + ", after a fix. Set `origin` on every finding. " +
+      "`prior`: one of the findings below that still holds (omit the ones now fixed). " +
+      "`regression`: a defect introduced by the fix, `git diff " + (priorHead || args.base) + "...HEAD`. " +
+      "`new`: anything else; it is reported but does not block this loop.\n" + JSON.stringify(prior, null, 2);
+  }
   return task;
 }
 
@@ -106,14 +114,14 @@ function launchCoder(key, round, findings, gateFailure) {
   return runs.all([item]);
 }
 
-function launchReview(round) {
+function launchReview(round, prior, priorHead) {
   const items = [];
   for (let i = 1; i <= reviewerCount; i++) {
     const item = placed({
       key: "review-" + round + "-" + i,
       label: label + ": review " + round + "." + i,
       agent: "reviewer",
-      task: reviewerTask(),
+      task: reviewerTask(round, prior, priorHead),
       outputSchema: reviewSchema,
     });
     if (i === 2 && typeof args.review2Model === "string" && args.review2Model) item.model = args.review2Model;
@@ -144,6 +152,7 @@ function progress(phase) {
 let outcome = null;
 while (outcome === null) {
   rounds++;
+  const priorHead = head;
   const coderKey = rounds === 1 ? "code-1" : "fix-" + rounds;
   let [coded] = await launchCoder(coderKey, rounds, blocking, null);
   record(coderKey, coded);
@@ -169,7 +178,7 @@ while (outcome === null) {
     break;
   }
 
-  const reviews = await launchReview(rounds);
+  const reviews = await launchReview(rounds, blocking, priorHead);
   blocking = [];
   nonBlocking = [];
   let reviewFailed = false;
@@ -182,12 +191,19 @@ while (outcome === null) {
       return;
     }
     const mine = out.findings.map((f) => Object.assign({ reviewer }, f));
-    const hard = mine.filter((f) => f.severity === "blocking");
+    let hard = mine.filter((f) => f.severity === "blocking");
     if (out.verdict === "blocked" && hard.length === 0) {
       hard.push({ reviewer, severity: "blocking", file: "", claim: "Reviewer returned blocked without a blocking finding.", evidence: String(review.output || "").slice(0, 2000) });
     }
+    // After round 1, only unfixed prior findings and regressions block, so the loop converges.
+    // A blocking finding without an origin still blocks: an untagged finding must not pass silently.
+    const soft = mine.filter((f) => f.severity !== "blocking");
+    if (rounds > 1) {
+      soft.push(...hard.filter((f) => f.origin === "new").map((f) => Object.assign({}, f, { severity: "non-blocking", downgraded: true })));
+      hard = hard.filter((f) => f.origin !== "new");
+    }
     blocking.push(...hard);
-    nonBlocking.push(...mine.filter((f) => f.severity !== "blocking"));
+    nonBlocking.push(...soft);
   });
   await progress("reviewed");
 
