@@ -119,7 +119,9 @@ function launchCoder(key, round, findings, gateFailure) {
     label: label + ": " + key,
     agent: "coder",
     task: coderTask(round, findings, gateFailure),
-    gate: args.gate,
+    // Explicit form of `gate`: report "on" puts the acceptance report in the schema-enforced
+    // structured_output call, which coders do not skip the way they skip a fenced report block.
+    acceptance: { level: "verified", verify: [{ id: "gate", command: args.gate }], report: "on" },
     outputSchema: coderSchema,
   });
   if (args.coderModel) item.model = args.coderModel;

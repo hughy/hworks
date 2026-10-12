@@ -74,7 +74,8 @@ test("clean on first review", async () => {
     { key: "review-1-1", runId: "run-review-1-1", ok: true },
   ]);
   assert.equal(calls[0].agent, "coder");
-  assert.equal(calls[0].gate, "npm test");
+  assert.deepEqual(calls[0].acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test" }], report: "on" });
+  assert.equal(calls[0].gate, undefined);
   assert.ok(calls[0].outputSchema);
   assert.equal(calls[0].worktree, false);
   assert.equal(calls[0].model, undefined);
@@ -82,6 +83,7 @@ test("clean on first review", async () => {
   assert.equal(calls[1].worktree, false);
   assert.equal(calls[1].agent, "reviewer");
   assert.equal(calls[1].gate, undefined);
+  assert.equal(calls[1].acceptance, undefined);
   assert.match(calls[1].task, /git diff 0123abc\.\.\.HEAD/);
   assert.match(calls[1].task, /\/r\/rubric\.md/);
   assert.ok(state.sets.length > 0);
@@ -100,7 +102,7 @@ test("blocking then clean runs a fix round with the findings", async () => {
   assert.equal(out.rounds, 2);
   assert.equal(out.head, "a2");
   const fix = calls.find((c) => c.key === "fix-2");
-  assert.equal(fix.gate, "npm test");
+  assert.deepEqual(fix.acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test" }], report: "on" });
   assert.match(fix.task, /off by one/);
   assert.doesNotMatch(fix.task, /naming/);
   assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1", "fix-2", "review-2-1"]);
