@@ -3,6 +3,7 @@
 A personal layer over the [pstack](./pstack/) mirror. `pstack/` is a git subtree of the mirror; edits to it go to the mirror. Everything hworks owns lives outside it.
 
 - `skills/hughy-mode/` is the entry point. Six routes, each starting from a goal, effort, and verify brief, with pstack playbooks read by path as references and the hworks deltas applied.
+- `skills/review-loop/` and `workflows/review-loop.js` run a `coder` change and its review to a verdict as one pi-subagents workflow; `scripts/review-loop-args.sh` builds its args from the effort level. `node --test workflows/*.test.js` checks the loop logic.
 - `skills/edit-prose/` drafts and edits prose: a style guide that defers to the `~/AGENTS.md` prose rules, plus guides for design docs, issues, and PR descriptions.
 - `skills/<name>` symlinks are the allowlist of pstack skills and principles that load. Some serve hughy-mode routes. Others (`bro`, `teach`, `swarm`, `correct`, and the verification-skill pair) are commands to invoke directly, useful or not depending on the harness. `scripts/skill.sh enable|disable|list <name>` manages them.
 - `agents/` sets the prompt and tool scope per role for pi-subagents: `coder`, `reviewer`, `explorer`, `synthesizer`.

@@ -1,0 +1,186 @@
+// coder -> reviewer -> fix loop to a verdict. Runs as a pi-subagents workflow script:
+// a statement body with top-level await and the globals runs, args, state, emit, console.
+// Launch with cwd = a branch worktree with a clean tree; every child runs there.
+
+if (typeof args.brief !== "string" || !args.brief) throw new Error("args.brief (absolute path to the brief file) is required");
+if (typeof args.gate !== "string" || !args.gate) throw new Error("args.gate (shell command) is required");
+if (typeof args.base !== "string" || !args.base) throw new Error("args.base (ref to diff against) is required");
+const reviewerCount = args.reviewers === undefined ? 1 : args.reviewers;
+if (![0, 1, 2].includes(reviewerCount)) throw new Error("args.reviewers must be 0, 1 or 2");
+const maxRounds = args.maxRounds === undefined ? 3 : args.maxRounds;
+if (!Number.isInteger(maxRounds) || maxRounds < 1) throw new Error("args.maxRounds must be a positive integer");
+const label = typeof args.label === "string" && args.label ? args.label : "review-loop";
+const stateKey = args.label ? ("review-loop." + label.replace(/[^A-Za-z0-9._-]/g, "-")).slice(0, 128) : "review-loop";
+const hasState = typeof state !== "undefined" && state && typeof state.set === "function";
+
+const coderSchema = {
+  type: "object",
+  properties: {
+    status: { enum: ["done", "blocked"] },
+    head: { type: "string", description: "git rev-parse HEAD after your last commit" },
+    summary: { type: "string" },
+  },
+  required: ["status", "head", "summary"],
+};
+
+const reviewSchema = {
+  type: "object",
+  properties: {
+    verdict: { enum: ["ok", "blocked"] },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          severity: { enum: ["blocking", "non-blocking"] },
+          file: { type: "string" },
+          line: { type: "integer" },
+          claim: { type: "string" },
+          evidence: { type: "string" },
+        },
+        required: ["severity", "file", "claim", "evidence"],
+      },
+    },
+  },
+  required: ["verdict", "findings"],
+};
+
+const commitRules =
+  "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. " +
+  "The gate `" + args.gate + "` runs on the host after you finish; a failing gate fails this run, so run it yourself first. " +
+  "Return status `blocked` only when the brief cannot be met without a decision you cannot make; put the reason in summary. " +
+  "Set head to the output of `git rev-parse HEAD`.";
+
+function coderTask(round, findings, gateFailure) {
+  let task = "Read the brief at " + args.brief + " and implement it. " + commitRules;
+  if (findings.length) {
+    task +=
+      "\n\nThis is fix round " + round + ". Reviewers of `git diff " + args.base + "...HEAD` raised these blocking findings. " +
+      "Verify each against the code. Fix the ones that hold, adding a test where the finding is a behavior defect. " +
+      "For any that do not hold, say why in summary.\n" + JSON.stringify(findings, null, 2);
+  }
+  if (gateFailure) {
+    task += "\n\nThe previous attempt failed its gate or did not finish. Find the cause and fix it. Failure:\n" + gateFailure;
+  }
+  return task;
+}
+
+function reviewerTask() {
+  let task =
+    "Review the change on the current branch. Intent: read the brief at " + args.brief + ". " +
+    "Diff: run `git diff " + args.base + "...HEAD` in your cwd and read the surrounding code, not only the diff. " +
+    "Verify every claim against the code before reporting it. You are read-only: do not edit, commit, or stage anything. ";
+  if (typeof args.rubricDir === "string" && args.rubricDir) {
+    task += "Apply the rubric at " + args.rubricDir + "/rubric.md and " + args.rubricDir + "/code-quality-review.md. ";
+  }
+  task +=
+    "Mark a finding blocking only when it is a verified defect, a gap against the brief, or a broken gate. " +
+    "Return verdict `blocked` if any finding is blocking, else `ok`.";
+  return task;
+}
+
+function launchCoder(key, round, findings, gateFailure) {
+  return runs.all([
+    {
+      key,
+      label: label + ": " + key,
+      agent: "coder",
+      task: coderTask(round, findings, gateFailure),
+      gate: args.gate,
+      outputSchema: coderSchema,
+    },
+  ]);
+}
+
+function launchReview(round) {
+  const items = [];
+  for (let i = 1; i <= reviewerCount; i++) {
+    const item = {
+      key: "review-" + round + "-" + i,
+      label: label + ": review " + round + "." + i,
+      agent: "reviewer",
+      task: reviewerTask(),
+      outputSchema: reviewSchema,
+    };
+    if (i === 2 && typeof args.review2Model === "string" && args.review2Model) item.model = args.review2Model;
+    items.push(item);
+  }
+  return runs.all(items);
+}
+
+const runLog = [];
+let head = null;
+let blocking = [];
+let nonBlocking = [];
+let rounds = 0;
+
+function record(key, result) {
+  runLog.push({ key, runId: result && result.runId ? result.runId : null, ok: !!(result && result.ok) });
+}
+
+function finish(finalState) {
+  return { state: finalState, rounds, head, blocking, nonBlocking, runs: runLog };
+}
+
+function progress(phase) {
+  if (!hasState) return Promise.resolve();
+  return state.set(stateKey, { phase, rounds, head, blocking: blocking.length, nonBlocking: nonBlocking.length, runs: runLog });
+}
+
+let outcome = null;
+while (outcome === null) {
+  rounds++;
+  const coderKey = rounds === 1 ? "code-1" : "fix-" + rounds;
+  let [coded] = await launchCoder(coderKey, rounds, blocking, null);
+  record(coderKey, coded);
+  if (!coded.ok) {
+    const retryKey = coderKey + "-retry";
+    [coded] = await launchCoder(retryKey, rounds, blocking, String(coded.error || coded.output || "unknown failure"));
+    record(retryKey, coded);
+    if (!coded.ok) {
+      outcome = "gate-failed";
+      break;
+    }
+  }
+  const report = coded.structuredOutput || {};
+  if (report.head) head = report.head;
+  if (report.status === "blocked") {
+    outcome = "blocked";
+    break;
+  }
+  await progress("coded");
+
+  if (reviewerCount === 0) {
+    outcome = "clean";
+    break;
+  }
+
+  const reviews = await launchReview(rounds);
+  blocking = [];
+  nonBlocking = [];
+  let reviewFailed = false;
+  reviews.forEach((review, i) => {
+    const reviewer = "review-" + rounds + "-" + (i + 1);
+    record(reviewer, review);
+    const out = review.ok ? review.structuredOutput : null;
+    if (!out || !Array.isArray(out.findings)) {
+      reviewFailed = true;
+      return;
+    }
+    const mine = out.findings.map((f) => Object.assign({ reviewer }, f));
+    const hard = mine.filter((f) => f.severity === "blocking");
+    if (out.verdict === "blocked" && hard.length === 0) {
+      hard.push({ reviewer, severity: "blocking", file: "", claim: "Reviewer returned blocked without a blocking finding.", evidence: String(review.output || "").slice(0, 2000) });
+    }
+    blocking.push(...hard);
+    nonBlocking.push(...mine.filter((f) => f.severity !== "blocking"));
+  });
+  await progress("reviewed");
+
+  if (reviewFailed) outcome = "review-failed";
+  else if (blocking.length === 0) outcome = "clean";
+  else if (rounds >= maxRounds) outcome = "unresolved";
+}
+
+await progress(outcome);
+return finish(outcome);
