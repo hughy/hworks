@@ -767,6 +767,12 @@ def scan_runs(runs_dir, row):
         else:
             found.append({"run": child, "kind": "child", "bound": True, "parent": parent,
                           "state": state, "liveness": "unknown", "dir": cdir, "status": None})
+    # A collected child stays listed as terminal so its structured output is still found.
+    for child in sorted(collected - listed):
+        cdir = os.path.join(runs_dir, child)
+        st = read_json(os.path.join(cdir, "status.json"))
+        found.append({"run": child, "kind": "child", "bound": True, "parent": None, "state": "completed",
+                      "liveness": "terminal", "dir": cdir, "status": st if isinstance(st, dict) else None})
     return found
 
 

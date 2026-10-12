@@ -742,6 +742,25 @@ class GraphTest(unittest.TestCase):
         self.g("record", "A", "1", status)
         self.assertEqual(self.rows()["A"]["state"], "unresolved")
 
+    def test_collected_child_without_status_still_surfaces_its_structured_output(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.stopped("wf-1", child="child-shared")
+        self.g("bind", "A", "1", "wf-2")
+
+        def failed_after_collecting(doc):
+            doc["state"] = "failed"
+            doc["steps"][0]["status"] = "completed"
+            doc["workflowChildren"]["children"][0]["state"] = "completed"
+        self.stopped("wf-2", child="child-shared", edit=failed_after_collecting)
+        output = os.path.join(self.runs, "child-shared", "structured-output", "result", "output.json")
+        os.makedirs(os.path.dirname(output))
+        graph.write_json(output, {"status": "done", "head": "h", "summary": "s"})
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn(output, out["reason"])
+
     def test_launching_with_unbound_live_workflow_for_the_unit_holds(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
