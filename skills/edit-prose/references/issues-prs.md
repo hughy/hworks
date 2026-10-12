@@ -1,6 +1,6 @@
 # Issues and PR descriptions
 
-Brief and factual. These are read later by people without the conversation's context, so state the problem or change plainly. The "Linear Issues" and "Commits" sections of `~/AGENTS.md` also apply.
+Brief and factual. These are read later by people without the conversation's context, so state the problem or change plainly. The "Linear Issues" and "Commits" sections of `global/AGENTS.md` also apply.
 
 ## Issues
 

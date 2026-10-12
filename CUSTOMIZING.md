@@ -20,32 +20,33 @@ cursor/plugins/pstack            upstream, written for Cursor
 
 | Path | What it holds | When you fork |
 |---|---|---|
+| `global/AGENTS.md` | Global agent guidance, linked to `~/.pi/agent/AGENTS.md`, `~/.claude/CLAUDE.md`, and `~/.codex/AGENTS.md` | Replace it with your own rules; keep the Autonomy and scratch sections if you keep `autonomy.ts` and `blockers.sh` |
 | `skills/hughy-mode/` | The router: routes, effort levels, and the deltas that override pstack playbooks | Rename it and rewrite the routes and deltas to match how you work |
-| `skills/edit-prose/` | A prose skill that defers to `~/AGENTS.md` | Keep, replace, or delete it |
+| `skills/edit-prose/` | A prose skill that defers to `global/AGENTS.md` | Keep, replace, or delete it |
 | `skills/<name>` symlinks | The allowlist of pstack skills that load | Choose your own with `scripts/skill.sh` |
 | `DIVERGENCE.md` | Why each pstack skill is not linked | Rewrite the reasons to match your choices |
 | `agents/` | The `coder`, `reviewer`, `explorer`, and `synthesizer` roles for pi-subagents | Keep the roles and edit the prompts |
 | `extensions/autonomy.ts` | pi guard that blocks mid-task questions and history-destroying git commands | Keep, edit the patterns, or skip the symlink |
 | `adapters/pi.md` | Maps Cursor terms in pstack to pi | Keep it unless you change harness |
 | `models.conf` | Model profiles | Replace the profiles with your own |
-| `scripts/` | `skill.sh` and `models.sh` | Keep them. They resolve paths relative to the repo, so the clone can live anywhere |
+| `scripts/` | `install.sh`, `skill.sh`, `models.sh`, `task-dir.sh`, and `blockers.sh` | Keep them. They resolve paths relative to the repo; only `global/AGENTS.md` names `~/dev/hworks`, so change that path if you clone elsewhere |
 | `.claude-plugin/`, `.codex-plugin/`, `LICENSE` | Plugin manifests and license | Change the plugin name and author, and add your copyright line |
 | `pstack/` | The mirror subtree | Do not edit it (see [Resync pstack](#resync-pstack)) |
 
 ## Requirements outside the repo
 
 - [pi](https://github.com/earendil-works/pi) with [pi-subagents](https://github.com/nicobailon/pi-subagents). The agent files and `scripts/models.sh` work only on pi. Claude Code and Codex load `skills/` only.
-- A global `~/AGENTS.md`. hworks does not restate rules that live there:
+- The global guidance in `global/AGENTS.md`, linked into pi, Claude Code, and Codex by `scripts/install.sh`. hworks does not restate rules that live there:
   - `skills/edit-prose/references/style-guide.md` applies its "Prose" section.
   - `skills/edit-prose/references/issues-prs.md` applies its "Linear Issues" and "Commits" sections.
   - The router applies its PR rules and its comment rules.
   - The router, `extensions/autonomy.ts`, and `scripts/blockers.sh` rely on its scratch rule pointing at `scripts/task-dir.sh` and on its Autonomy section.
 
-  Without that file, `edit-prose` has only the trope list and two rules of its own. Either write those sections in your own `~/AGENTS.md`, or put the rules in the skills and remove the references.
+  If you replace it, keep those sections or put the rules in the skills and remove the references; without them `edit-prose` has only the trope list and two rules of its own.
 
 ## Fork into your own layer
 
-1. Fork the repo and clone it anywhere. Add `<clone>/skills` to `skills` in `~/.pi/agent/settings.json`, and link `<clone>/agents` into `~/.pi/agent/agents/`.
+1. Fork the repo and clone it. Edit `global/AGENTS.md` (or replace its `~/dev/hworks` paths with your clone's), then run `scripts/install.sh`.
 2. Rename the router. Rename `skills/hughy-mode/` and change the `name:` in its frontmatter to match the new directory name. Then run `git grep -n hughy-mode -- ':!pstack'` and update each hit. The hits are in `README.md`, `CUSTOMIZING.md`, `DIVERGENCE.md`, `adapters/pi.md`, `agents/coder.md`, `models.conf`, and `scripts/models.sh`. Start a task with `/skill:<new-name> <task>`.
 3. Rename the plugin. Set `name` in `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`, and set `author` in both `plugin.json` files. Add your copyright line to `LICENSE`. Keep `pstack/LICENSE`, because pstack's MIT license requires its notice in copies.
 4. Choose the allowlist. `scripts/skill.sh list` shows which pstack skills are linked. `scripts/skill.sh enable <name>` links a skill and deletes its `DIVERGENCE.md` row. `scripts/skill.sh disable <name> "<reason>"` unlinks a skill and adds a row with the reason and the current mirror commit. pstack skills set `disable-model-invocation: true`, so the model never sees them in its catalog. You invoke one with `/skill:<name>`, the router reads one by path, or an agent loads one through its `skills:` line.
@@ -80,7 +81,7 @@ An agent file is markdown with frontmatter. The body is the system prompt. hwork
 |---|---|---|
 | `tools` | No `edit` or `write` on read-only roles | `adapters/pi.md` maps pstack's `readonly: true` to those roles |
 | `systemPromptMode` | `replace` | The body replaces pi's base prompt instead of being appended to it |
-| `inheritProjectContext`, `inheritGlobalContext` | `true` | The child loads the project's `AGENTS.md` and `~/AGENTS.md` |
+| `inheritProjectContext`, `inheritGlobalContext` | `true` | The child loads the project's `AGENTS.md` and the global one, `~/.pi/agent/AGENTS.md` |
 | `inheritSkills`, `skills`, `skillPath` | `false`, a list, `../skills` | The child loads only the listed skills, found in `skills/` relative to the agent file |
 | `aliases` | For example, `poteto-agent` | pstack's agent names resolve to the hworks role |
 | `acceptanceRole` | `writer` or `read-only` | Declares whether the role writes, for pi-subagents' acceptance checks |

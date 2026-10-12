@@ -2,7 +2,7 @@
 
 ## Core rules
 
-The "Prose" section of `~/AGENTS.md` is the canonical rule set. Read it and apply all of it. Do not restate it here; it changes there.
+The "Prose" section of `global/AGENTS.md` is the canonical rule set. Read it and apply all of it. Do not restate it here; it changes there.
 
 Two additions:
 
@@ -26,7 +26,7 @@ Common review edits: what to say and what to leave out.
 
 ## AI tropes
 
-`~/AGENTS.md` already bans the most common tells (magic adverbs, "delve" vocabulary, negative parallelism, self-answered questions, gerund-fragment litanies, em dashes, bold-label bullets, signposted conclusions, "X is real"). Also cut these. Any one used once may be fine; cut repeats and clusters.
+`global/AGENTS.md` already bans the most common tells (magic adverbs, "delve" vocabulary, negative parallelism, self-answered questions, gerund-fragment litanies, em dashes, bold-label bullets, signposted conclusions, "X is real"). Also cut these. Any one used once may be fine; cut repeats and clusters.
 
 - Anaphora: several sentences in a row that open the same way ("They assume ... They assume ... They assume ...").
 - Tricolons by reflex: lists of three, or stacked three-part parallel sentences, where the content does not have three parts.

@@ -2,13 +2,15 @@
 
 A personal layer over the [pstack](./pstack/) mirror. `pstack/` is a git subtree of the mirror; edits to it go to the mirror. Everything hworks owns lives outside it.
 
+- `global/AGENTS.md` is the global agent guidance: prose, comments, commits, PRs, autonomy, and scratch rules. `scripts/install.sh` links it to `~/.pi/agent/AGENTS.md`, `~/.claude/CLAUDE.md`, and `~/.codex/AGENTS.md`, so editing any of them edits this file.
+- `scripts/install.sh [--profile <name>] [--check]` sets up a machine: the global guidance links, the agent roles and `autonomy.ts` in `~/.pi/agent`, the `skills` entry in pi settings, and the scratch root. It is safe to rerun, and `--check` reports drift without changing anything.
 - `skills/hughy-mode/` is the entry point. Six routes, each starting from a goal, effort, and verify brief, with pstack playbooks read by path as references and the hworks deltas applied.
 - `skills/review-loop/` and `workflows/review-loop.js` run a `coder` change and its review to a verdict as one pi-subagents workflow; `scripts/review-loop-args.sh` builds its args from the effort level. `node --test workflows/*.test.js` checks the loop logic.
-- `skills/edit-prose/` drafts and edits prose: a style guide that defers to the `~/AGENTS.md` prose rules, plus guides for design docs, issues, and PR descriptions.
+- `skills/edit-prose/` drafts and edits prose: a style guide that defers to the `global/AGENTS.md` prose rules, plus guides for design docs, issues, and PR descriptions.
 - `skills/<name>` symlinks are the allowlist of pstack skills and principles that load. Some serve hughy-mode routes. Others (`bro`, `teach`, `swarm`, `correct`, and the verification-skill pair) are commands to invoke directly, useful or not depending on the harness. `scripts/skill.sh enable|disable|list <name>` manages them.
 - `agents/` sets the prompt and tool scope per role for pi-subagents: `coder`, `reviewer`, `explorer`, `synthesizer`.
-- `extensions/autonomy.ts` is a pi extension that blocks `ask_user_question` and git commands that destroy history or uncommitted work, returning a redirect to the model. It enforces the Autonomy section of `~/AGENTS.md`. `/autonomy off` relaxes it for one session; `PI_AUTONOMY=0` disables it. `node --experimental-strip-types extensions/autonomy.test.mts` checks the classifier and the log.
-- `scripts/task-dir.sh <task-slug>` prints and creates `$TASK_DIR`, the scratch directory for a task: `~/.local/state/agent-tasks/<host>--<owner>--<repo>/<branch>/<task-slug>`, or `_misc/<task-slug>` outside a repo. `~/AGENTS.md` owns the rule to keep scratch out of repos; this script owns the layout, and every `$TASK_DIR` in hworks means its output.
+- `extensions/autonomy.ts` is a pi extension that blocks `ask_user_question` and git commands that destroy history or uncommitted work, returning a redirect to the model. It enforces the Autonomy section of `global/AGENTS.md`. `/autonomy off` relaxes it for one session; `PI_AUTONOMY=0` disables it. `node --experimental-strip-types extensions/autonomy.test.mts` checks the classifier and the log.
+- `scripts/task-dir.sh <task-slug>` prints and creates `$TASK_DIR`, the scratch directory for a task: `~/.local/state/agent-tasks/<host>--<owner>--<repo>/<branch>/<task-slug>`, or `_misc/<task-slug>` outside a repo. `global/AGENTS.md` owns the rule to keep scratch out of repos; this script owns the layout, and every `$TASK_DIR` in hworks means its output.
 - `scripts/blockers.sh [--since 7d] [--json]` reports where runs blocked: guard blocks and asks logged by `autonomy.ts`, subagent `contact_supervisor` decision requests, idle, failed, or paused subagents, categorized `open-questions.md` entries, and an optional harness audit log. Feed the output to `/skill:correct` to fix recurring classes.
 - `adapters/pi.md` maps Cursor-specific terms in pstack skills to pi.
 - `models.conf` and `scripts/models.sh` hold the model roster. A profile names a model for each agent role and sets two slots that hughy-mode reads for per-call overrides: `review2` (the second reviewer) and `exhaustive` (the `coder` model at exhaustive effort). `models.sh <profile>` writes the role models to pi settings as `subagents.agentOverrides.<role>.model` and leaves the agent files untouched; `models.sh show` prints the active profile. Profiles: `inherit` (session model, the default) and `anthropic`.
@@ -17,10 +19,10 @@ A personal layer over the [pstack](./pstack/) mirror. `pstack/` is a git subtree
 
 ## Rationale
 
-hworks starts from the harness as it ships: a frontier model, its tools and subagents, `~/AGENTS.md`, and a brief that states the goal, the effort, and how to verify. Additions stay small and earn their place by changing what a run does. When a model handles something well from a plain brief, hworks leaves it alone.
+hworks starts from the harness as it ships: a frontier model, its tools and subagents, `global/AGENTS.md` (installed as `~/.pi/agent/AGENTS.md`), and a brief that states the goal, the effort, and how to verify. Additions stay small and earn their place by changing what a run does. When a model handles something well from a plain brief, hworks leaves it alone.
 
 - pstack is a reference library. A pstack skill loads when it adds behavior a plain brief does not get, or when it is useful on its own as a command. `DIVERGENCE.md` records every exclusion. Playbooks are read by path when a run stalls, the change is high-stakes, or it runs unattended. They are not scripts.
-- `~/AGENTS.md` owns prose, comments, commits, and PR rules. hworks points at it and does not restate it.
+- `global/AGENTS.md` owns prose, comments, commits, PR, autonomy, and scratch rules, and applies in every session, with or without hworks skills loaded. Skills and agents point at it and do not restate it. hworks is public, so employer-specific guidance goes in an overlay repo, not in this file.
 - Multi-day work with several concurrent writers belongs to a multi-agent coordinator when the harness has one. hworks does not rebuild one. Below that scale, `progress.md` and git are the record.
 - Model names live in `models.conf` and pi settings. Skills name roles and slots, so a new model or a provider outage is one profile switch.
 
@@ -30,14 +32,14 @@ pstack's skills reference each other by name (`/poteto-mode` appears 120 times a
 
 ## Install (pi)
 
-```json
-{ "skills": ["~/dev/hworks/skills"] }
-```
+On a new machine, install [pi](https://github.com/earendil-works/pi) with [pi-subagents](https://github.com/nicobailon/pi-subagents), plus `git`, `node`, and `python3`, then:
 
 ```bash
-ln -s ~/dev/hworks/agents ~/.pi/agent/agents/hworks
-ln -s ~/dev/hworks/extensions/autonomy.ts ~/.pi/agent/extensions/autonomy.ts
+git clone https://github.com/hughy/hworks ~/dev/hworks
+~/dev/hworks/scripts/install.sh --profile inherit
 ```
+
+`global/AGENTS.md` refers to `~/dev/hworks`, so clone there or link that path to your clone. `install.sh` refuses to replace a real file that differs from what it would link, such as an existing `~/.claude/CLAUDE.md`; compare the two, move yours aside, and rerun. It removes a `global/AGENTS.md` that links to `global/AGENTS.md`, because pi reads `AGENTS.md` from every ancestor of the working directory as well as its agent dir, and would load the guidance twice under `~`. Install an overlay repo after hworks if you use one (see [Local overlays](#local-overlays)).
 
 Then `/reload` and start a task with `/skill:hughy-mode <task>`. The skills root follows symlinks, and `skillPath: ../skills` in each agent file resolves the same links.
 

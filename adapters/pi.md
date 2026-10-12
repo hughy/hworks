@@ -11,7 +11,7 @@ pstack was written for Cursor. When a skill under `pstack/skills/` names a Curso
 | `run_in_background: true` | `async: true` (the default); consume results at the barrier |
 | `environment: "cloud"`, `cloud_base_branch` | run locally; use `worktree: true` for isolation |
 | `model: <Cursor slug>`, slug-fallback paragraphs, `pstack-models.mdc` role lines | ignore; `scripts/models.sh` sets each role's model. Override per call only with a slot from `scripts/models.sh show`, or an available model when no slot fits |
-| `AskQuestion`, "ask the user", "pause for approval" | record the question and your chosen default in `$TASK_DIR/open-questions.md`, keep going, and ask at the end of the final reply (`~/AGENTS.md`, Autonomy; `autonomy.ts` blocks `ask_user_question`) |
+| `AskQuestion`, "ask the user", "pause for approval" | record the question and your chosen default in `$TASK_DIR/open-questions.md`, keep going, and ask at the end of the final reply (`global/AGENTS.md`, Autonomy; `autonomy.ts` blocks `ask_user_question`) |
 | `/loop`, watcher heartbeat | `bg_wait`, or a background-process or PR-tracking tool when the harness has one |
 | `agent-transcripts/`, `~/.cursor/projects/*/` | not available; skills that mine transcripts (`recall`, `reflect`, `automate-me`) are not linked |
 | `/deslop`, `/no-comments`, `/unslop`, `/technical-writing`, `create-skill` | skip the step; the global `AGENTS.md` owns prose and comments |
