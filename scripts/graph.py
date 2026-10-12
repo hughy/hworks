@@ -22,8 +22,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ARGS_SCRIPT = os.path.join(HERE, "review-loop-args.sh")
 DEFAULT_WORKFLOW = os.path.normpath(os.path.join(HERE, "..", "workflows", "review-loop.js"))
 
+# reserved: the attempt number whose writers may still own the worktree. Set when a live attempt is parked;
+# cleared only by a requeue that finds every bound controller and child terminal.
 COLUMNS = ["id", "state", "deps", "paths", "branch", "worktree", "effort", "attempt", "run",
-           "start_head", "head", "claim", "reason"]
+           "start_head", "head", "claim", "reason", "reserved"]
 LIVE = {"launching", "running"}
 WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "blocked"}
 # run-failed: the workflow ended without a return value (stopped, failed, cancelled) and no writer is left.
@@ -164,8 +166,12 @@ def is_ancestor(cfg, sha, ref):
     return rc == 0
 
 
+def valid_pid(pid):
+    return isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+
+
 def pid_alive(pid):
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+    if not valid_pid(pid):
         return False
     try:
         os.kill(pid, 0)
@@ -351,7 +357,9 @@ def ineligible(cfg, row, rows_by_id):
             return "unknown dependency " + dep
         if d["state"] != "merged":
             return "dependency %s is %s, not merged" % (dep, d["state"])
-        if d["head"] and not is_ancestor(cfg, d["head"], cfg["base"]):
+        if not d["head"]:
+            return "dependency %s is merged but has no recorded head to check against %s" % (dep, cfg["base"])
+        if not is_ancestor(cfg, d["head"], cfg["base"]):
             return "dependency %s head %s is not in %s" % (dep, d["head"][:12], cfg["base"])
     return ""
 
@@ -361,7 +369,7 @@ def plan(cfg, rows, units, window):
     by_id = {r["id"]: r for r in rows}
     active = [r for r in rows if r["state"] in LIVE]
     holding = active + [r for r in rows if r["state"] in ACCEPTED_UNMERGED]
-    exclusive_active = any(not split_list(r["paths"]) for r in active)
+    exclusive = next((r for r in holding if not split_list(r["paths"])), None)
     order = {r["id"]: i for i, r in enumerate(rows)}
 
     def key(r):
@@ -374,15 +382,15 @@ def plan(cfg, rows, units, window):
         reason = ineligible(cfg, r, by_id)
         paths = split_list(r["paths"])
         if not reason:
-            if exclusive_active:
-                reason = "a unit without paths is active"
-            elif not paths and (active or picked):
-                reason = "no paths: runs only when nothing else is active"
+            if exclusive:
+                reason = "%s has no paths and is %s" % (exclusive["id"], exclusive["state"])
+            elif not paths and (holding or picked):
+                reason = "no paths: runs only when nothing else is active or accepted but unmerged"
             elif picked and not split_list(picked[0]["paths"]):
                 reason = "a unit without paths was picked first"
             else:
                 for o in holding + picked:
-                    if split_list(o["paths"]) and overlaps(paths, split_list(o["paths"])):
+                    if overlaps(paths, split_list(o["paths"])):
                         reason = "paths overlap %s (%s)" % (o["id"], o["state"] if o in holding else "picked")
                         break
         if not reason and len(picked) >= slots:
@@ -467,6 +475,7 @@ def cmd_launch(store, a):
         if reason:
             return block(reason)
         _, row["start_head"], _ = git(row["worktree"], "rev-parse", "HEAD")
+        write_rows(store, rows)
         brief = os.path.join(store, "briefs", tag + ".md")
         atomic_write(brief, render_brief(cfg, row, units.get(row["id"], {}), prev_state, prev_reason))
         gate = units.get(row["id"], {}).get("gate") or cfg.get("gate")
@@ -481,14 +490,14 @@ def cmd_launch(store, a):
         args_path = os.path.join(store, "args", tag + ".json")
         if os.path.exists(args_path):
             return block("%s already exists" % args_path)
-        atomic_write(args_path, json.dumps(args, sort_keys=True) + "\n")
-        write_rows(store, rows)
         if p.stderr.strip():
             sys.stderr.write(p.stderr)
-        # launch.json is written last: reconcile treats its absence as a launch that never finished.
         spec = {"id": row["id"], "attempt": row["attempt"], "cwd": cfg["repo"], "args_path": args_path,
                 "workflow": os.path.abspath(a.workflow)}
         write_json(os.path.join(store, "args", tag + ".launch.json"), spec)
+        # The args file is written last: reconcile treats it as the point after which the attempt
+        # resumes with these exact args, and its absence as a launch that never finished.
+        atomic_write(args_path, json.dumps(args, sort_keys=True) + "\n")
         print(json.dumps(spec))
     return 0
 
@@ -599,8 +608,12 @@ def cmd_record(store, a):
             return 0
         if row["state"] != "running":
             raise Refused("%s is %s; bind the attempt before recording it" % (a.id, row["state"]))
-        if run not in split_list(row["run"]):
+        bound = split_list(row["run"])
+        if run not in bound:
             raise Refused("run %s is not bound to %s attempt %d" % (run, a.id, a.attempt))
+        if run != bound[-1]:
+            raise Refused("run %s was superseded by %s for %s attempt %d; record the latest bound run"
+                          % (run, bound[-1], a.id, a.attempt))
         if status.get("state") not in RUNTIME_TERMINAL:
             raise BadInput("run %s is %s, not terminal; nothing to record yet" % (run, status.get("state")))
         args = read_json(os.path.join(store, "args", tag + ".json"), {})
@@ -665,52 +678,131 @@ def run_status(runs_dir, run):
     return read_json(os.path.join(runs_dir, run, "status.json"))
 
 
-def unit_children(runs_dir, worktree, owned_runs):
-    """Child runs that write in this worktree or belong to one of its workflows."""
-    found = []
-    wt = real(worktree)
+def liveness(st):
+    """terminal, alive, dead (nonterminal with a gone pid), or unknown (nonterminal without a usable pid)."""
+    if st.get("state") in RUNTIME_TERMINAL:
+        return "terminal"
+    if not valid_pid(st.get("pid")):
+        return "unknown"
+    return "alive" if pid_alive(st["pid"]) else "dead"
+
+
+def scan_runs(runs_dir, row):
+    """Every run that may write in the unit worktree.
+
+    Bound workflows, their children, any child whose cwd is the worktree, and any workflow whose args
+    target the worktree under the unit's label (dispatched but not yet bound). A bound run without a
+    status.json is listed with liveness unknown.
+    """
+    runs = split_list(row["run"])
+    wt = real(row["worktree"])
+    found, seen = [], set()
     try:
         names = sorted(os.listdir(runs_dir))
     except FileNotFoundError:
-        return found
+        names = []
     for name in names:
         st = read_json(os.path.join(runs_dir, name, "status.json"))
-        if not isinstance(st, dict) or st.get("mode") == "workflow":
+        if not isinstance(st, dict):
+            continue
+        rid = st.get("runId", name)
+        if st.get("mode") == "workflow":
+            args = (st.get("workflow") or {}).get("args")
+            targets = (isinstance(args, dict) and isinstance(args.get("cwd"), str) and bool(wt)
+                       and real(args["cwd"]) == wt and args.get("label") == row["id"])
+            if rid not in runs and not targets:
+                continue
+            seen.add(rid)
+            found.append({"run": rid, "kind": "workflow", "bound": rid in runs, "parent": None,
+                          "state": st.get("state"), "liveness": liveness(st), "dir": os.path.join(runs_dir, name),
+                          "status": st})
             continue
         parent = st.get("parentWorkflowRunId")
-        if (st.get("cwd") and real(st["cwd"]) == wt) or parent in owned_runs:
-            alive = st.get("state") not in RUNTIME_TERMINAL and pid_alive(st.get("pid"))
-            found.append({"run": st.get("runId", name), "parent": parent, "state": st.get("state"),
-                          "pid": st.get("pid"), "alive": alive})
+        if (st.get("cwd") and real(st["cwd"]) == wt) or parent in runs:
+            found.append({"run": rid, "kind": "child", "bound": parent in runs, "parent": parent,
+                          "state": st.get("state"), "liveness": liveness(st), "dir": os.path.join(runs_dir, name),
+                          "status": st})
+    for r in runs:
+        if r not in seen:
+            found.append({"run": r, "kind": "workflow", "bound": True, "parent": None, "state": None,
+                          "liveness": "unknown", "dir": os.path.join(runs_dir, r), "status": None})
     return found
+
+
+def describe(e):
+    what = "bound workflow" if e["kind"] == "workflow" and e["bound"] else (
+        "unbound workflow for this unit" if e["kind"] == "workflow" else "child")
+    if e["status"] is None:
+        return "%s %s has no status.json" % (what, e["run"])
+    if e["liveness"] == "unknown":
+        return "%s %s is %s with no usable pid" % (what, e["run"], e["state"])
+    return "%s %s is %s with a live pid" % (what, e["run"], e["state"])
+
+
+def ownership_blockers(runs_dir, row):
+    """Runs that may still write in the worktree; empty only when durable evidence shows every one terminal or gone."""
+    return [describe(e) for e in scan_runs(runs_dir, row) if e["liveness"] in ("alive", "unknown")]
+
+
+def structured_outputs(children):
+    out = []
+    for k in children:
+        for root, _, files in os.walk(os.path.join(k["dir"], "structured-output")):
+            out += [os.path.join(root, f) for f in sorted(files) if f == "output.json"]
+        for step in (k["status"] or {}).get("steps") or []:
+            p = step.get("structuredOutputPath") if isinstance(step, dict) else None
+            if isinstance(p, str) and os.path.isfile(p) and p not in out:
+                out.append(p)
+    return out
 
 
 def decide(cfg, store, row, runs_dir):
     tag = "%s-%d" % (row["id"], row["attempt"])
     args_path = os.path.join(store, "args", tag + ".json")
     runs = split_list(row["run"])
-    kids = unit_children(runs_dir, row["worktree"], set(runs))
-    live = [k for k in kids if k["alive"]]
-    foreign = [k for k in live if k["parent"] not in runs]
+    entries = scan_runs(runs_dir, row)
+    kids = [e for e in entries if e["kind"] == "child" and e["bound"]]
+    live = [k for k in kids if k["liveness"] == "alive"]
     res = {"id": row["id"], "attempt": row["attempt"], "state": row["state"], "runs": runs,
-           "live_children": [k["run"] for k in live]}
+           "live_children": [k["run"] for k in entries if k["kind"] == "child" and k["liveness"] == "alive"]}
 
     def act(action, reason, **extra):
         res.update(action=action, reason=reason, **extra)
         return res
 
+    if row["state"] not in LIVE:
+        blockers = ownership_blockers(runs_dir, row)
+        if blockers:
+            return act("hold", "%s with attempt %s still reserved: %s"
+                       % (row["state"], row["reserved"], "; ".join(blockers)))
+        return act("hold", "%s with attempt %s still reserved; every bound run and child is terminal, so "
+                   "set %s queued --reason TEXT --runs-dir %s releases it"
+                   % (row["state"], row["reserved"], row["id"], runs_dir))
+
     spec = read_json(os.path.join(store, "args", tag + ".launch.json"), {})
     relaunch = {"args_path": args_path, "workflow": spec.get("workflow", DEFAULT_WORKFLOW), "cwd": cfg["repo"]}
+    foreign = [e for e in entries if not e["bound"] and e["liveness"] in ("alive", "unknown")]
     if foreign:
-        return act("hold", "live child %s writes in %s and is not owned by this attempt"
-                   % (foreign[0]["run"], row["worktree"]))
+        e = foreign[0]
+        if e["kind"] == "workflow":
+            return act("hold", "%s targets %s; if it is this attempt's run, bind %s %d %s"
+                       % (describe(e), row["worktree"], row["id"], row["attempt"], e["run"]))
+        return act("hold", "%s writes in %s and is not owned by this attempt" % (describe(e), row["worktree"]))
+    unknown = [k for k in kids if k["liveness"] == "unknown"]
+    if unknown:
+        return act("hold", "%s; its liveness is unknown" % describe(unknown[0]))
+    older = [e for e in entries if e["kind"] == "workflow" and e["run"] in runs[:-1]
+             and e["liveness"] in ("alive", "unknown")]
+    if older:
+        return act("hold", "%s; it was superseded but may still write" % describe(older[0]))
     commits = ""
     if row["start_head"]:
         _, commits, _ = git(row["worktree"], "rev-list", "--count", row["start_head"] + "..HEAD")
     if row["state"] == "launching":
-        if not os.path.exists(os.path.join(store, "args", tag + ".launch.json")):
-            return act("hold", "launch did not finish (no launch.json), so nothing was dispatched. "
-                       "Use set %s parked, then set %s queued" % (row["id"], row["id"]))
+        if not os.path.exists(args_path):
+            return act("hold", "launch did not finish (no args file), so nothing was dispatched. "
+                       "Use set %s parked --reason TEXT, then set %s queued --reason TEXT --runs-dir %s"
+                       % (row["id"], row["id"], runs_dir))
         if commits not in ("", "0"):
             return act("hold", "no run bound but %s commits since start head %s" % (commits, row["start_head"][:12]))
         return act("relaunch-same-args", "intent written, no run bound, no live writer", **relaunch)
@@ -721,8 +813,11 @@ def decide(cfg, store, row, runs_dir):
             return act("relaunch-same-args", "workflow %s missing; child %s still alive" % (cur, live[0]["run"]), **relaunch)
         return act("hold", "workflow %s has no status.json and no live writer" % cur)
     wstate = st.get("state")
-    if wstate not in RUNTIME_TERMINAL and pid_alive(st.get("pid")):
+    wlive = liveness(st)
+    if wlive == "alive":
         return act("wait", "workflow %s is %s" % (cur, wstate))
+    if wlive == "unknown":
+        return act("hold", "workflow %s is %s with no usable pid" % (cur, wstate))
     path = os.path.join(runs_dir, cur, "status.json")
     if workflow_value(st) is not None:
         if wstate not in RUNTIME_TERMINAL:
@@ -732,6 +827,16 @@ def decide(cfg, store, row, runs_dir):
         return act("relaunch-same-args", "workflow %s %s; child %s still alive" % (cur, wstate, live[0]["run"]), **relaunch)
     if wstate not in RUNTIME_TERMINAL:
         return act("hold", "workflow %s is %s but its process is gone and no writer is alive" % (cur, wstate))
+    evidence = []
+    if commits not in ("", "0"):
+        evidence.append("%s commits since start head %s" % (commits, row["start_head"][:12]))
+    outputs = structured_outputs(kids)
+    if outputs:
+        evidence.append("structured output " + ", ".join(outputs))
+    if evidence:
+        return act("hold", "workflow %s %s without a return value but left %s: possibly finished work. "
+                   "Inspect it before recording, which spends the attempt" % (cur, wstate, " and ".join(evidence)),
+                   file=path, outputs=outputs)
     return act("retry", "workflow %s %s without a return value; no live writer. Record the file, then launch"
                % (cur, wstate), file=path)
 
@@ -740,7 +845,7 @@ def cmd_reconcile(store, a):
     with locked(store):
         cfg = load_config(store)
         rows = read_rows(store)
-    out = [decide(cfg, store, r, a.runs_dir) for r in rows if r["state"] in LIVE]
+    out = [decide(cfg, store, r, a.runs_dir) for r in rows if r["state"] in LIVE or r["reserved"]]
     if a.json:
         print(json.dumps(out, indent=2))
     else:
@@ -759,6 +864,17 @@ def cmd_set(store, a):
         row = find_row(rows, a.id)
         if row["state"] in LIVE and a.state != "parked":
             raise Refused("%s has a live attempt (%s); only parked is allowed" % (a.id, row["state"]))
+        if row["state"] in LIVE:
+            row["reserved"] = str(row["attempt"])
+        if a.state == "queued" and row["reserved"]:
+            if not a.runs_dir:
+                raise Refused("%s attempt %s may still own %s; pass --runs-dir so set can check its runs"
+                              % (a.id, row["reserved"], row["worktree"]))
+            blockers = ownership_blockers(a.runs_dir, row)
+            if blockers:
+                raise Refused("%s attempt %s still owns %s: %s"
+                              % (a.id, row["reserved"], row["worktree"], "; ".join(blockers)))
+            row["reserved"] = ""
         row.update(state=a.state, reason=a.reason)
         write_rows(store, rows)
     print("%s: %s" % (a.id, a.state))
@@ -816,6 +932,7 @@ def parser():
     s.add_argument("id")
     s.add_argument("state")
     s.add_argument("--reason", required=True)
+    s.add_argument("--runs-dir", help="run dirs to check before releasing a parked attempt's reservation")
     return p
 
 

@@ -237,10 +237,10 @@ class GraphTest(unittest.TestCase):
         self.started("A", "wf-2")
         self.assertEqual(self.rows()["A"]["attempt"], 2)
         self.g("bind", "A", "2", "wf-3")
-        self.g("record", "A", "2", self.workflow("unresolved", "wf-2", head))
+        self.g("record", "A", "2", self.workflow("unresolved", "wf-3", head))
         with open(os.path.join(self.store, "units.tsv"), "rb") as f:
             tsv = f.read()
-        self.g("record", "A", "2", self.workflow("clean", "wf-3", head), code=3)
+        self.g("record", "A", "2", self.workflow("clean", "wf-2", head), code=3)
         late = self.workflow("clean", "wf-late", head)
         self.g("record", "A", "1", status1, code=3)
         self.g("record", "A", "1", late, code=3)
@@ -248,7 +248,7 @@ class GraphTest(unittest.TestCase):
         with open(os.path.join(self.store, "units.tsv"), "rb") as f:
             self.assertEqual(f.read(), tsv)
         with open(os.path.join(self.store, "receipts", "A-2.json")) as f:
-            self.assertEqual(json.load(f)["run"], "wf-2")
+            self.assertEqual(json.load(f)["run"], "wf-3")
 
     def test_clean_with_moved_head_is_stale(self):
         self.init()
@@ -371,7 +371,7 @@ class GraphTest(unittest.TestCase):
         self.g("set", "X", "parked", "--reason", "test")
         self.assertEqual(self.next(), ["B", "C"])
         self.launch("B")
-        self.g("set", "X", "queued", "--reason", "requeue")
+        self.g("set", "X", "queued", "--reason", "requeue", "--runs-dir", self.runs)
         self.assertEqual(self.next(), ["C"])
         self.launch("X", "--force-window", code=3)
 
@@ -483,6 +483,161 @@ class GraphTest(unittest.TestCase):
         status = self.workflow("clean", "wf-1", "abc")
         out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))[0]
         self.assertEqual((out["action"], out["file"]), ("record", status))
+
+    def reconcile(self):
+        return json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))
+
+    def running_workflow(self, run, args=None):
+        def edit(doc):
+            doc.update(state="running", pid=os.getpid())
+            del doc["workflow"]["value"]
+            if args is not None:
+                doc["workflow"]["args"] = args
+                doc["steps"] = []
+        return self.fixture("clean", run, edit)
+
+    def test_parked_live_attempt_keeps_reservation_until_writers_end(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A")
+        self.fixture("stopped", "wf-1")
+        child = self.child("child-1", "wf-1", "A", os.getpid())
+        self.g("set", "A", "parked", "--reason", "pause")
+        out = self.reconcile()
+        self.assertEqual([(d["id"], d["action"]) for d in out], [("A", "hold")], out)
+        self.assertIn("child-1", out[0]["reason"])
+        self.g("set", "A", "queued", "--reason", "resume", code=3)
+        self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs, code=3)
+        self.assertEqual(self.rows()["A"]["state"], "parked")
+        self.assertEqual(self.next(), [])
+        doc = graph.read_json(child)
+        doc.update(state="complete", pid=self.dead_pid())
+        graph.write_json(child, doc)
+        self.assertNotIn("child-1", self.reconcile()[0]["reason"])
+        self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs)
+        self.assertEqual(self.reconcile(), [])
+        self.assertEqual(self.launch("A")["attempt"], 2)
+
+    def test_reconcile_holds_while_an_older_bound_controller_runs(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.running_workflow("wf-1")
+        self.g("bind", "A", "1", "wf-2")
+        self.fixture("stopped", "wf-2")
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("wf-1", out["reason"])
+
+    def test_reconcile_holds_for_nonterminal_child_with_unknown_pid(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.fixture("stopped", "wf-1")
+        for parent in ("someone-else", "wf-1"):
+            shutil.rmtree(os.path.join(self.runs, "child-1"), ignore_errors=True)
+            path = self.child("child-1", parent, "A", os.getpid())
+            doc = graph.read_json(path)
+            doc.pop("pid")
+            graph.write_json(path, doc)
+            out = self.reconcile()[0]
+            self.assertEqual(out["action"], "hold", (parent, out))
+            self.assertIn("child-1", out["reason"])
+
+    def test_failed_run_with_commits_or_structured_output_holds(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.fixture("stopped", "wf-1", lambda d: d.update(state="failed"))
+        child = self.child("child-1", "wf-1", "A", self.dead_pid(), state="complete")
+        output = os.path.join(os.path.dirname(child), "structured-output", "x", "output.json")
+        os.makedirs(os.path.dirname(output))
+        graph.write_json(output, {"status": "done", "head": "h", "summary": "s"})
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn(output, out["reason"])
+        shutil.rmtree(os.path.dirname(output))
+        self.assertEqual(self.reconcile()[0]["action"], "retry")
+        self.commit("A")
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("1 commits since start head", out["reason"])
+
+    def test_merged_dependency_without_recorded_head_blocks(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]},
+                   {"id": "B", "title": "b", "blockedBy": ["A"], "paths": ["b/*"]}])
+        self.g("set", "A", "merged", "--reason", "landed elsewhere")
+        self.assertEqual(self.next(), [])
+        self.launch("B", code=3)
+
+    def test_accepted_unit_without_paths_reserves_everything(self):
+        self.init()
+        self.load([{"id": "A", "title": "a"}, {"id": "B", "title": "b", "paths": ["b/*"]}])
+        self.started("A")
+        self.g("record", "A", "1", self.workflow("clean", "wf-1", self.commit("A")))
+        self.assertEqual(self.rows()["A"]["state"], "clean")
+        self.assertEqual(self.next(), [])
+
+    def test_candidate_without_paths_waits_for_accepted_unit(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["b/*"]}, {"id": "B", "title": "b"}])
+        self.started("A")
+        self.g("record", "A", "1", self.workflow("clean", "wf-1", self.commit("A")))
+        self.assertEqual(self.rows()["A"]["state"], "clean")
+        self.assertEqual(self.next(), [])
+
+    def test_crash_after_args_before_launch_record_resumes_same_attempt(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        workflow = os.path.join(self.tmp, "custom-loop.js")
+        args_path = os.path.join(self.store, "args", "A-1.json")
+        real_write = graph.atomic_write
+
+        def crash_after_args(path, text):
+            if os.path.exists(args_path):
+                raise RuntimeError("simulated crash")
+            real_write(path, text)
+        a = graph.parser().parse_args(["--store", self.store, "launch", "A", "--workflow", workflow])
+        with mock.patch.object(graph, "atomic_write", side_effect=crash_after_args), \
+                mock.patch("sys.stdout", new=open(os.devnull, "w")):
+            try:
+                graph.cmd_launch(self.store, a)
+            except RuntimeError:
+                pass
+        with open(args_path, "rb") as f:
+            before = f.read()
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "relaunch-same-args", out)
+        self.assertEqual((out["args_path"], out["workflow"]), (args_path, workflow))
+        self.assertEqual(self.rows()["A"]["start_head"], sh(self.repo, "rev-parse", "main"))
+        with open(args_path, "rb") as f:
+            self.assertEqual(f.read(), before)
+        self.g("bind", "A", "1", "wf-1")
+
+    def test_record_refuses_an_older_bound_run_while_running(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.g("bind", "A", "1", "wf-2")
+        old = self.fixture("stopped", "wf-1")
+        self.running_workflow("wf-2")
+        self.child("child-2", "wf-2", "A", os.getpid())
+        self.g("record", "A", "1", old, code=3)
+        r = self.rows()["A"]
+        self.assertEqual((r["state"], r["attempt"]), ("running", 1))
+        self.assertEqual(self.next(), [])
+
+    def test_launching_with_unbound_live_workflow_for_the_unit_holds(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        spec = self.launch("A")
+        with open(spec["args_path"]) as f:
+            args = json.load(f)
+        self.running_workflow("wf-x", args)
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("wf-x", out["reason"])
 
     def test_set_refuses_live_attempt_except_parked(self):
         self.init()
