@@ -1,4 +1,5 @@
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -39,6 +40,7 @@ class GraphTest(unittest.TestCase):
         self.env = dict(os.environ, PI_SETTINGS=os.path.join(self.tmp, "no-settings.json"))
         self.env.pop("PI_PROVIDER", None)
         self.env.pop("PI_MODEL", None)
+        self.env.pop("PI_SESSION_ID", None)
         self.seq = 0
 
     # ---------- helpers ----------
@@ -494,13 +496,82 @@ class GraphTest(unittest.TestCase):
     def test_reconcile_stopped_workflow_with_live_child_relaunches_same_args(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
-        spec = self.started("A", "wf-1")
+        spec = self.launch("A")
+        self.env["PI_SESSION_ID"] = "sess-1"
+        self.g("bind", "A", "1", "wf-1")
         self.stopped("wf-1")
         self.child("child-1", "wf-1", "A", os.getpid())
         out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))[0]
         self.assertEqual(out["action"], "relaunch-same-args", out)
         self.assertEqual(out["args_path"], spec["args_path"])
         self.assertEqual(out["live_children"], ["child-1"])
+        del self.env["PI_SESSION_ID"]
+        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json"))[0]
+        self.assertEqual(out["action"], "relaunch-same-args", out)
+
+    def test_live_child_from_another_session_holds_instead_of_relaunching(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.launch("A")
+        self.g("bind", "A", "1", "wf-1", "--session", "sess-old")
+        self.stopped("wf-1")
+        self.child("child-1", "wf-1", "A", os.getpid())
+        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-new", "--json"))[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("sess-old", out["reason"])
+        self.assertIn("child-1", out["reason"])
+        self.assertIn("end", out["reason"])
+        self.assertNotIn("args_path", out)
+        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))[0]
+        self.assertEqual(out["action"], "hold", "no current session is never the binding session")
+        shutil.rmtree(os.path.join(self.runs, "wf-1"))
+        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-new", "--json"))[0]
+        self.assertEqual(out["action"], "hold", "missing controller with a live child: %s" % out)
+        self.assertIn("sess-old", out["reason"])
+
+    def test_live_child_bound_without_a_session_holds(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.assertEqual(self.rows()["A"]["session"], "")
+        self.stopped("wf-1")
+        self.child("child-1", "wf-1", "A", os.getpid())
+        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json"))[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("unknown", out["reason"])
+
+    def test_live_child_holds_when_the_workflow_file_changed_since_launch(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        workflow = os.path.join(self.tmp, "loop.js")
+        with open(workflow, "w") as f:
+            f.write("v1\n")
+        spec = self.launch("A", "--workflow", workflow)
+        with open(os.path.join(self.store, "args", "A-1.launch.json")) as f:
+            self.assertEqual(json.load(f)["workflow_sha256"], hashlib.sha256(b"v1\n").hexdigest())
+        self.g("bind", "A", "1", "wf-1", "--session", "s")
+        self.stopped("wf-1")
+        self.child("child-1", "wf-1", "A", os.getpid())
+        reconcile = ("reconcile", "--runs-dir", self.runs, "--session", "s", "--json")
+        self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "relaunch-same-args")
+        with open(workflow, "w") as f:
+            f.write("v2\n")
+        out = json.loads(self.g(*reconcile))[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn(workflow, out["reason"])
+        self.assertIn("changed", out["reason"])
+        self.assertIn("child-1", out["reason"])
+        os.unlink(workflow)
+        self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "hold")
+        with open(workflow, "w") as f:
+            f.write("v1\n")
+        launch_path = os.path.join(self.store, "args", "A-1.launch.json")
+        old = graph.read_json(launch_path)
+        del old["workflow_sha256"]
+        graph.write_json(launch_path, old)
+        out = json.loads(self.g(*reconcile))[0]
+        self.assertEqual(out["action"], "hold", "a launch without a recorded digest: %s" % out)
+        self.assertEqual(spec["workflow"], workflow)
 
     def test_reconcile_stopped_workflow_with_dead_child_retries(self):
         self.init()
