@@ -20,11 +20,14 @@ Paths below are relative to this file: the workflow is `../../workflows/review-l
    - `unresolved`: `maxRounds` review rounds (the first review counts as one) left `blocking` open. Read each finding, then fix, dismiss with a reason, or re-brief.
    - `blocked`: the coder needs a decision. Read its summary in the run output.
    - `gate-failed`: two coder runs in a row failed, by gate or by a runner that ended without a result. Check `git log` for work the failed runs committed, then read the error before re-briefing.
+   - `gate-unverified`: a coder runner exited without a result (a runtime defect with host gates longer than about five seconds) and there were no reviewers to run the gate. Run the gate yourself.
    - `review-failed`: a reviewer failed or returned no structured findings. Rerun the review by hand.
 
 Fix rounds converge: after the first review, reviewers tag each finding `prior` (an earlier finding still unfixed), `regression` (introduced by the fix), or `new`. Only `prior` and `regression` findings block; a blocking `new` finding moves to `nonBlocking` with `downgraded: true`, and an untagged blocking finding still blocks. Read downgraded findings before shipping.
 
 Keep process instructions (commit counts, pacing) out of the brief's acceptance criteria: reviewers judge the brief literally, and fix rounds add commits.
+
+When a coder runner exits without a result after finishing (a known runtime defect with slow host gates), the loop skips the retry and each reviewer runs the gate and reports it; `gateBy` in the result says whether the host or the reviewers ran the last gate.
 
 The result also carries `rounds`, `head` (the coder's last reported commit), and `runs` (key, runId, ok) for inspecting any child. With mission state, each round writes a progress record under the key `review-loop` or `review-loop.<label>`.
 

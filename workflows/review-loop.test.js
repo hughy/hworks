@@ -165,6 +165,52 @@ test("round 1 blocks on any blocking finding, whatever its origin", async () => 
   assert.equal(out.blocking.length, 1);
 });
 
+const runnerExit = { ok: false, error: "Async runner process 1 exited with code 0 before writing a result. Marked run failed by stale-run reconciliation." };
+const gated = (gate, head) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], gate, head } });
+
+test("a runner exit skips the retry and reviewers run the gate", async () => {
+  const { out, calls } = await run({ "code-1": runnerExit, "review-1-1": gated("passed", "h1") });
+  assert.equal(out.state, "clean");
+  assert.equal(out.gateBy, "reviewers");
+  assert.equal(out.head, "h1");
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1"]);
+  assert.match(calls[1].task, /Run `npm test`/);
+});
+
+test("a reviewer-run gate that fails blocks and starts a fix round", async () => {
+  const { out, calls } = await run({
+    "code-1": runnerExit,
+    "review-1-1": gated("failed", "h1"),
+    "fix-2": coded("h2"),
+    "review-2-1": clean,
+  });
+  assert.equal(out.state, "clean");
+  assert.equal(out.gateBy, "host");
+  assert.match(calls.find((c) => c.key === "fix-2").task, /The gate fails: npm test/);
+  assert.doesNotMatch(calls.find((c) => c.key === "review-2-1").task, /Run `npm test`/);
+});
+
+test("a reviewer that does not report the gate fails the review", async () => {
+  const { out } = await run({ "code-1": runnerExit, "review-1-1": clean });
+  assert.equal(out.state, "review-failed");
+});
+
+test("a runner exit with no reviewers is gate-unverified", async () => {
+  const { out } = await run({ "code-1": runnerExit }, { reviewers: 0 });
+  assert.equal(out.state, "gate-unverified");
+});
+
+test("a runner exit on the retry also hands the gate to reviewers", async () => {
+  const { out, calls } = await run({
+    "code-1": { ok: false, error: "gate failed: 2 tests" },
+    "code-1-retry": runnerExit,
+    "review-1-1": gated("passed", "h9"),
+  });
+  assert.equal(out.state, "clean");
+  assert.equal(out.head, "h9");
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry", "review-1-1"]);
+});
+
 test("reviewers 0 runs the gated coder only", async () => {
   const { out, calls } = await run({ "code-1": coded("abc") }, { reviewers: 0 });
   assert.equal(out.state, "clean");
