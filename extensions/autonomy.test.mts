@@ -32,5 +32,10 @@ const kinds = logged.map((r) => `${r.kind}:${r.rule}:${r.blocked}`).join(",");
 const want = "ask:ask_user_question:true,destructive:git branch -D:true,supervisor:need_decision:false";
 if (kinds !== want || logged.some((r) => r.session !== "s1" || r.cwd !== "/repo")) { bad++; console.log("LOG     ", kinds); }
 
-console.log(bad?`${bad} failures`:`all ${block.length+allow.length+cases.length+1} pass`);
+// The block reason names a task-dir.sh that exists, resolved through the extension's symlink.
+const askReason = handler({ toolName: "ask_user_question", input: {} }, ctx)?.reason ?? "";
+const script = askReason.match(/`(\S+\/scripts\/task-dir\.sh) <task-slug>`/)?.[1];
+if (!script || !existsSync(script)) { bad++; console.log("TASKDIR ", script); }
+
+console.log(bad?`${bad} failures`:`all ${block.length+allow.length+cases.length+2} pass`);
 process.exit(bad ? 1 : 0);

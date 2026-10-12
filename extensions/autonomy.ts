@@ -4,14 +4,23 @@
 // Every block, and every ask or supervisor decision request, is appended to a JSONL log for
 // scripts/blockers.sh. PI_AUTONOMY=0 disables the guard and the log.
 
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const LOG = process.env.HWORKS_BLOCKERS_LOG || join(homedir(), ".local/state/agent-tasks/blockers.jsonl");
 
+const TASK_DIR_SCRIPT = (() => {
+  try {
+    return join(dirname(dirname(realpathSync(fileURLToPath(import.meta.url)))), "scripts/task-dir.sh");
+  } catch {
+    return "~/dev/hworks/scripts/task-dir.sh";
+  }
+})();
+
 const ENTRY_FORMAT =
-  "one line per entry in ~/.local/state/agent-tasks/<task>/open-questions.md: " +
+  `one line per entry in $TASK_DIR/open-questions.md (\`${TASK_DIR_SCRIPT} <task-slug>\` prints $TASK_DIR): ` +
   "`- [<category>] <question> | <choice> | <evidence> | <how to reverse>`, where category is one of " +
   "missing-info, permission, irreversible, tooling, ambiguous-brief, external-wait.";
 

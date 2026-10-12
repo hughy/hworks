@@ -151,6 +151,15 @@ for key, rs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
     for r in rs[-3:]:
         where = r["cwd"] or r["session"] or ""
         print(f"            {r['ts'][:16]}  {where[-40:]}  {r['detail'][:90]}")
+by_branch = defaultdict(int)
+for r in rows:
+    if r["source"] == "open-questions":
+        parts = (r["cwd"] or "").split("/")
+        by_branch["/".join(parts[:2]) if len(parts) >= 3 and "--" in parts[0] else f"(legacy) {parts[0]}"] += 1
+if by_branch:
+    print("\nDeferred decisions by repo/branch")
+    for k, n in sorted(by_branch.items(), key=lambda kv: -kv[1]):
+        print(f"{n:>5}  {k}")
 for n in notes:
     print(f"\nnote: {n}", file=sys.stderr)
 PY

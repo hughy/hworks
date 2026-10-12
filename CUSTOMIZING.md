@@ -39,6 +39,7 @@ cursor/plugins/pstack            upstream, written for Cursor
   - `skills/edit-prose/references/style-guide.md` applies its "Prose" section.
   - `skills/edit-prose/references/issues-prs.md` applies its "Linear Issues" and "Commits" sections.
   - The router applies its PR rules and its comment rules.
+  - The router, `extensions/autonomy.ts`, and `scripts/blockers.sh` rely on its scratch rule pointing at `scripts/task-dir.sh` and on its Autonomy section.
 
   Without that file, `edit-prose` has only the trope list and two rules of its own. Either write those sections in your own `~/AGENTS.md`, or put the rules in the skills and remove the references.
 
