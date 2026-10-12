@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Print the args JSON for workflows/review-loop.js.
-# usage: review-loop-args.sh <brief> <gate> <base> <effort>
-#   effort: quick (gate only), standard (1 reviewer), exhaustive (2 reviewers, second on the review2 slot)
+# usage: review-loop-args.sh <brief> <gate> <base> <effort> [worktree]
+#   base: a ref; emitted as the merge-base SHA of it and the worktree's HEAD
+#   effort: quick (gate only, coder at :low), standard (1 reviewer), exhaustive (2 reviewers, coder on the exhaustive slot)
+#   worktree: where the children run (default: the current directory); emitted as cwd when given
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-if [ $# -ne 4 ]; then sed -n '2,4p' "$0" >&2; exit 2; fi
-brief=$1; gate=$2; base=$3; effort=$4
+if [ $# -lt 4 ] || [ $# -gt 5 ]; then sed -n '2,6p' "$0" >&2; exit 2; fi
+brief=$1; gate=$2; base=$3; effort=$4; worktree=${5:-}
 
 case "$effort" in
   quick) reviewers=0 ;;
@@ -22,21 +24,61 @@ case "$brief" in
 esac
 [ -f "$brief" ] || echo "warning: brief file not found: $brief" >&2
 
+if [ -n "$worktree" ]; then
+  worktree=$(cd "$worktree" && pwd -P)
+fi
+if ! base_sha=$(git -C "${worktree:-.}" merge-base "$base" HEAD 2>/dev/null); then
+  echo "cannot resolve the merge-base of $base and HEAD in ${worktree:-$PWD}" >&2
+  exit 2
+fi
+
+session=""
+if [ -n "${PI_PROVIDER:-}" ] && [ -n "${PI_MODEL:-}" ]; then session="$PI_PROVIDER/$PI_MODEL"; fi
+
+shown=$("$root/scripts/models.sh" show)
+# Prints the role's or slot's model; a session-model entry prints the session model, or nothing when unknown.
+model_of() {
+  local m
+  m=$(awk -v r="$1" '$1==r {print $2}' <<< "$shown")
+  if [ "$m" = "(session" ]; then m=$session; fi
+  printf '%s' "$m"
+}
+
+coder_model=""
+case "$effort" in
+  quick)
+    coder_model=$(model_of coder)
+    if [ -n "$coder_model" ]; then
+      coder_model="$(sed -E 's/:(off|minimal|low|medium|high|xhigh)$//' <<< "$coder_model"):low"
+    else
+      echo "warning: coder runs on the session model and PI_PROVIDER/PI_MODEL are unset; quick effort runs it without :low" >&2
+    fi
+    ;;
+  exhaustive)
+    coder_model=$(model_of exhaustive)
+    if [ -z "$coder_model" ]; then
+      echo "warning: exhaustive slot is the session model and PI_PROVIDER/PI_MODEL are unset; coder runs on its role default" >&2
+    fi
+    ;;
+esac
+
 review2=""
 if [ "$reviewers" -eq 2 ]; then
-  shown=$("$root/scripts/models.sh" show)
-  review2=$(awk '$1=="review2" {print $2}' <<< "$shown")
-  reviewer=$(awk '$1=="reviewer" {print $2}' <<< "$shown")
-  if [ "$review2" = "(session" ]; then review2=""; fi
-  if [ "$reviewer" = "(session" ]; then reviewer=""; fi
-  if [ "$review2" = "$reviewer" ]; then
-    echo "warning: review2 slot matches the reviewer model (${reviewer:-session model}); both reviews run on one model" >&2
+  review2=$(model_of review2)
+  reviewer=$(model_of reviewer)
+  if [ -z "$review2" ]; then
+    echo "warning: review2 slot is the session model and PI_PROVIDER/PI_MODEL are unset; the second reviewer runs on the reviewer model" >&2
+  fi
+  if [ "${review2:-$reviewer}" = "$reviewer" ]; then
+    echo "warning: review2 runs the reviewer model (${reviewer:-session model}); both reviews run on one model" >&2
   fi
 fi
 
 node -e '
-  const [brief, gate, base, reviewers, review2, rubricDir] = process.argv.slice(1);
+  const [brief, gate, base, reviewers, review2, coderModel, cwd, rubricDir] = process.argv.slice(1);
   const args = { brief, gate, base, reviewers: Number(reviewers), rubricDir };
   if (review2) args.review2Model = review2;
+  if (coderModel) args.coderModel = coderModel;
+  if (cwd) args.cwd = cwd;
   process.stdout.write(JSON.stringify(args) + "\n");
-' "$brief" "$gate" "$base" "$reviewers" "$review2" "$root/skills/interrogate/references"
+' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/skills/interrogate/references"

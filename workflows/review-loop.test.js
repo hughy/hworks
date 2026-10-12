@@ -50,7 +50,7 @@ function fakeState() {
   };
 }
 
-const baseArgs = { brief: "/tmp/brief.md", gate: "npm test", base: "main", reviewers: 1, rubricDir: "/r" };
+const baseArgs = { brief: "/tmp/brief.md", gate: "npm test", base: "0123abc", reviewers: 1, rubricDir: "/r" };
 const coded = (head) => ({ ok: true, output: "", structuredOutput: { status: "done", head, summary: "s" } });
 const clean = { ok: true, output: "", structuredOutput: { verdict: "ok", findings: [] } };
 const finding = { severity: "blocking", file: "a.js", line: 3, claim: "off by one", evidence: "a.js:3" };
@@ -76,10 +76,13 @@ test("clean on first review", async () => {
   assert.equal(calls[0].agent, "coder");
   assert.equal(calls[0].gate, "npm test");
   assert.ok(calls[0].outputSchema);
-  assert.equal(calls[0].worktree, undefined);
+  assert.equal(calls[0].worktree, false);
+  assert.equal(calls[0].model, undefined);
+  assert.equal(calls[0].cwd, undefined);
+  assert.equal(calls[1].worktree, false);
   assert.equal(calls[1].agent, "reviewer");
   assert.equal(calls[1].gate, undefined);
-  assert.match(calls[1].task, /git diff main\.\.\.HEAD/);
+  assert.match(calls[1].task, /git diff 0123abc\.\.\.HEAD/);
   assert.match(calls[1].task, /\/r\/rubric\.md/);
   assert.ok(state.sets.length > 0);
   assert.equal(state.sets.at(-1).key, "review-loop.fix--issue-12");
@@ -131,6 +134,67 @@ test("review2Model goes to the second reviewer only", async () => {
   const [r1, r2] = calls.filter((c) => c.agent === "reviewer");
   assert.equal(r1.model, undefined);
   assert.equal(r2.model, "prov/model-b");
+});
+
+test("every child runs in the shared worktree, never an isolated one", async () => {
+  const { calls } = await run(
+    {
+      "code-1": { ok: false, error: "gate failed" },
+      "code-1-retry": coded("a1"),
+      "review-1-1": blocked,
+      "review-1-2": clean,
+      "fix-2": coded("a2"),
+      "review-2-1": clean,
+      "review-2-2": clean,
+    },
+    { reviewers: 2 },
+  );
+  assert.equal(calls.length, 7);
+  for (const c of calls) assert.equal(c.worktree, false, c.key);
+});
+
+test("a base that is not a commit SHA is rejected", async () => {
+  for (const base of ["HEAD", "main", "origin/main", "abc12", "0123abcz", "a".repeat(41)]) {
+    await assert.rejects(run({}, { base }), /args\.base/, base);
+  }
+  for (const base of ["0123abc", "A".repeat(40)]) {
+    const { out } = await run({ "code-1": coded("x"), "review-1-1": clean }, { base });
+    assert.equal(out.state, "clean");
+  }
+});
+
+test("coderModel goes to coder launches only", async () => {
+  const { calls } = await run(
+    {
+      "code-1": { ok: false, error: "gate failed" },
+      "code-1-retry": coded("a1"),
+      "review-1-1": blocked,
+      "review-1-2": clean,
+      "fix-2": coded("a2"),
+      "review-2-1": clean,
+      "review-2-2": clean,
+    },
+    { reviewers: 2, coderModel: "prov/coder:low", review2Model: "prov/model-b" },
+  );
+  const coders = calls.filter((c) => c.agent === "coder");
+  const reviewers = calls.filter((c) => c.agent === "reviewer");
+  assert.equal(coders.length, 3);
+  for (const c of coders) assert.equal(c.model, "prov/coder:low", c.key);
+  assert.deepEqual(reviewers.map((c) => c.model), [undefined, "prov/model-b", undefined, "prov/model-b"]);
+});
+
+test("cwd goes to every child when set", async () => {
+  const { calls } = await run(
+    { "code-1": coded("a1"), "review-1-1": blocked, "fix-2": coded("a2"), "review-2-1": clean },
+    { cwd: "/work/tree" },
+  );
+  assert.equal(calls.length, 4);
+  for (const c of calls) assert.equal(c.cwd, "/work/tree", c.key);
+});
+
+test("a non-string cwd or coderModel is rejected", async () => {
+  await assert.rejects(run({}, { cwd: 3 }), /args\.cwd/);
+  await assert.rejects(run({}, { coderModel: "" }), /args\.coderModel/);
 });
 
 test("two gate failures in a row stop with gate-failed", async () => {

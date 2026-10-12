@@ -1,10 +1,13 @@
 // coder -> reviewer -> fix loop to a verdict. Runs as a pi-subagents workflow script:
 // a statement body with top-level await and the globals runs, args, state, emit, console.
-// Launch with cwd = a branch worktree with a clean tree; every child runs there.
+// Every child runs in one shared worktree (args.cwd, else the launch cwd) on a clean branch checkout.
 
 if (typeof args.brief !== "string" || !args.brief) throw new Error("args.brief (absolute path to the brief file) is required");
 if (typeof args.gate !== "string" || !args.gate) throw new Error("args.gate (shell command) is required");
-if (typeof args.base !== "string" || !args.base) throw new Error("args.base (ref to diff against) is required");
+// A ref like HEAD or the branch name moves with the coder's commits and would empty every review diff.
+if (typeof args.base !== "string" || !/^[0-9a-f]{7,40}$/i.test(args.base)) throw new Error("args.base must be a commit SHA (7 to 40 hex chars), not a ref");
+if (args.cwd !== undefined && (typeof args.cwd !== "string" || !args.cwd)) throw new Error("args.cwd must be a non-empty path");
+if (args.coderModel !== undefined && (typeof args.coderModel !== "string" || !args.coderModel)) throw new Error("args.coderModel must be a non-empty model id");
 const reviewerCount = args.reviewers === undefined ? 1 : args.reviewers;
 if (![0, 1, 2].includes(reviewerCount)) throw new Error("args.reviewers must be 0, 1 or 2");
 const maxRounds = args.maxRounds === undefined ? 3 : args.maxRounds;
@@ -79,29 +82,36 @@ function reviewerTask() {
   return task;
 }
 
+// worktree: false overrides a global worktree default so coder commits land on the caller's branch.
+function placed(item) {
+  item.worktree = false;
+  if (args.cwd) item.cwd = args.cwd;
+  return item;
+}
+
 function launchCoder(key, round, findings, gateFailure) {
-  return runs.all([
-    {
-      key,
-      label: label + ": " + key,
-      agent: "coder",
-      task: coderTask(round, findings, gateFailure),
-      gate: args.gate,
-      outputSchema: coderSchema,
-    },
-  ]);
+  const item = placed({
+    key,
+    label: label + ": " + key,
+    agent: "coder",
+    task: coderTask(round, findings, gateFailure),
+    gate: args.gate,
+    outputSchema: coderSchema,
+  });
+  if (args.coderModel) item.model = args.coderModel;
+  return runs.all([item]);
 }
 
 function launchReview(round) {
   const items = [];
   for (let i = 1; i <= reviewerCount; i++) {
-    const item = {
+    const item = placed({
       key: "review-" + round + "-" + i,
       label: label + ": review " + round + "." + i,
       agent: "reviewer",
       task: reviewerTask(),
       outputSchema: reviewSchema,
-    };
+    });
     if (i === 2 && typeof args.review2Model === "string" && args.review2Model) item.model = args.review2Model;
     items.push(item);
   }
