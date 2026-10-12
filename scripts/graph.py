@@ -364,11 +364,18 @@ def ineligible(cfg, row, rows_by_id):
     return ""
 
 
+def held(row):
+    if row["reserved"] and row["state"] not in LIVE:
+        return "%s with attempt %s reserved" % (row["state"], row["reserved"])
+    return row["state"]
+
+
 def plan(cfg, rows, units, window):
     """Launchable ids in priority order, and a reason for each unit left out."""
     by_id = {r["id"]: r for r in rows}
-    active = [r for r in rows if r["state"] in LIVE]
-    holding = active + [r for r in rows if r["state"] in ACCEPTED_UNMERGED]
+    # A reserved attempt's writers may still run, so it counts against the window and holds its paths.
+    active = [r for r in rows if r["state"] in LIVE or r["reserved"]]
+    holding = active + [r for r in rows if r["state"] in ACCEPTED_UNMERGED and r not in active]
     exclusive = next((r for r in holding if not split_list(r["paths"])), None)
     order = {r["id"]: i for i, r in enumerate(rows)}
 
@@ -383,7 +390,7 @@ def plan(cfg, rows, units, window):
         paths = split_list(r["paths"])
         if not reason:
             if exclusive:
-                reason = "%s has no paths and is %s" % (exclusive["id"], exclusive["state"])
+                reason = "%s has no paths and is %s" % (exclusive["id"], held(exclusive))
             elif not paths and (holding or picked):
                 reason = "no paths: runs only when nothing else is active or accepted but unmerged"
             elif picked and not split_list(picked[0]["paths"]):
@@ -391,7 +398,7 @@ def plan(cfg, rows, units, window):
             else:
                 for o in holding + picked:
                     if overlaps(paths, split_list(o["paths"])):
-                        reason = "paths overlap %s (%s)" % (o["id"], o["state"] if o in holding else "picked")
+                        reason = "paths overlap %s (%s)" % (o["id"], held(o) if o in holding else "picked")
                         break
         if not reason and len(picked) >= slots:
             reason = "window full"
@@ -593,6 +600,13 @@ def build_receipt(cfg, row, status, args):
 def cmd_record(store, a):
     status, spath = load_run_file(a.file)
     run = status.get("runId")
+    runs_dir = a.runs_dir
+    if not runs_dir:
+        run_dir = os.path.dirname(spath)
+        if os.path.basename(run_dir) != run:
+            raise BadInput("%s is not in a run dir named %s; pass --runs-dir so record can check the attempt's "
+                           "other runs" % (spath, run))
+        runs_dir = os.path.dirname(run_dir)
     with locked(store):
         cfg = load_config(store)
         rows = read_rows(store)
@@ -616,6 +630,10 @@ def cmd_record(store, a):
                           % (run, bound[-1], a.id, a.attempt))
         if status.get("state") not in RUNTIME_TERMINAL:
             raise BadInput("run %s is %s, not terminal; nothing to record yet" % (run, status.get("state")))
+        blockers = ownership_blockers(runs_dir, row)
+        if blockers:
+            raise Refused("%s attempt %d still owns %s: %s; record after every writer ends"
+                          % (a.id, a.attempt, row["worktree"], "; ".join(blockers)))
         args = read_json(os.path.join(store, "args", tag + ".json"), {})
         receipt = build_receipt(cfg, row, status, args)
         ws = receipt["workflow_state"]
@@ -692,7 +710,8 @@ def scan_runs(runs_dir, row):
 
     Bound workflows, their children, any child whose cwd is the worktree, and any workflow whose args
     target the worktree under the unit's label (dispatched but not yet bound). A bound run without a
-    status.json is listed with liveness unknown.
+    status.json is listed with liveness unknown, and so is a child a bound workflow names but did not
+    record as completed whose own status.json is missing.
     """
     runs = split_list(row["run"])
     wt = real(row["worktree"])
@@ -726,7 +745,41 @@ def scan_runs(runs_dir, row):
         if r not in seen:
             found.append({"run": r, "kind": "workflow", "bound": True, "parent": None, "state": None,
                           "liveness": "unknown", "dir": os.path.join(runs_dir, r), "status": None})
+    listed = {e["run"] for e in found}
+    for e in list(found):
+        if e["kind"] != "workflow" or not e["bound"] or e["status"] is None:
+            continue
+        for child, states in child_refs(e["status"]).items():
+            if child in listed or all(s in COLLECTED for s in states):
+                continue
+            listed.add(child)
+            cdir = os.path.join(runs_dir, child)
+            st = read_json(os.path.join(cdir, "status.json"))
+            if isinstance(st, dict):
+                found.append({"run": child, "kind": "child", "bound": True, "parent": e["run"],
+                              "state": st.get("state"), "liveness": liveness(st), "dir": cdir, "status": st})
+            else:
+                found.append({"run": child, "kind": "child", "bound": True, "parent": e["run"],
+                              "state": states[0], "liveness": "unknown", "dir": cdir, "status": None})
     return found
+
+
+# A controller marks a child completed only after collecting its result, so the child has ended. Any other
+# recorded state (running, stopped) says nothing about the child's own process.
+COLLECTED = {"complete", "completed"}
+
+
+def child_refs(status):
+    """Child run ids a workflow status names, each with every state it records for that child."""
+    refs = {}
+    for step in status.get("steps") or []:
+        if isinstance(step, dict) and isinstance(step.get("runId"), str) and step["runId"]:
+            refs.setdefault(step["runId"], []).append(step.get("status"))
+    children = (status.get("workflowChildren") or {}).get("children")
+    for c in children if isinstance(children, list) else []:
+        if isinstance(c, dict) and isinstance(c.get("runId"), str) and c["runId"]:
+            refs.setdefault(c["runId"], []).append(c.get("state"))
+    return refs
 
 
 def describe(e):
@@ -822,6 +875,9 @@ def decide(cfg, store, row, runs_dir):
     if workflow_value(st) is not None:
         if wstate not in RUNTIME_TERMINAL:
             return act("hold", "workflow %s has a value but is %s with a dead pid" % (cur, wstate))
+        if live:
+            return act("hold", "workflow %s %s with a return value but child %s is still alive; record after it ends"
+                       % (cur, wstate, live[0]["run"]))
         return act("record", "workflow %s %s with a return value" % (cur, wstate), file=path)
     if live:
         return act("relaunch-same-args", "workflow %s %s; child %s still alive" % (cur, wstate, live[0]["run"]), **relaunch)
@@ -920,6 +976,7 @@ def parser():
     s.add_argument("id")
     s.add_argument("attempt", type=int)
     s.add_argument("file")
+    s.add_argument("--runs-dir", help="run dirs to check for live writers (default: the parent of the run's dir)")
 
     s = sub.add_parser("status", parents=[common])
     s.add_argument("--json", action="store_true")

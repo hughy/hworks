@@ -105,6 +105,17 @@ class GraphTest(unittest.TestCase):
                 value_edit(doc["workflow"]["value"])
         return self.fixture(name, run, edit)
 
+    def stopped(self, run, child="child-1", edit=None):
+        """The stopped fixture, with its one child reference renamed to child, or removed when child is None."""
+        def rename(doc):
+            for ref in doc["steps"] + doc["workflowChildren"]["children"]:
+                ref["runId"] = child
+            if child is None:
+                doc["steps"], doc["workflowChildren"]["children"] = [], []
+            if edit:
+                edit(doc)
+        return self.fixture("stopped", run, rename)
+
     def child(self, run, parent, uid, pid, state="running"):
         def edit(doc):
             doc.update(cwd=self.wt(uid), parentWorkflowRunId=parent, pid=pid, state=state)
@@ -237,10 +248,11 @@ class GraphTest(unittest.TestCase):
         self.started("A", "wf-2")
         self.assertEqual(self.rows()["A"]["attempt"], 2)
         self.g("bind", "A", "2", "wf-3")
+        superseded = self.workflow("clean", "wf-2", head)
         self.g("record", "A", "2", self.workflow("unresolved", "wf-3", head))
         with open(os.path.join(self.store, "units.tsv"), "rb") as f:
             tsv = f.read()
-        self.g("record", "A", "2", self.workflow("clean", "wf-2", head), code=3)
+        self.g("record", "A", "2", superseded, code=3)
         late = self.workflow("clean", "wf-late", head)
         self.g("record", "A", "1", status1, code=3)
         self.g("record", "A", "1", late, code=3)
@@ -369,6 +381,10 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(self.next(), [])
         self.launch("B", "--force-window", code=3)
         self.g("set", "X", "parked", "--reason", "test")
+        self.assertEqual(self.next(), [])
+        self.g("set", "X", "queued", "--reason", "release", "--runs-dir", self.runs)
+        self.assertEqual(self.next(), ["X"])
+        self.g("set", "X", "parked", "--reason", "test")
         self.assertEqual(self.next(), ["B", "C"])
         self.launch("B")
         self.g("set", "X", "queued", "--reason", "requeue", "--runs-dir", self.runs)
@@ -437,7 +453,7 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         spec = self.started("A", "wf-1")
-        self.fixture("stopped", "wf-1")
+        self.stopped("wf-1")
         self.child("child-1", "wf-1", "A", os.getpid())
         out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))[0]
         self.assertEqual(out["action"], "relaunch-same-args", out)
@@ -448,7 +464,7 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A", "wf-1")
-        status = self.fixture("stopped", "wf-1")
+        status = self.stopped("wf-1")
         self.child("child-1", "wf-1", "A", self.dead_pid())
         out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))[0]
         self.assertEqual(out["action"], "retry", out)
@@ -461,7 +477,7 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A", "wf-1")
-        self.fixture("stopped", "wf-1")
+        self.stopped("wf-1")
         self.child("child-1", "someone-else", "A", os.getpid())
         out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))[0]
         self.assertEqual(out["action"], "hold", out)
@@ -500,7 +516,7 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A")
-        self.fixture("stopped", "wf-1")
+        self.stopped("wf-1")
         child = self.child("child-1", "wf-1", "A", os.getpid())
         self.g("set", "A", "parked", "--reason", "pause")
         out = self.reconcile()
@@ -524,7 +540,7 @@ class GraphTest(unittest.TestCase):
         self.started("A", "wf-1")
         self.running_workflow("wf-1")
         self.g("bind", "A", "1", "wf-2")
-        self.fixture("stopped", "wf-2")
+        self.stopped("wf-2", child=None)
         out = self.reconcile()[0]
         self.assertEqual(out["action"], "hold", out)
         self.assertIn("wf-1", out["reason"])
@@ -533,7 +549,7 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A", "wf-1")
-        self.fixture("stopped", "wf-1")
+        self.stopped("wf-1")
         for parent in ("someone-else", "wf-1"):
             shutil.rmtree(os.path.join(self.runs, "child-1"), ignore_errors=True)
             path = self.child("child-1", parent, "A", os.getpid())
@@ -548,7 +564,7 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A", "wf-1")
-        self.fixture("stopped", "wf-1", lambda d: d.update(state="failed"))
+        self.stopped("wf-1", edit=lambda d: d.update(state="failed"))
         child = self.child("child-1", "wf-1", "A", self.dead_pid(), state="complete")
         output = os.path.join(os.path.dirname(child), "structured-output", "x", "output.json")
         os.makedirs(os.path.dirname(output))
@@ -620,13 +636,92 @@ class GraphTest(unittest.TestCase):
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A", "wf-1")
         self.g("bind", "A", "1", "wf-2")
-        old = self.fixture("stopped", "wf-1")
+        old = self.stopped("wf-1")
         self.running_workflow("wf-2")
         self.child("child-2", "wf-2", "A", os.getpid())
         self.g("record", "A", "1", old, code=3)
         r = self.rows()["A"]
         self.assertEqual((r["state"], r["attempt"]), ("running", 1))
         self.assertEqual(self.next(), [])
+
+    def test_record_refuses_while_an_older_bound_controller_runs(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.running_workflow("wf-1")
+        self.g("bind", "A", "1", "wf-2")
+        latest = self.stopped("wf-2", child=None)
+        self.g("record", "A", "1", latest, code=3)
+        self.assertEqual(self.rows()["A"]["state"], "running")
+        self.assertEqual(self.next(), [])
+        self.launch("A", "--force-window", code=3)
+
+    def test_record_refuses_while_a_bound_child_runs(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        head = self.commit("A")
+        status = self.workflow("unresolved", "wf-1", head)
+        child = self.child("child-1", "wf-1", "A", os.getpid())
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("child-1", out["reason"])
+        self.g("record", "A", "1", status, code=3)
+        self.g("record", "A", "1", status, "--runs-dir", self.runs, code=3)
+        self.assertEqual(self.rows()["A"]["state"], "running")
+        self.assertFalse(os.path.exists(os.path.join(self.store, "receipts", "A-1.json")))
+        self.launch("A", "--force-window", code=3)
+        doc = graph.read_json(child)
+        doc.update(state="complete", pid=self.dead_pid())
+        graph.write_json(child, doc)
+        self.assertEqual(self.reconcile()[0]["action"], "record")
+        self.g("record", "A", "1", status)
+        self.assertEqual(self.rows()["A"]["state"], "unresolved")
+        self.assertEqual(self.launch("A")["attempt"], 2)
+
+    def test_parked_reserved_attempt_keeps_its_paths_and_window_slot(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}, {"id": "B", "title": "b", "paths": ["a/b"]},
+                   {"id": "C", "title": "c", "paths": ["c/*"]}])
+        self.started("A")
+        self.stopped("wf-1")
+        self.child("child-1", "wf-1", "A", os.getpid())
+        self.g("set", "A", "parked", "--reason", "pause")
+        self.assertEqual(self.rows()["A"]["reserved"], "1")
+        self.assertEqual(self.next(3), ["C"])
+        self.assertEqual(self.next(1), [])
+        self.launch("B", "--force-window", code=3)
+
+    def test_parked_reserved_attempt_without_paths_excludes_everything(self):
+        self.init()
+        self.load([{"id": "A", "title": "a"}, {"id": "B", "title": "b", "paths": ["a/*"]}])
+        self.started("A")
+        self.stopped("wf-1")
+        self.child("child-1", "wf-1", "A", os.getpid())
+        self.g("set", "A", "parked", "--reason", "pause")
+        self.assertEqual(self.reconcile()[0]["action"], "hold")
+        self.assertEqual(self.next(), [])
+        self.launch("B", "--force-window", code=3)
+
+    def test_child_named_by_controller_without_status_keeps_ownership(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+
+        def running_ref(doc):
+            doc["steps"][0]["status"] = "running"
+            doc["workflowChildren"]["children"][0]["state"] = "running"
+        status = self.stopped("wf-1", child="child-missing", edit=running_ref)
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("child-missing", out["reason"])
+        self.g("record", "A", "1", status, code=3)
+        self.g("set", "A", "parked", "--reason", "pause")
+        self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs, code=3)
+        self.launch("A", "--force-window", code=3)
+        self.child("child-missing", "wf-1", "A", self.dead_pid(), state="complete")
+        self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs)
+        self.assertEqual(self.launch("A")["attempt"], 2)
 
     def test_launching_with_unbound_live_workflow_for_the_unit_holds(self):
         self.init()
