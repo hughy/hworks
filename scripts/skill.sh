@@ -15,6 +15,7 @@ cmd=${1:-}; name=${2:-}; reason=${3:-}
 
 ensure_div() {
   [ -f "$div" ] && return
+  # shellcheck disable=SC2016  # backticks are literal Markdown
   printf '# Divergence from pstack\n\nOne line per pstack skill or principle that hworks does not link. `scripts/skill.sh enable <name>` removes a line; `disable` adds one.\n\n| skill | reason | mirror commit |\n|---|---|---|\n' > "$div"
 }
 
@@ -33,6 +34,7 @@ case "$cmd" in
     rm -f "$skills/$name"
     ensure_div
     grep -v "^| \`$name\` |" "$div" > "$div.tmp" && mv "$div.tmp" "$div"
+    # shellcheck disable=SC2016  # backticks are literal Markdown
     printf '| `%s` | %s | %s |\n' "$name" "${reason:-not linked}" "$upstream" >> "$div"
     echo "unlinked $name. Run /reload in pi."
     ;;
