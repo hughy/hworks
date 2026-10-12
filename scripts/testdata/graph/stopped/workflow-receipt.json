@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "workflowRunId": "52db8172-4389-4c53-9edf-453f0e00a079",
+  "state": "stopped",
+  "createdAt": 1791838777068,
+  "entries": {},
+  "argsDigest": "43f22f4c225e0269d7e252a8fda9cb2adaa824ff63e8899fec3bf43c4e745d9c",
+  "workflowChildren": {
+    "version": 1,
+    "parentToolCallId": "call-stopped-0001",
+    "workflowRunId": "52db8172-4389-4c53-9edf-453f0e00a079",
+    "inventoryComplete": true,
+    "workflowState": "stopped",
+    "children": [
+      {
+        "childId": "code-1",
+        "state": "stopped",
+        "runId": "0188fd3c-2a89-4140-ad28-1125547edea9",
+        "agent": "coder",
+        "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h..."
+      }
+    ]
+  }
+}

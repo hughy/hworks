@@ -1,0 +1,114 @@
+{
+  "lifecycleArtifactVersion": 3,
+  "runId": "0188fd3c-2a89-4140-ad28-1125547edea9",
+  "sessionId": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68.jsonl",
+  "completionOwnerId": "17d2f3a4-9ff5-4ee4-909a-52589d7ef989",
+  "mode": "single",
+  "state": "complete",
+  "lastActivityAt": 1791839288884,
+  "startedAt": 1791838496820,
+  "lastUpdate": 1791839290871,
+  "timeoutMs": 1800000,
+  "deadlineAt": 1791840296175,
+  "pid": 64946,
+  "cwd": "/private/tmp/g05b-c",
+  "currentStep": 0,
+  "chainStepCount": 1,
+  "parallelGroups": [],
+  "launchContractDigest": "a80be194a40ec37b7ea7d6ec97f4a5c17f9cc5883e8f554a335d0231acdb03ad",
+  "runFanoutBudget": {
+    "used": 1,
+    "limit": 64,
+    "remaining": 63
+  },
+  "parentWorkflowRunId": "52db8172-4389-4c53-9edf-453f0e00a079",
+  "workflowKey": "code-1",
+  "processTerminal": {
+    "version": 1,
+    "state": "observed",
+    "runId": "0188fd3c-2a89-4140-ad28-1125547edea9",
+    "runnerProcessInstanceId": "cbdd96da-0d64-4f1b-92b4-80f96952ebdd",
+    "observedAt": 1791839290970,
+    "instances": [
+      {
+        "kind": "runner",
+        "processInstanceId": "cbdd96da-0d64-4f1b-92b4-80f96952ebdd",
+        "closeObservedAt": 1791839290970,
+        "exitCode": 0,
+        "signal": null
+      }
+    ],
+    "resumeDisposition": "resumable"
+  },
+  "steps": [
+    {
+      "agent": "coder",
+      "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h...",
+      "description": "[prompt redacted]",
+      "context": "fresh",
+      "launchContractDigest": "a80be194a40ec37b7ea7d6ec97f4a5c17f9cc5883e8f554a335d0231acdb03ad",
+      "status": "complete",
+      "sessionFile": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68/5ddb99bc-6818-492f-96e4-56e00eff3727/run-0/session.jsonl",
+      "transcriptPath": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/subagent-artifacts/0188fd3c-2a89-4140-ad28-1125547edea9_coder_transcript.jsonl",
+      "model": "provider-a/model-a:high",
+      "contextLimit": 1000000,
+      "thinking": "high",
+      "requestedModel": "provider-a/model-a",
+      "processTerminal": {
+        "version": 1,
+        "runId": "0188fd3c-2a89-4140-ad28-1125547edea9",
+        "childIndex": 0,
+        "runnerProcessInstanceId": "cbdd96da-0d64-4f1b-92b4-80f96952ebdd",
+        "resumeDisposition": "resumable",
+        "state": "not-started"
+      },
+      "startedAt": 1791838496825,
+      "lastActivityAt": 1791839288884,
+      "turnCount": 11,
+      "tokens": {
+        "input": 24,
+        "output": 4913,
+        "total": 4937,
+        "window": 12351,
+        "windowPeak": 12351
+      },
+      "toolCount": 27,
+      "activityState": "active_long_running",
+      "endedAt": 1791839290869,
+      "durationMs": 794044,
+      "exitCode": 0,
+      "totalCost": {
+        "inputTokens": 24,
+        "outputTokens": 4913,
+        "costUsd": 0.5441138000000001
+      },
+      "structuredOutput": {
+        "status": "done",
+        "head": "b589a3b81cd3ed5deb45e1640d4e8d73e3095e49",
+        "summary": "I added eight functions to strutil.py, each with tests in test_strutil.py, and committed them one at a time in the order"
+      },
+      "structuredOutputPath": "/tmp/pi-subagents-user/async-subagent-runs/0188fd3c-2a89-4140-ad28-1125547edea9/structured-output/pi-subagent-structured-S6ELmv/output.json",
+      "structuredOutputSchemaPath": "/tmp/pi-subagents-user/async-subagent-runs/0188fd3c-2a89-4140-ad28-1125547edea9/structured-output/pi-subagent-structured-S6ELmv/schema.json"
+    }
+  ],
+  "artifactsDir": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/subagent-artifacts",
+  "sessionDir": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68/5ddb99bc-6818-492f-96e4-56e00eff3727/async-0188fd3c-2a89-4140-ad28-1125547edea9",
+  "outputFile": "/tmp/pi-subagents-user/async-subagent-runs/0188fd3c-2a89-4140-ad28-1125547edea9/output-0.log",
+  "totalTokens": {
+    "input": 24,
+    "output": 4913,
+    "total": 4937,
+    "window": 12351,
+    "windowPeak": 12351
+  },
+  "turnCount": 11,
+  "toolCount": 27,
+  "outputs": {},
+  "endedAt": 1791839290871,
+  "sessionFile": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68/5ddb99bc-6818-492f-96e4-56e00eff3727/run-0/session.jsonl",
+  "totalCost": {
+    "inputTokens": 24,
+    "outputTokens": 4913,
+    "costUsd": 0.5441138000000001
+  }
+}

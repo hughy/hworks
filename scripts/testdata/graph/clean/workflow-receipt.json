@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "workflowRunId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
+  "state": "complete",
+  "createdAt": 1791832312808,
+  "entries": {
+    "code-1": {
+      "key": "code-1",
+      "agent": "coder",
+      "resolvedContext": "fresh",
+      "continuation": {
+        "runIds": [
+          "f73a126e-278f-43f3-8cd6-852a86904344"
+        ]
+      },
+      "latestRunId": "f73a126e-278f-43f3-8cd6-852a86904344",
+      "resumability": {
+        "state": "resumable"
+      }
+    },
+    "review-1-1": {
+      "key": "review-1-1",
+      "agent": "reviewer",
+      "resolvedContext": "fresh",
+      "continuation": {
+        "runIds": [
+          "4adf0004-fae8-4496-abb5-0b6605464125"
+        ]
+      },
+      "latestRunId": "4adf0004-fae8-4496-abb5-0b6605464125",
+      "resumability": {
+        "state": "resumable"
+      }
+    }
+  },
+  "argsDigest": "bce86b9149c4c718e1f2df2af62f08ff8de6bc623a916a9581dbdb85bad5e988",
+  "workflowChildren": {
+    "version": 1,
+    "parentToolCallId": "call-clean-0001",
+    "workflowRunId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
+    "inventoryComplete": true,
+    "workflowState": "completed",
+    "children": [
+      {
+        "childId": "code-1",
+        "state": "completed",
+        "runId": "f73a126e-278f-43f3-8cd6-852a86904344",
+        "agent": "coder",
+        "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h...",
+        "model": "provider-a/model-a:high"
+      },
+      {
+        "childId": "review-1-1",
+        "state": "completed",
+        "runId": "4adf0004-fae8-4496-abb5-0b6605464125",
+        "agent": "reviewer",
+        "sessionName": "reviewer: Review the change on the current branch. Intent: read the...",
+        "model": "provider-b/model-b:high"
+      }
+    ]
+  }
+}

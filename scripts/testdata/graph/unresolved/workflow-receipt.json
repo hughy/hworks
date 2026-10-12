@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "workflowRunId": "bfb7a476-3f2d-4d69-8cde-832344377bfb",
+  "state": "complete",
+  "createdAt": 1791839512614,
+  "entries": {
+    "code-1": {
+      "key": "code-1",
+      "agent": "coder",
+      "continuation": {
+        "runIds": [
+          "0188fd3c-2a89-4140-ad28-1125547edea9"
+        ]
+      },
+      "latestRunId": "0188fd3c-2a89-4140-ad28-1125547edea9",
+      "resumability": {
+        "state": "resumable"
+      }
+    },
+    "review-1-1": {
+      "key": "review-1-1",
+      "agent": "reviewer",
+      "resolvedContext": "fresh",
+      "continuation": {
+        "runIds": [
+          "1c6036f7-3cd7-4cea-9d3f-f340998f9643"
+        ]
+      },
+      "latestRunId": "1c6036f7-3cd7-4cea-9d3f-f340998f9643",
+      "resumability": {
+        "state": "resumable"
+      }
+    },
+    "fix-2": {
+      "key": "fix-2",
+      "agent": "coder",
+      "resolvedContext": "fresh",
+      "continuation": {
+        "runIds": [
+          "c545948b-d46e-4ac6-97c0-aa31eda40d49"
+        ]
+      },
+      "latestRunId": "c545948b-d46e-4ac6-97c0-aa31eda40d49",
+      "resumability": {
+        "state": "resumable"
+      }
+    },
+    "review-2-1": {
+      "key": "review-2-1",
+      "agent": "reviewer",
+      "resolvedContext": "fresh",
+      "continuation": {
+        "runIds": [
+          "593aa1fe-9b46-4e2f-93c7-1b0671d8de6d"
+        ]
+      },
+      "latestRunId": "593aa1fe-9b46-4e2f-93c7-1b0671d8de6d",
+      "resumability": {
+        "state": "resumable"
+      }
+    },
+    "fix-3": {
+      "key": "fix-3",
+      "agent": "coder",
+      "resolvedContext": "fresh",
+      "continuation": {
+        "runIds": [
+          "d41fb73a-1980-4124-873d-630daa22da2e"
+        ]
+      },
+      "latestRunId": "d41fb73a-1980-4124-873d-630daa22da2e",
+      "resumability": {
+        "state": "resumable"
+      }
+    },
+    "review-3-1": {
+      "key": "review-3-1",
+      "agent": "reviewer",
+      "resolvedContext": "fresh",
+      "continuation": {
+        "runIds": [
+          "dcfb09d2-565e-412e-81e8-986ccfab1d61"
+        ]
+      },
+      "latestRunId": "dcfb09d2-565e-412e-81e8-986ccfab1d61",
+      "resumability": {
+        "state": "resumable"
+      }
+    }
+  },
+  "argsDigest": "43f22f4c225e0269d7e252a8fda9cb2adaa824ff63e8899fec3bf43c4e745d9c",
+  "workflowChildren": {
+    "version": 1,
+    "parentToolCallId": "call-unresolved-0001",
+    "workflowRunId": "bfb7a476-3f2d-4d69-8cde-832344377bfb",
+    "inventoryComplete": true,
+    "workflowState": "completed",
+    "children": [
+      {
+        "childId": "code-1",
+        "state": "completed",
+        "runId": "0188fd3c-2a89-4140-ad28-1125547edea9",
+        "agent": "coder",
+        "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h...",
+        "model": "provider-a/model-a:high"
+      },
+      {
+        "childId": "review-1-1",
+        "state": "completed",
+        "runId": "1c6036f7-3cd7-4cea-9d3f-f340998f9643",
+        "agent": "reviewer",
+        "sessionName": "reviewer: Review the change on the current branch. Intent: read the...",
+        "model": "provider-b/model-b:high"
+      },
+      {
+        "childId": "fix-2",
+        "state": "completed",
+        "runId": "c545948b-d46e-4ac6-97c0-aa31eda40d49",
+        "agent": "coder",
+        "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h...",
+        "model": "provider-a/model-a:high"
+      },
+      {
+        "childId": "review-2-1",
+        "state": "completed",
+        "runId": "593aa1fe-9b46-4e2f-93c7-1b0671d8de6d",
+        "agent": "reviewer",
+        "sessionName": "reviewer: Review the change on the current branch. Intent: read the...",
+        "model": "provider-b/model-b:high"
+      },
+      {
+        "childId": "fix-3",
+        "state": "completed",
+        "runId": "d41fb73a-1980-4124-873d-630daa22da2e",
+        "agent": "coder",
+        "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h...",
+        "model": "provider-a/model-a:high"
+      },
+      {
+        "childId": "review-3-1",
+        "state": "completed",
+        "runId": "dcfb09d2-565e-412e-81e8-986ccfab1d61",
+        "agent": "reviewer",
+        "sessionName": "reviewer: Review the change on the current branch. Intent: read the...",
+        "model": "provider-b/model-b:high"
+      }
+    ]
+  }
+}

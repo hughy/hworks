@@ -1,0 +1,148 @@
+{
+  "runId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
+  "toolCallId": "call-clean-0001",
+  "sessionId": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68.jsonl",
+  "completionOwnerId": "17d2f3a4-9ff5-4ee4-909a-52589d7ef989",
+  "mode": "workflow",
+  "state": "complete",
+  "startedAt": 1791832255900,
+  "lastUpdate": 1791832312815,
+  "cwd": "/tmp/rl-smoke",
+  "sessionRoot": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68",
+  "pid": 38904,
+  "steps": [
+    {
+      "agent": "coder",
+      "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h...",
+      "label": "smoke: code-1",
+      "workflowKey": "code-1",
+      "parentWorkflowRunId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
+      "status": "completed",
+      "startedAt": 1791832255972,
+      "sessionFile": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68/0ef530d2-8154-42de-b5fa-1060093a2149/run-0/session.jsonl",
+      "async": true,
+      "runId": "f73a126e-278f-43f3-8cd6-852a86904344",
+      "durationMs": 30160
+    },
+    {
+      "agent": "reviewer",
+      "sessionName": "reviewer: Review the change on the current branch. Intent: read the...",
+      "label": "smoke: review 1.1",
+      "workflowKey": "review-1-1",
+      "parentWorkflowRunId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
+      "status": "completed",
+      "startedAt": 1791832286138,
+      "sessionFile": "/home/user/.pi/agent/sessions/--home-user-dev-repo--/2026-10-09T18-29-05-703Z_01a121ed-0c26-741b-a2c1-b55cbfdc1a68/48912823-bd19-4954-814c-ca86f44e2c33/run-0/session.jsonl",
+      "async": true,
+      "runId": "4adf0004-fae8-4496-abb5-0b6605464125",
+      "durationMs": 26649
+    }
+  ],
+  "workflow": {
+    "value": {
+      "state": "clean",
+      "rounds": 1,
+      "head": "e47c555b69042f6f7922a0fd9db606876ef46240",
+      "blocking": [],
+      "nonBlocking": [],
+      "runs": [
+        {
+          "key": "code-1",
+          "runId": "f73a126e-278f-43f3-8cd6-852a86904344",
+          "ok": true
+        },
+        {
+          "key": "review-1-1",
+          "runId": "4adf0004-fae8-4496-abb5-0b6605464125",
+          "ok": true
+        }
+      ]
+    },
+    "trace": [
+      {
+        "operation": "run",
+        "key": "code-1",
+        "state": "started",
+        "label": "smoke: code-1",
+        "agent": "coder"
+      },
+      {
+        "operation": "run",
+        "key": "code-1",
+        "state": "completed",
+        "durationMs": 30160,
+        "label": "smoke: code-1",
+        "agent": "coder",
+        "runId": "f73a126e-278f-43f3-8cd6-852a86904344"
+      },
+      {
+        "operation": "run",
+        "key": "review-1-1",
+        "state": "started",
+        "label": "smoke: review 1.1",
+        "agent": "reviewer"
+      },
+      {
+        "operation": "run",
+        "key": "review-1-1",
+        "state": "completed",
+        "durationMs": 26649,
+        "label": "smoke: review 1.1",
+        "agent": "reviewer",
+        "runId": "4adf0004-fae8-4496-abb5-0b6605464125"
+      }
+    ],
+    "emits": [],
+    "console": [],
+    "args": {
+      "brief": "/home/user/tasks/graph/smoke-brief.md",
+      "gate": "python3 -m unittest",
+      "base": "main",
+      "reviewers": 1,
+      "rubricDir": "/home/user/hworks/skills/interrogate/references",
+      "label": "smoke"
+    },
+    "argsDigest": "bce86b9149c4c718e1f2df2af62f08ff8de6bc623a916a9581dbdb85bad5e988",
+    "scriptDigest": "10d2e87cf521f8b4bd25d48e5c52c1e97af963dc2f0f12e0a130d074160b8ed3"
+  },
+  "workflowChildren": {
+    "version": 1,
+    "parentToolCallId": "call-clean-0001",
+    "workflowRunId": "cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8",
+    "inventoryComplete": true,
+    "workflowState": "completed",
+    "children": [
+      {
+        "childId": "code-1",
+        "state": "completed",
+        "runId": "f73a126e-278f-43f3-8cd6-852a86904344",
+        "agent": "coder",
+        "sessionName": "coder: Read the brief at /home/user/.local/state/agent-tasks/h..."
+      },
+      {
+        "childId": "review-1-1",
+        "state": "completed",
+        "runId": "4adf0004-fae8-4496-abb5-0b6605464125",
+        "agent": "reviewer",
+        "sessionName": "reviewer: Review the change on the current branch. Intent: read the..."
+      }
+    ]
+  },
+  "runFanoutBudget": {
+    "used": 2,
+    "limit": 64,
+    "remaining": 62
+  },
+  "endedAt": 1791832312808,
+  "totalTokens": {
+    "input": 26,
+    "output": 3572,
+    "total": 3598
+  },
+  "totalCost": {
+    "inputTokens": 26,
+    "outputTokens": 3572,
+    "costUsd": 0.25169410000000003
+  },
+  "workflowReceiptPath": "/tmp/pi-subagents-user/async-subagent-runs/cc4a83da-f70f-47ea-9b65-f0fa72e3d1c8/workflow-receipt.json"
+}
