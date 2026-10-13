@@ -636,9 +636,10 @@ def cmd_record(store, a):
         bound = split_list(row["run"])
         if run not in bound:
             raise Refused("run %s is not bound to %s attempt %d" % (run, a.id, a.attempt))
-        if run != bound[-1]:
+        cur = current_run(runs_dir, bound)
+        if run != cur:
             raise Refused("run %s was superseded by %s for %s attempt %d; record the latest bound run"
-                          % (run, bound[-1], a.id, a.attempt))
+                          % (run, cur, a.id, a.attempt))
         if status.get("state") not in RUNTIME_TERMINAL:
             raise BadInput("run %s is %s, not terminal; nothing to record yet" % (run, status.get("state")))
         blockers = ownership_blockers(runs_dir, row)
@@ -705,6 +706,16 @@ def cmd_status(store, a):
 
 def run_status(runs_dir, run):
     return read_json(os.path.join(runs_dir, run, "status.json"))
+
+
+def current_run(runs_dir, bound):
+    """The bound run that is the attempt's outcome: the newest started, ties going to the last bound.
+
+    bind appends, so a late-bound older run must not displace the newest one."""
+    def started(r):
+        v = (run_status(runs_dir, r) or {}).get("startedAt")
+        return v if isinstance(v, int) else -1
+    return max(reversed(bound), key=started, default="")
 
 
 def liveness(st):
@@ -887,10 +898,7 @@ def decide(cfg, store, row, runs_dir):
         spec = read_json(os.path.join(store, "args", tag + ".launch.json"), {})
         return act("relaunch-same-args", "intent written, nothing dispatched, no writer", args_path=args_path,
                    workflow=spec.get("workflow", DEFAULT_WORKFLOW), cwd=cfg["repo"])
-    # bind appends, so a late-bound older run must not displace the newest one as the attempt's outcome.
-    started = {e["run"]: e["status"].get("startedAt") for e in entries if e["kind"] == "workflow" and e["status"]}
-    cur = max(reversed(runs), key=lambda r: started.get(r) if isinstance(started.get(r), int) else -1,
-              default="")
+    cur = current_run(runs_dir, runs)
     st = run_status(runs_dir, cur) if cur else None
     if not isinstance(st, dict):
         return act("hold", "workflow %s has no status.json" % (cur or "(none bound)"))
