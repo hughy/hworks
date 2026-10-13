@@ -61,6 +61,17 @@ class Normalize(unittest.TestCase):
             self.assertEqual([(s["kind"], s["lang"], s["code"]) for s in rs.call_scripts(call, source())],
                              [("inline", lang, "import os\nprint(1)")], cmd)
 
+    def test_heredoc_is_data_when_interpreter_has_code_or_script_file(self):
+        for cmd in ("python3 -c 'import json,sys; print(json.load(sys.stdin))' <<'EOF'", "python3 scripts/reader.py <<'EOF'",
+                    "node -e 'process.stdin.pipe(process.stdout)' <<EOF", "python3 -uc 'print(1)' <<EOF",
+                    "bash -c 'cat' <<EOF", "node --eval 'x' <<EOF", "python3 -m json.tool <<EOF"):
+            call = {"name": "bash", "args": {"command": cmd + "\n{\n  \"enabled\": true\n}\nEOF"}}
+            codes = [s["code"] for s in rs.call_scripts(call, source())]
+            self.assertNotIn('{\n  "enabled": true\n}', codes, cmd)
+        for cmd in ("bash -e <<EOF", "bash -s arg <<EOF", "python3 -u - <<EOF", "node --input-type=module <<EOF"):
+            call = {"name": "bash", "args": {"command": cmd + "\nimport os\nEOF"}}
+            self.assertEqual([s["code"] for s in rs.call_scripts(call, source())], ["import os"], cmd)
+
     def test_tee_heredoc_writes_a_script_file(self):
         for cmd in ("tee /tmp/a.py <<'EOF'", "tee -a /tmp/a.py <<'EOF'", "cat <<'EOF' | tee /tmp/a.py >/dev/null"):
             call = {"name": "bash", "args": {"command": cmd + "\nimport os\nx = 1\nprint(x)\nEOF"}}

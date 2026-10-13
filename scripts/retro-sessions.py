@@ -339,10 +339,31 @@ def heredoc_script(header, body, src, cwd=None):
          or re.search(r"\btee\s+(?:-\S+\s+)*([^\s<>|;&-][^\s<>|;&]*)", header))
     if m and not m.group(1).strip("'\"").startswith("/dev/"):
         return file_script(m.group(1), body, src, cwd)
-    m = re.search(r"(?:^|[\s;&|(])((?:\S*/)?(python3?|node|bun|deno|ruby|perl|bash|sh|zsh|osascript))\b[^|;&]*\bHEREDOC_IN\b", head)
-    if m:
+    m = re.search(r"(?:^|[\s;&|(])((?:\S*/)?(python3?|node|bun|deno|ruby|perl|bash|sh|zsh|osascript))\b([^|;&]*)\bHEREDOC_IN\b", head)
+    if m and stdin_is_source(m.group(2), m.group(3).split()):
         return {"kind": "inline", "path": None, "lang": LANG[m.group(2)], "code": body, "where": "inline"}
     return None
+
+
+CODE_FLAGS = {"py": "cm", "js": "ep", "rb": "eE", "pl": "eE", "sh": "c", "applescript": "e"}
+
+
+def stdin_is_source(interp, args):
+    """False when the interpreter gets its code from -c/-e or a script file, so the heredoc is data."""
+    lang = LANG[interp]
+    for t in args:
+        if t == "-" or (t == "-s" and lang == "sh"):
+            return True
+        if t in ("--eval", "--print"):
+            return False
+        if t.startswith("--"):
+            continue
+        if t.startswith("-"):
+            if any(c in CODE_FLAGS.get(lang, "") for c in t[1:]):
+                return False
+            continue
+        return False
+    return True
 
 
 def shebang_lang(code):
