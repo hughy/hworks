@@ -132,4 +132,4 @@ async function record(opts, scenes) {
   }
 }
 
-module.exports = { record, voiceFor, sleep };
+module.exports = { record, voiceFor, sleep, loadChromium };
