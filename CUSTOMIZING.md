@@ -21,7 +21,7 @@ cursor/plugins/pstack            upstream, written for Cursor
 | Path | What it holds | When you fork |
 |---|---|---|
 | `global/AGENTS.md` | Global agent guidance, linked to `~/.pi/agent/AGENTS.md`, `~/.claude/CLAUDE.md`, and `~/.codex/AGENTS.md` | Replace it with your own rules; keep the Autonomy and scratch sections if you keep `autonomy.ts` and `blockers.sh` |
-| `skills/hughy-mode/` | The router: routes, effort levels, and the deltas that override pstack playbooks | Rename it and rewrite the routes and deltas to match how you work |
+| `skills/hughy-router/` | The router: routes, effort levels, and the deltas that override pstack playbooks | Rename it and rewrite the routes and deltas to match how you work |
 | `skills/edit-prose/` | A prose skill that defers to `global/AGENTS.md` | Keep, replace, or delete it |
 | `skills/<name>` symlinks | The allowlist of pstack skills that load | Choose your own with `scripts/skill.sh` |
 | `DIVERGENCE.md` | Why each pstack skill is not linked | Rewrite the reasons to match your choices |
@@ -47,7 +47,7 @@ cursor/plugins/pstack            upstream, written for Cursor
 ## Fork into your own layer
 
 1. Fork the repo and clone it. Edit `global/AGENTS.md` (or replace its `~/dev/hworks` paths with your clone's), then run `scripts/install.sh`.
-2. Rename the router. Rename `skills/hughy-mode/` and change the `name:` in its frontmatter to match the new directory name. Then run `git grep -n hughy-mode -- ':!pstack'` and update each hit. The hits are in `README.md`, `CUSTOMIZING.md`, `DIVERGENCE.md`, `adapters/pi.md`, `agents/coder.md`, `models.conf`, and `scripts/models.sh`. Start a task with `/skill:<new-name> <task>`.
+2. Rename the router. Rename `skills/hughy-router/` and change the `name:` in its frontmatter to match the new directory name. Then run `git grep -n hughy-router -- ':!pstack'` and update each hit. The hits are in `README.md`, `CUSTOMIZING.md`, `DIVERGENCE.md`, `adapters/pi.md`, `agents/coder.md`, `models.conf`, and `scripts/models.sh`. Start a task with `/skill:<new-name> <task>`.
 3. Rename the plugin. Set `name` in `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`, and set `author` in both `plugin.json` files. Add your copyright line to `LICENSE`. Keep `pstack/LICENSE`, because pstack's MIT license requires its notice in copies.
 4. Choose the allowlist. `scripts/skill.sh list` shows which pstack skills are linked. `scripts/skill.sh enable <name>` links a skill and deletes its `DIVERGENCE.md` row. `scripts/skill.sh disable <name> "<reason>"` unlinks a skill and adds a row with the reason and the current mirror commit. pstack skills set `disable-model-invocation: true`, so the model never sees them in its catalog. You invoke one with `/skill:<name>`, the router reads one by path, or an agent loads one through its `skills:` line.
 5. Rewrite the router. Its effort table, routes, and deltas are opinions. Keep the brief format (goal, effort, verify) if it suits you. Playbooks under `pstack/skills/poteto-mode/playbooks/` need no enabling, because the router reads them by path.

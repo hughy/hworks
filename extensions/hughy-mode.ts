@@ -1,4 +1,4 @@
-// `/hughy-mode on|off|status` (no argument toggles) keeps the hughy-mode skill in force for a session.
+// `/hughy-mode on|off|status` (no argument toggles) keeps the hughy-router skill in force for a session.
 // While on, every turn carries a short system-prompt section that points the model at the skill file,
 // so routing survives compaction. The setting is stored in the session and restored on resume and fork.
 // PI_HUGHY_MODE=1 starts new sessions with it on.
@@ -11,9 +11,9 @@ const ENTRY = "hughy-mode";
 
 const SKILL = (() => {
   try {
-    return join(dirname(dirname(realpathSync(fileURLToPath(import.meta.url)))), "skills/hughy-mode/SKILL.md");
+    return join(dirname(dirname(realpathSync(fileURLToPath(import.meta.url)))), "skills/hughy-router/SKILL.md");
   } catch {
-    return "~/dev/hworks/skills/hughy-mode/SKILL.md";
+    return "~/dev/hworks/skills/hughy-router/SKILL.md";
   }
 })();
 
@@ -37,7 +37,7 @@ export default function (pi: any) {
   });
 
   pi.registerCommand("hughy-mode", {
-    description: "on|off|status: keep the hughy-mode skill in force for this session (no argument toggles)",
+    description: "on|off|status: keep the hughy-router skill in force for this session (no argument toggles)",
     handler: async (arg: string, ctx: any) => {
       const a = (arg ?? "").trim();
       if (a === "status") {

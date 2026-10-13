@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Apply a model profile: write each agent role's model to pi settings (subagents.agentOverrides.<role>.model)
-# and record the profile so hughy-mode can read its slots. Profiles come from models.conf and models.d/*.conf.
+# and record the profile so hughy-router can read its slots. Profiles come from models.conf and models.d/*.conf.
 # usage: models.sh show
 #        models.sh <profile>
 set -euo pipefail

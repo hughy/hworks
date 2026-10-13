@@ -1,11 +1,11 @@
 ---
 name: review-loop
-description: Run one coder change and its review to a verdict as a single pi-subagents workflow. coder implements a brief under a gate, reviewers check the branch diff, and blocking findings go back to a fresh coder until the review is clean or the round cap hits. Use for the coder plus review cycle in hughy-mode Fix and Build.
+description: Run one coder change and its review to a verdict as a single pi-subagents workflow. coder implements a brief under a gate, reviewers check the branch diff, and blocking findings go back to a fresh coder until the review is clean or the round cap hits. Use for the coder plus review cycle in hughy-router Fix and Build.
 ---
 
 # review-loop
 
-Use it when a hughy-mode Fix or Build step is one `coder` run plus its review. It replaces a hand-written workflow per round. It needs pi with pi-subagents. On other harnesses, run the cycle by hand.
+Use it when a hughy-router Fix or Build step is one `coder` run plus its review. It replaces a hand-written workflow per round. It needs pi with pi-subagents. On other harnesses, run the cycle by hand.
 
 For a review-only pass over one or more targets (PRs, plans) with no coder, use `review-fanout` (`../review-fanout/SKILL.md`).
 

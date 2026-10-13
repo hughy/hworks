@@ -1,9 +1,9 @@
 ---
-name: hughy-mode
-description: Entry point for non-trivial engineering work. Routes a task to one of six routes (investigate, fix, build, measure, ship, long run). Each route starts from a goal, effort, and verify brief, with pstack playbooks as references and the hworks deltas applied. Use for /hughy-mode, "do this rigorously", or any task with a check that can pass or fail.
+name: hughy-router
+description: Entry point for non-trivial engineering work. Routes a task to one of six routes (investigate, fix, build, measure, ship, long run). Each route starts from a goal, effort, and verify brief, with pstack playbooks as references and the hworks deltas applied. Use for /skill:hughy-router (one task) or /hughy-mode on (every turn), "do this rigorously", or any task with a check that can pass or fail.
 ---
 
-# hughy-mode
+# hughy-router
 
 On pi, read `../../adapters/pi.md` once per session before following any playbook. It maps Cursor terms in pstack text to pi mechanisms and names the agent for each role. Then read every file in `../../adapters/local/` if it exists; local adapters map the generic terms below to this harness's tools and win where they conflict. On Claude Code and Codex only the skills load: the roles named below map to that harness's own subagent, and `adapters/pi.md` does not apply.
 
