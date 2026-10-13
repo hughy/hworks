@@ -315,6 +315,23 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(st["state"], "stale")
         self.assertIn("reviewed head", st["reason"])
 
+    def test_status_rederives_stale_for_pr_open_unit(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A")
+        head = self.commit("A")
+        self.g("record", "A", "1", self.workflow("clean", "wf-1", head))
+        self.g("set", "A", "pr-open", "--reason", "draft PR")
+        self.assertEqual(json.loads(self.g("status", "--json"))[0]["state"], "pr-open")
+        self.commit("A", "later.txt")
+        st = json.loads(self.g("status", "--json"))[0]
+        self.assertEqual(st["state"], "stale")
+        self.assertIn("reviewed head", st["reason"])
+        sh(self.wt("A"), "reset", "-q", "--soft", "HEAD~1")
+        st = json.loads(self.g("status", "--json"))[0]
+        self.assertEqual(st["state"], "stale")
+        self.assertIn("uncommitted", st["reason"])
+
     def test_reviewer_without_structured_output_prevents_clean(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])

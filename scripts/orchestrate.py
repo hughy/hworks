@@ -699,7 +699,7 @@ def cmd_status(store, a):
     out = []
     for r in rows:
         state, reason = r["state"], r["reason"]
-        if state == "clean":
+        if state in ("clean", "pr-open"):
             stale = freshness(cfg, r, r["head"])
             if stale:
                 state, reason = "stale", stale
