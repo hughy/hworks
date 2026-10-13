@@ -157,6 +157,18 @@ fi
 grep -q '"path":"/x/".*"file":null.*"error":"load failed: [^;]*ERR_CONNECTION_REFUSED' "$work/refused.jsonl" || { echo "shot: refused connection not reported:" >&2; cat "$work/refused.jsonl" >&2; exit 1; }
 [[ -z "$(ls -A "$work/refused")" ]] || { echo "shot: refused connection wrote a file: $(ls "$work/refused")" >&2; exit 1; }
 
+# A server that accepts the connection and never answers leaves the page at about:blank, so only the load error counts.
+t0=$(python3 -c 'import time; print(time.time())')
+if node "$shot" "http://127.0.0.1:$hang_port" --path /x/ --viewports 800x600 --settle 0 --timeout 1500 --out "$work/silent" >"$work/silent.jsonl" 2>"$work/silent.err"; then
+  echo "shot: a server that never answers exited 0" >&2; exit 1
+fi
+elapsed=$(python3 -c 'import sys, time; print(int((time.time() - float(sys.argv[1])) * 1000))' "$t0")
+grep -q '"path":"/x/".*"file":null,"scrollWidth":null,.*"error":"load failed: [^;]*Timeout[^;]*"}$' "$work/silent.jsonl" \
+  || { echo "shot: silent server not reported as a load error alone:" >&2; cat "$work/silent.jsonl" >&2; exit 1; }
+[[ -z "$(ls -A "$work/silent")" ]] || { echo "shot: silent server wrote a file: $(ls "$work/silent")" >&2; exit 1; }
+# Browser launch takes part of the budget; a capture attempt would add two more 1500 ms timeouts.
+(( elapsed < 4000 )) || { echo "shot: silent server took $elapsed ms" >&2; exit 1; }
+
 # A main thread that never yields blocks page.evaluate, which has no timeout of its own.
 mkdir -p "$site/busy"
 cat >"$site/busy/index.html" <<'EOF'

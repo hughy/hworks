@@ -17,7 +17,7 @@ const usage = `usage: node shot.mjs <base-url> [options]
   --viewports <list>      comma-separated WxH sizes (default: 1280x800,1920x1080)
   --wait-for <selector>   wait until the selector is visible before the shot
   --settle <ms>           extra wait after load and selector (default: 500)
-  --timeout <ms>          limit for page load, --wait-for, and the screenshot (default: 30000)
+  --timeout <ms>          limit for page load, --wait-for, the measurement, and the screenshot (default: 30000)
   --local-storage k=v     set localStorage k to the text v before the page's scripts run; repeatable
   --full-page             capture the whole scrollable page instead of the viewport
   --out <dir>             output directory (default: a new temp dir)
@@ -160,8 +160,9 @@ async function shoot(browser, opts, target, viewport) {
       response = await page.goto(target.url, { waitUntil: "load", timeout: opts.timeout });
     } catch (e) {
       errors.push(`load failed: ${firstLine(e)}`);
-      // After a timeout the page usually shows what has rendered so far; other failures leave only Chrome's error page.
-      capture = e.name === "TimeoutError";
+      // After a timeout the page shows what has rendered so far, but only if the main document arrived; otherwise the
+      // page is still about:blank. Other failures leave only Chrome's error page.
+      capture = e.name === "TimeoutError" && page.url() !== "about:blank";
     }
     if (response && response.status() >= 400) errors.push(`HTTP ${response.status()}`);
     if (!errors.length && opts.waitFor) {
