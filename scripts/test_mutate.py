@@ -436,7 +436,7 @@ class MutateTest(unittest.TestCase):
         git(self.repo, "commit", "-q", "-m", "go")
         return os.path.join(self.repo, "sum.go")
 
-    def test_explicit_overlay_passes_goflags_through_a_wrapper(self):
+    def test_go_mutant_overlays_through_a_wrapper(self):
         path = self.go_module()
         st, before = os.stat(path), read(path)
         # Stands in for a wrapper such as make: it sees only GOFLAGS and reports a compile failure.
@@ -446,13 +446,59 @@ class MutateTest(unittest.TestCase):
                    "print(open(copy).read())\n"
                    "print('FAIL\\tex [build failed]' if 'a +)' in open(copy).read() else '--- FAIL: TestSum')\n"
                    "sys.exit(1)"]
-        out = self.results({"test": wrapper, "mode": "overlay", "mutants": [
+        out = self.results({"test": wrapper, "mutants": [
             {"name": "minus", "file": "sum.go", "old": "a + b", "new": "a - b"},
             {"name": "broken", "file": "sum.go", "old": "a + b", "new": "a +)"},
         ]}, "--no-baseline", code=1)
         self.assertEqual([(r["verdict"], r["mode"]) for r in out], [("killed", "overlay"), ("build-error", "overlay")])
         self.assertIn("a - b", read(out[0]["log"]).decode())
         self.assertEqual((read(path), os.stat(path).st_mtime_ns), (before, st.st_mtime_ns))
+
+    def test_explicit_overlay_refuses_a_non_go_file_instead_of_writing_it(self):
+        r = self.one({"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b", "mode": "overlay"}, code=2)
+        self.assertEqual((r["verdict"], r["mode"]), ("invalid", "overlay"))
+        self.assertIn("only .go files", r["reason"])
+        self.assertEqual(read(self.calc), CALC.encode())
+
+    def test_mixed_go_and_python_mutant_runs_in_place_and_reads_go_build_errors(self):
+        path = self.go_module()
+        seen = os.path.join(self.tmp, "seen")
+        # Stands in for go build: it sees the mutant in the worktree and prints a compile error for it.
+        fake = [sys.executable, "-c", "import os, shutil, sys\n"
+                "assert '-overlay' not in os.environ.get('GOFLAGS', '')\n"
+                "shutil.copy('sum.go', sys.argv[1])\n"
+                "if 'a +)' in open('sum.go').read():\n"
+                "    print('# ex\\n./sum.go:3:31: syntax error: unexpected )')\n"
+                "else:\n"
+                "    print('--- FAIL: TestSum (0.00s)')\n"
+                "sys.exit(1)", seen]
+        out = self.results({"test": fake, "mutants": [
+            {"name": "broken", "files": [{"file": "sum.go", "old": "a + b", "new": "a +)"},
+                                         {"file": "calc.py", "old": "a + b", "new": "a - b"}]},
+            {"name": "minus", "files": [{"file": "sum.go", "old": "a + b", "new": "a - b"},
+                                        {"file": "calc.py", "old": "x * 2", "new": "x * 3"}]},
+        ]}, "--no-baseline", code=1)
+        self.assertEqual([(r["verdict"], r["mode"]) for r in out], [("build-error", "in-place"), ("killed", "in-place")])
+        self.assertIn(b"a - b", read(seen))
+        self.assertIn(b"a + b", read(path))
+        self.assertEqual(read(self.calc), CALC.encode())
+
+    def test_python_mutant_with_go_words_in_a_shell_test_runs_in_place(self):
+        test = "echo 'go test ./...' >/dev/null; %s check.py" % sys.executable
+        [r] = self.results({"test": test, "mutants": [{"name": "minus", "file": "calc.py", "old": "a + b",
+                                                       "new": "a - b"}]}, code=0)
+        self.assertEqual((r["verdict"], r["mode"]), ("killed", "in-place"))
+        self.assertEqual(read(self.calc), CALC.encode())
+
+    def test_auto_mode_follows_the_changed_files(self):
+        def mode(*files, test="go test ./..."):
+            return mutate.resolve_mode({"mode": "auto", "test": test, "changes": [{"file": f} for f in files]})
+        self.assertEqual(mode("a.go"), "overlay")
+        self.assertEqual(mode("a.go", "a_test.go", test="make test"), "overlay")
+        self.assertEqual(mode("a.go", test=["bash", "-co", "pipefail", "-c", "go test ."]), "overlay")
+        self.assertEqual(mode("a.go", "a.py"), "in-place")
+        self.assertEqual(mode("a.py", test="go test ./..."), "in-place")
+        self.assertEqual(mode("go.mod"), "in-place")
 
     def test_overlay_run_waits_for_an_in_place_run(self):
         path = self.go_module()
@@ -463,8 +509,9 @@ class MutateTest(unittest.TestCase):
                 "o = re.search(r'-overlay=(\\S+)', os.environ['GOFLAGS']).group(1)\n"
                 "[copy] = set(json.load(open(o))['Replace'].values())\n"
                 "print(open(copy).read()); print('--- FAIL: TestSum'); sys.exit(1)"]
-        first = {"test": hold, "mutants": [{"name": "a", "file": "sum.go", "old": "a + b", "new": "a * b"}]}
-        second = {"test": show, "mode": "overlay",
+        first = {"test": hold, "mode": "in-place",
+                 "mutants": [{"name": "a", "file": "sum.go", "old": "a + b", "new": "a * b"}]}
+        second = {"test": show,
                   "mutants": [{"name": "b", "file": "sum.go", "old": "a + b", "new": "a - b"}]}
         procs = []
         for spec in (first, second):
@@ -633,52 +680,37 @@ class MutateTest(unittest.TestCase):
 
 class ClassifyTest(unittest.TestCase):
     def test_non_go_nonzero_is_killed(self):
-        self.assertEqual(mutate.classify(1, "anything", set())[0], "killed")
-        self.assertEqual(mutate.classify(0, "--- FAIL", {"test"})[0], "survived")
+        self.assertEqual(mutate.classify(1, "anything", False)[0], "killed")
+        self.assertEqual(mutate.classify(1, "# ex\n./a.go:5:2: undefined: x\nFAIL\tex [build failed]\n", False)[0],
+                         "killed")
+        self.assertEqual(mutate.classify(0, "--- FAIL", True)[0], "survived")
 
     def test_go_outputs(self):
         cases = [
             ("--- FAIL: TestSum (0.00s)\n    sum_test.go:9: got 4\nFAIL\nFAIL\tex/calc\t0.2s\nFAIL\n", "killed"),
+            ("go: downloading example.com/x v1.0.0\n--- FAIL: TestSum (0.00s)\nFAIL\n", "killed"),
             ("panic: boom\n\ngoroutine 1 [running]:\nFAIL\tex/calc\t0.1s\n", "killed"),
-            ("# ex/calc\ncalc/sum.go:4:9: syntax error\nFAIL\tex/calc [build failed]\nFAIL\n", "build-error"),
+            ("# ex/calc\ncalc/sum.go:4:9: syntax error\nFAIL\tex/calc [build failed]\n", "build-error"),
             ("FAIL\tex/calc [setup failed]\n", "build-error"),
             ("go: cannot find main module\n", "build-error"),
             ("--- FAIL: TestA\nFAIL\tex/a\t0.1s\nFAIL\tex/b [build failed]\n", "build-error"),
+            ("# ex/p\np/a.go:3:26: syntax error: unexpected ), expected expression\n", "build-error"),
+            ("found packages p (a.go) and q (b.go) in /x/p\n", "build-error"),
+            ("p/c.go:2:8: package nope/x is not in std\n", "build-error"),
+            ("go test ./calc\nmake: *** [Makefile:2: test] Error 1\n", "killed"),
+            ("    sum_test.go:9: got 4\nexit status 1\n", "killed"),
+            ("go: downloading example.com/x v1.0.0\nAssertionError\n", "killed"),
         ]
         for output, want in cases:
-            self.assertEqual(mutate.classify(1, output, {"test"})[0], want, output)
+            self.assertEqual(mutate.classify(1, output, True)[0], want, output)
 
-    def test_go_vet_and_build(self):
-        self.assertEqual(mutate.classify(1, "# ex\n./a.go:5:2: Printf format %d\n", {"vet"})[0], "killed")
-        self.assertEqual(mutate.classify(1, "# ex\nvet: ./a.go:5:2: undefined: x\n", {"vet"})[0], "build-error")
-        self.assertEqual(mutate.classify(1, "# ex\n./a.go:5:2: undefined: x\n", {"build"})[0], "build-error")
-
-    def test_go_subcommands(self):
-        self.assertEqual(mutate.go_subcommands(["go", "test", "./..."]), {"test"})
-        self.assertEqual(mutate.go_subcommands("cd x && /usr/local/go/bin/go vet ./... && go build ."),
-                         {"vet", "build"})
-        self.assertEqual(mutate.go_subcommands(["go", "-C", "/tmp/x", "test", "."]), {"test"})
-        self.assertEqual(mutate.go_subcommands("go --C=sub vet ./..."), {"vet"})
-        self.assertEqual(mutate.go_subcommands(["go", "-C", "test", "mod", "tidy"]), set())
-        self.assertEqual(mutate.go_subcommands("go test; echo done"), {"test"})
-        self.assertEqual(mutate.go_subcommands("cd x&&go vet ./...|tee log"), {"vet"})
-        self.assertEqual(mutate.go_subcommands(["go", "-C", "sub", "-x", "build", "."]), {"build"})
-        self.assertEqual(mutate.go_subcommands(["bash", "-c", "go test ./..."]), {"test"})
-        self.assertEqual(mutate.go_subcommands(["sh", "-lc", "cd sub && go -C . test ./..."]), {"test"})
-        self.assertEqual(mutate.go_subcommands("bash -c 'go build ./...'"), {"build"})
-        self.assertEqual(mutate.go_subcommands("make test"), set())
-        self.assertEqual(mutate.go_subcommands(["python3", "-m", "pytest"]), set())
-        self.assertEqual(mutate.go_subcommands(["python3", "-c", "assert f(), 'go test failed'"]), set())
-        self.assertEqual(mutate.go_subcommands("python3 -c \"print('go build .')\""), set())
-        self.assertEqual(mutate.go_subcommands(["bash", "script.sh", "go test ./..."]), set())
-        self.assertEqual(mutate.go_subcommands(["bash", "-o", "pipefail", "-c", "go test ./..."]), {"test"})
-        self.assertEqual(mutate.go_subcommands(["bash", "-euo", "pipefail", "-c", "go vet ."]), {"vet"})
-        self.assertEqual(mutate.go_subcommands(["/bin/sh", "-e", "-c", "go build ."]), {"build"})
-        self.assertEqual(mutate.go_subcommands(["bash", "-co", "pipefail", "go test ."]), {"test"})
-        self.assertEqual(mutate.go_subcommands(["bash", "-ceuo", "pipefail", "go vet ."]), {"vet"})
-        self.assertEqual(mutate.go_subcommands(["bash", "-oc", "pipefail", "go build ."]), {"build"})
-        self.assertEqual(mutate.go_subcommands(["bash", "-ooc", "pipefail", "errexit", "go test ."]), {"test"})
-        self.assertEqual(mutate.go_subcommands("bash -co pipefail 'go test ./...'"), {"test"})
+    def test_go_vet_output(self):
+        # A vet finding and a compile error print the same diagnostic, so both are build-error.
+        self.assertEqual(mutate.classify(1, "# ex/p\np/a.go:5:24: fmt.Printf format %d has arg\n", True)[0],
+                         "build-error")
+        self.assertEqual(mutate.classify(1, "# ex/p\nvet: p/a.go:3:23: undefined: x\n", True)[0], "build-error")
+        self.assertEqual(mutate.classify(1, "# ex/p\n# [ex/p]\np/a_test.go:3:35: Logf format %d\n"
+                                            "FAIL\tex/p [build failed]\n", True)[0], "build-error")
 
 
 @unittest.skipUnless(shutil.which("go"), "go is not on PATH")
@@ -715,28 +747,41 @@ class GoOverlayTest(unittest.TestCase):
         self.assertEqual((read(watch), st.st_mtime_ns, st.st_ino), before, "the worktree file changed")
         return json.loads(p.stdout)
 
-    def test_go_chdir_flag_still_uses_overlay(self):
-        out = self.run_spec([
-            {"name": "minus", "file": "calc/sum.go", "old": "a + b", "new": "a - b"},
-            {"name": "broken", "file": "calc/sum.go", "old": "a + b", "new": "a +"},
-        ], 1, test=["go", "-C", self.repo, "test", "./calc"])
-        self.assertEqual([(r["verdict"], r["mode"]) for r in out], [("killed", "overlay"), ("build-error", "overlay")])
+    def test_syntax_error_is_build_error_behind_any_wrapper(self):
+        makefile = os.path.join(self.tmp, "Makefile")
+        write(makefile, "test:\n\tgo test ./calc\n")
+        commands = [("go test", ["go", "test", "./calc"]),
+                    ("go -C", ["go", "-C", self.repo, "test", "./calc"]),
+                    ("bash -co", ["bash", "-co", "pipefail", "-c", "go test ./calc | cat"])]
+        if shutil.which("make"):
+            commands.append(("make", ["make", "-s", "-f", makefile, "test"]))
+        if shutil.which("zsh"):
+            commands.append(("zsh", ["zsh", "-oerrexit", "-c", "go test ./calc; exit $?"]))
+        for label, test in commands:
+            out = self.run_spec([
+                {"name": "minus", "file": "calc/sum.go", "old": "a + b", "new": "a - b"},
+                {"name": "broken", "file": "calc/sum.go", "old": "a + b", "new": "a +"},
+            ], 1, test=test)
+            self.assertEqual([(r["verdict"], r["mode"]) for r in out],
+                             [("killed", "overlay"), ("build-error", "overlay")], label)
 
-    def test_go_through_a_shell_still_uses_overlay(self):
-        out = self.run_spec([
-            {"name": "minus", "file": "calc/sum.go", "old": "a + b", "new": "a - b"},
-            {"name": "broken", "file": "calc/sum.go", "old": "a + b", "new": "a +"},
-        ], 1, test=["bash", "-c", "go test ./calc; exit $?"])
-        self.assertEqual([(r["verdict"], r["mode"]) for r in out], [("killed", "overlay"), ("build-error", "overlay")])
-
-    def test_go_command_refuses_a_non_go_file_instead_of_writing_it(self):
-        data = os.path.join(self.repo, "calc", "data.txt")
-        write(data, "one\n")
+    def test_mixed_go_and_python_mutant_runs_in_place(self):
+        helper = os.path.join(self.repo, "calc", "helper.py")
+        write(helper, "X = 1\n")
         git(self.repo, "add", ".")
-        git(self.repo, "commit", "-q", "-m", "data")
-        [r] = self.run_spec([{"name": "data", "file": "calc/data.txt", "old": "one", "new": "two"}], 2, watch=data)
-        self.assertEqual((r["verdict"], r["mode"]), ("invalid", "overlay"))
-        self.assertIn("only .go files", r["reason"])
+        git(self.repo, "commit", "-q", "-m", "helper")
+        spec = {"test": ["go", "test", "./calc"], "mutants": [
+            {"name": "broken", "files": [{"file": "calc/sum.go", "old": "a + b", "new": "a +"},
+                                         {"file": "calc/helper.py", "old": "1", "new": "2"}]},
+            {"name": "minus", "files": [{"file": "calc/sum.go", "old": "a + b", "new": "a - b"},
+                                        {"file": "calc/helper.py", "old": "1", "new": "2"}]}]}
+        p = subprocess.run([sys.executable, SCRIPT, "--json", "-"], input=json.dumps(spec), text=True,
+                           capture_output=True, cwd=self.repo, env=self.env, timeout=300)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertEqual([(r["verdict"], r["mode"]) for r in json.loads(p.stdout)],
+                         [("build-error", "in-place"), ("killed", "in-place")])
+        self.assertEqual(read(self.sum), self.SUM.encode())
+        self.assertEqual(read(helper), b"X = 1\n")
 
     def test_overlay_kills_without_touching_worktree(self):
         [r] = self.run_spec([{"name": "minus", "file": "calc/sum.go", "old": "a + b", "new": "a - b"}], 0)

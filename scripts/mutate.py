@@ -23,24 +23,23 @@ exactly once and differ from "new") or a whole file taken from git ("rev": the c
 
 Modes:
   overlay   The mutated files go to the scratch dir and the command runs with GOFLAGS=-overlay=<json>,
-            so the worktree is never written. auto picks it whenever the command runs go test, go vet,
-            or go build, as an argv list, a shell string, or the -c script of sh, bash, zsh, dash,
-            ksh, mksh, or ash such as ["bash", "-c", "go test ./..."]. A Go run behind any other
-            wrapper (make test, a script) is not detected: set "mode": "overlay" so the wrapper's go
-            command inherits GOFLAGS and compile failures count as build-error. Only .go files can be
-            overlaid; a mutant of any other file is invalid in this mode rather than written in place.
+            so the worktree is never written. auto picks it when every changed file ends in .go, whatever
+            the command: GOFLAGS reaches the go command behind any wrapper (make, a shell, a script).
+            Only .go files can be overlaid; a mutant of any other file is invalid in this mode rather
+            than written in place. A test that reads .go sources without the go command (a code
+            generator, a linter test) sees no overlay: set "mode": "in-place" for it.
   in-place  The mutated files are written over the originals, the command runs, and the original bytes
             are restored, also on SIGINT and SIGTERM, after every process the command started
-            has been stopped. Backups stay in the scratch dir. A symlink is followed to its target. A
-            target with uncommitted changes, or marked assume-unchanged or skip-worktree, is refused
-            unless --allow-dirty is passed. In-place runs
-            on the same git worktree wait for each other, so one never reads another's mutant as the
-            original. Timestamps only move forward: the mutant's mtime is a whole second later than
-            the original's and than the time of the swap, and the restored file's is a whole second
-            later than the mutant's and than the time of the restore, so any cache keyed on source
-            mtime (Python .pyc, make) sees a change both ways. Either may sit up to two seconds in
-            the future. Python bytecode for each run also goes to a fresh dir under the scratch dir
-            (PYTHONPYCACHEPREFIX).
+            has been stopped. auto picks it when any changed file does not end in .go. Backups stay in
+            the scratch dir. A symlink is followed to its target. A target with uncommitted changes,
+            or marked assume-unchanged or skip-worktree, is refused unless --allow-dirty is passed.
+            In-place runs on the same git worktree wait for each other, so one never reads another's
+            mutant as the original. Timestamps only move forward: the mutant's mtime is a whole second
+            later than the original's and than the time of the swap, and the restored file's is a
+            whole second later than the mutant's and than the time of the restore, so any cache keyed
+            on source mtime (Python .pyc, make) sees a change both ways. Either may sit up to two
+            seconds in the future. Python bytecode for each run also goes to a fresh dir under the
+            scratch dir (PYTHONPYCACHEPREFIX).
 
 Overlay runs take a shared lock on the same worktree lock, so they wait for an in-place run there and
 never read its mutant as the original; overlay runs do not wait for each other.
@@ -51,9 +50,18 @@ a mutant proves nothing and its mutants are invalid. --no-baseline skips this.
 Verdicts, one line per mutant on stdout (--json prints a list of objects instead):
   killed       the command exited nonzero
   survived     the command exited zero
-  build-error  a Go command failed to compile or set up a package, or failed without a test failure
+  build-error  a changed file is .go and the output shows a Go package failed to build or set up
   invalid      the mutant cannot be applied (missing file, old not found or not unique, unknown rev,
                no-op change, dirty file), the command was not found, or the baseline failed
+
+The verdict reads the output, never the command. When any changed file is .go, in either mode, a
+nonzero exit is build-error if the output has go test's "[build failed]" or "[setup failed]". Without
+those, a Go test failure ("--- FAIL", "FAIL <pkg> <time>", "panic:") makes it killed; otherwise an
+unindented "file.go:L:C:" diagnostic, a "vet: " or "go: " error line, or "found packages" makes it
+build-error. Any other nonzero exit is killed. go vet prints its findings in the same "file.go:L:C:"
+form as a compile error, so a vet finding counts as build-error: this tool cannot prove a vet check
+catches a mutant, and it reports the miss (exit 1) rather than a false kill. go test reports its own
+vet findings as "[build failed]", with the same result.
 
 Exit codes: 0 every mutant killed, 1 a mutant survived or hit build-error, 2 bad input or an invalid
 mutant, 3 a file could not be restored (its backup path is printed), 128+N interrupted by signal N.
@@ -81,7 +89,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import shutil
 import signal
 import subprocess
@@ -89,12 +96,13 @@ import sys
 import tempfile
 import time
 
-GO_SUBCOMMANDS = {"test", "vet", "build"}
-SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "mksh", "ash"}
 MODES = {"auto", "overlay", "in-place"}
 BUILD_FAILED = re.compile(r"\[(?:build|setup) failed\]")
 TEST_FAILED = re.compile(r"--- FAIL|^FAIL\s+\S+\s+\d+(?:\.\d+)?s\s*$|^panic: ", re.M)
-GO_TOOL_ERROR = re.compile(r"^(?:go|vet): ", re.M)
+# Test log lines are indented and carry no column, so an unindented file.go:L:C: line is a diagnostic
+# from the compiler, the loader, or vet. "go: downloading" and similar progress lines are not errors.
+GO_BUILD_ERROR = re.compile(r"^(?:vet: |go: (?!downloading |finding |extracting )|found packages |[^\s:]+\.go:\d+:\d+: )",
+                            re.M)
 CAUGHT = (signal.SIGINT, signal.SIGTERM)
 NS = 10 ** 9
 STOP_GRACE = 3
@@ -220,56 +228,14 @@ def load_spec(text):
     return os.path.abspath(cwd), mutants
 
 
-def shell_tokens(text):
-    lex = shlex.shlex(text, posix=True, punctuation_chars=True)
-    lex.whitespace_split = True
-    try:
-        return list(lex)
-    except ValueError:
-        return []
-
-
-def shell_script(tokens, j):
-    """The script a shell runs from argv tokens[j:] (its options, then the -c operand), or None."""
-    has_c = False
-    while j < len(tokens) and tokens[j][:1] in ("-", "+") and tokens[j] not in ("-", "--"):
-        flag = tokens[j]
-        j += 1
-        if flag.startswith("--"):
-            continue
-        letters = flag[1:]
-        if "c" in letters:
-            has_c = True
-        # Each o or O in a group consumes the next word as its option name (bash -oc pipefail 'cmd').
-        j += letters.count("o") + letters.count("O")
-    if j < len(tokens) and tokens[j] == "--":
-        j += 1
-    return tokens[j] if has_c and j < len(tokens) else None
-
-
-def go_subcommands(cmd, depth=0):
-    tokens = shell_tokens(cmd) if isinstance(cmd, str) else cmd
-    found = set()
-    for i, tok in enumerate(tokens):
-        if os.path.basename(tok) in SHELLS and depth < 3:
-            script = shell_script(tokens, i + 1)
-            if script is not None:
-                found |= go_subcommands(script, depth + 1)
-        if os.path.basename(tok) != "go":
-            continue
-        j = i + 1
-        while j < len(tokens) and tokens[j].startswith("-"):
-            # -C takes a separate value; any other flag before the subcommand is taken as boolean.
-            j += 2 if tokens[j] in ("-C", "--C") else 1
-        if j < len(tokens) and tokens[j] in GO_SUBCOMMANDS:
-            found.add(tokens[j])
-    return found
+def is_go(m):
+    return any(c["file"].endswith(".go") for c in m["changes"])
 
 
 def resolve_mode(m):
     if m["mode"] != "auto":
         return m["mode"]
-    return "overlay" if go_subcommands(m["test"]) else "in-place"
+    return "overlay" if all(c["file"].endswith(".go") for c in m["changes"]) else "in-place"
 
 
 def git(cwd, *args):
@@ -423,18 +389,18 @@ def run(cmd, cwd, env, log_path):
     return code, output
 
 
-def classify(code, output, go_kinds):
+def classify(code, output, go):
     if code == 0:
         return "survived", None
-    if not go_kinds:
+    if not go:
         return "killed", None
     if BUILD_FAILED.search(output):
         return "build-error", "a package failed to build"
     if TEST_FAILED.search(output):
         return "killed", None
-    if "vet" in go_kinds and not GO_TOOL_ERROR.search(output):
-        return "killed", None
-    return "build-error", "the go command failed without a test failure"
+    if GO_BUILD_ERROR.search(output):
+        return "build-error", "the go command reported a build, setup, or vet error"
+    return "killed", None
 
 
 def later_mtime(prev_ns):
@@ -526,10 +492,7 @@ def run_mutant(index, m, cwd, scratch, args, baselines):
     try:
         mode = resolve_mode(m)
         result["mode"] = mode
-        go_kinds = go_subcommands(m["test"])
         if mode == "overlay":
-            # An explicit overlay with an undetected command is a Go run behind a wrapper.
-            go_kinds = go_kinds or {"test"}
             for c in m["changes"]:
                 if not c["file"].endswith(".go"):
                     raise Invalid("%s: overlay mode replaces only .go files; set mode to in-place to edit it "
@@ -557,7 +520,7 @@ def run_mutant(index, m, cwd, scratch, args, baselines):
         code, output = runner(edits, m["test"], cwd, workdir, log_path)
         result["seconds"] = round(time.monotonic() - start, 2)
         result["exit"] = code
-        result["verdict"], result["reason"] = classify(code, output, go_kinds)
+        result["verdict"], result["reason"] = classify(code, output, is_go(m))
     except Invalid as e:
         result["verdict"], result["reason"] = "invalid", str(e)
     return result
