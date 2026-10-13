@@ -867,6 +867,17 @@ def decide(cfg, store, row, runs_dir):
     unknown = [e for e in entries if e["bound"] and e["liveness"] == "unknown"]
     if unknown:
         return act("hold", "%s; its liveness is unknown" % describe(unknown[0]))
+    brief = (read_json(args_path) or {}).get("brief")
+    # An ended run older than the latest bound one is harmless; binding it would supersede the newer run.
+    since = next((e["status"].get("startedAt") for e in entries if runs and e["run"] == runs[-1] and e["status"]), 0)
+    ended = [e for e in entries if e["kind"] == "workflow" and not e["bound"] and brief
+             and ((e["status"].get("workflow") or {}).get("args") or {}).get("brief") == brief
+             and not (isinstance(since, int) and isinstance(e["status"].get("startedAt"), int)
+                      and e["status"]["startedAt"] < since)]
+    if ended:
+        e = ended[0]
+        return act("hold", "workflow %s ran this attempt's args, ended %s, and is not bound; bind %s %d %s "
+                   "so its outcome is recorded" % (e["run"], e["state"], row["id"], row["attempt"], e["run"]))
     commits = ""
     if row["start_head"]:
         _, commits, _ = git(row["worktree"], "rev-list", "--count", row["start_head"] + "..HEAD")

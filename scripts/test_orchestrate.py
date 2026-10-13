@@ -848,6 +848,70 @@ class OrchestrateTest(unittest.TestCase):
             self.assertNotIn("sess-old", f.read())
         self.assertEqual(self.rows()["A"]["run"], "wf-1,wf-2")
 
+    def ended_workflow(self, run, uid, attempt, state="stopped"):
+        """A terminal workflow with no return value whose args are uid's stored args for attempt."""
+        args = orchestrate.read_json(os.path.join(self.store, "args", "%s-%d.json" % (uid, attempt)))
+
+        def edit(doc):
+            doc["state"] = state
+            doc["workflow"]["args"] = args
+        return self.stopped(run, child=None, edit=edit)
+
+    def test_launching_with_an_ended_unbound_workflow_for_the_attempt_holds(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.launch("A")
+        self.ended_workflow("wf-x", "A", 1, state="failed")
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("wf-x", out["reason"])
+        self.assertIn("bind A 1 wf-x", out["reason"])
+        self.assertNotIn("args_path", out)
+        self.g("bind", "A", "1", "wf-x")
+        self.assertEqual(self.reconcile()[0]["action"], "retry")
+
+    def test_running_with_a_newer_ended_unbound_workflow_for_the_attempt_holds(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        self.stopped("wf-1")
+        self.child("child-1", "wf-1", "A", self.dead_pid())
+        self.assertEqual(self.reconcile()[0]["action"], "retry")
+        self.ended_workflow("wf-2", "A", 1, state="failed")
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("bind A 1 wf-2", out["reason"])
+        self.assertNotIn("file", out)
+
+    def test_ended_unbound_workflow_older_than_the_bound_run_does_not_hold(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        head = self.commit("A")
+        self.workflow("unresolved", "wf-1", head)
+        bound_start = orchestrate.read_json(os.path.join(self.runs, "wf-1", "status.json"))["startedAt"]
+        path = self.ended_workflow("wf-0", "A", 1, state="failed")
+        doc = orchestrate.read_json(path)
+        doc["startedAt"] = bound_start - 1000
+        orchestrate.write_json(path, doc)
+        self.assertEqual(self.reconcile()[0]["action"], "record")
+        doc["startedAt"] = bound_start + 1000
+        orchestrate.write_json(path, doc)
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "hold", out)
+        self.assertIn("bind A 1 wf-0", out["reason"])
+
+    def test_ended_workflow_of_an_earlier_attempt_does_not_hold_the_next(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        status = self.ended_workflow("wf-1", "A", 1)
+        self.g("record", "A", "1", status)
+        self.assertEqual(self.rows()["A"]["state"], "run-failed")
+        self.launch("A")
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "relaunch-same-args", out)
+
     def test_set_refuses_live_attempt_except_parked(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
