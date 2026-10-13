@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bookkeeping for an agent graph: units driven through workflows/review-loop.js, one branch worktree each.
+"""Bookkeeping for orchestrate: units driven through workflows/review-loop.js, one branch worktree each.
 
 The CLI never launches agents, pushes, deletes a worktree or branch, or discards uncommitted work.
 A coordinator runs it, dispatches the workflow itself, and feeds results back with bind and record.
@@ -36,7 +36,7 @@ WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "block
 RETRYABLE = {"unresolved", "gate-failed", "review-failed", "run-failed"}
 ACCEPTED_UNMERGED = {"clean", "stale", "pr-open"}
 SET_TARGETS = {"parked", "abandoned", "queued", "pr-open", "merged"}
-# quick runs no reviewer and can return a result whose gate nobody verified, so the graph never uses it.
+# quick runs no reviewer and can return a result whose gate nobody verified, so orchestrate never uses it.
 EFFORTS = {"standard", "exhaustive"}
 EFFORT_ERROR = "effort must be standard or exhaustive (quick runs no reviewer)"
 RUNTIME_TERMINAL = {"complete", "completed", "failed", "stopped", "cancelled", "canceled", "error",
@@ -279,7 +279,7 @@ def cmd_import(store, a):
                 by_id[u["id"]] = r
             r["deps"] = ",".join(u.get("blockedBy") or [])
             r["paths"] = ",".join(u.get("paths") or [])
-            r["branch"] = u.get("branch") or "graph/" + u["id"]
+            r["branch"] = u.get("branch") or "orchestrate/" + u["id"]
             r["effort"] = u.get("effort") or cfg["effort"]
             r["claim"] = " | ".join(one_line(c) for c in u.get("claimedBy") or [])
         for r in rows:
@@ -1051,9 +1051,9 @@ def cmd_set(store, a):
 
 def parser():
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--store", default=argparse.SUPPRESS, help="graph store directory")
-    p = argparse.ArgumentParser(prog="graph.py", description=__doc__.split("\n")[0])
-    p.add_argument("--store", help="graph store directory")
+    common.add_argument("--store", default=argparse.SUPPRESS, help="orchestrate store directory")
+    p = argparse.ArgumentParser(prog="orchestrate.py", description=__doc__.split("\n")[0])
+    p.add_argument("--store", help="orchestrate store directory")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("init", parents=[common])
@@ -1123,10 +1123,10 @@ def main(argv=None):
     try:
         return COMMANDS[a.cmd](store, a) or 0
     except BadInput as e:
-        print("graph: %s" % e, file=sys.stderr)
+        print("orchestrate: %s" % e, file=sys.stderr)
         return 2
     except Refused as e:
-        print("graph: refused: %s" % e, file=sys.stderr)
+        print("orchestrate: refused: %s" % e, file=sys.stderr)
         return 3
 
 

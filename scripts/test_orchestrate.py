@@ -11,10 +11,10 @@ import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GRAPH = os.path.join(HERE, "graph.py")
-FIXTURES = os.path.join(HERE, "testdata", "graph")
+SCRIPT = os.path.join(HERE, "orchestrate.py")
+FIXTURES = os.path.join(HERE, "testdata", "orchestrate")
 sys.path.insert(0, HERE)
-import graph  # noqa: E402
+import orchestrate  # noqa: E402
 
 
 def sh(cwd, *args):
@@ -23,9 +23,9 @@ def sh(cwd, *args):
     return p.stdout.strip()
 
 
-class GraphTest(unittest.TestCase):
+class OrchestrateTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="graph-test-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orchestrate-test-"))
         self.addCleanup(shutil.rmtree, self.tmp)
         self.repo = os.path.join(self.tmp, "repo")
         os.makedirs(self.repo)
@@ -47,9 +47,9 @@ class GraphTest(unittest.TestCase):
     # ---------- helpers ----------
 
     def g(self, *args, code=0, timeout=60):
-        p = subprocess.run([sys.executable, GRAPH, "--store", self.store] + list(args), capture_output=True,
+        p = subprocess.run([sys.executable, SCRIPT, "--store", self.store] + list(args), capture_output=True,
                            text=True, env=self.env, timeout=timeout)
-        self.assertEqual(p.returncode, code, "graph %s\nstdout: %s\nstderr: %s" % (args, p.stdout, p.stderr))
+        self.assertEqual(p.returncode, code, "orchestrate %s\nstdout: %s\nstderr: %s" % (args, p.stdout, p.stderr))
         return p.stdout
 
     def init(self, *extra):
@@ -64,7 +64,7 @@ class GraphTest(unittest.TestCase):
         return self.g("import", path)
 
     def rows(self):
-        return {r["id"]: r for r in graph.read_rows(self.store)}
+        return {r["id"]: r for r in orchestrate.read_rows(self.store)}
 
     def next(self, n=3):
         return json.loads(self.g("next", "--max", str(n), "--json"))["selected"]
@@ -112,7 +112,7 @@ class GraphTest(unittest.TestCase):
         """The stopped fixture, with its one child reference renamed to child, or removed when child is None."""
         def rename(doc):
             doc["sessionId"] = "sess-1"
-            doc["workflow"]["scriptDigest"] = graph.file_sha256(graph.DEFAULT_WORKFLOW)
+            doc["workflow"]["scriptDigest"] = orchestrate.file_sha256(orchestrate.DEFAULT_WORKFLOW)
             for ref in doc["steps"] + doc["workflowChildren"]["children"]:
                 ref["runId"] = child
             if child is None:
@@ -174,7 +174,7 @@ class GraphTest(unittest.TestCase):
         self.assertIn("https://example.test/A", acceptance)
         self.assertNotIn("commit", acceptance.lower())
         self.assertIn("Commit on this branch", process)
-        self.assertEqual(sh(self.wt("A"), "symbolic-ref", "--short", "HEAD"), "graph/A")
+        self.assertEqual(sh(self.wt("A"), "symbolic-ref", "--short", "HEAD"), "orchestrate/A")
         r = self.rows()["A"]
         self.assertEqual((r["state"], r["start_head"]), ("launching", sh(self.repo, "rev-parse", "main")))
 
@@ -340,7 +340,7 @@ class GraphTest(unittest.TestCase):
     def test_adopting_dirty_existing_worktree_blocks(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
-        sh(self.repo, "worktree", "add", "-q", "-b", "graph/A", self.wt("A"), "main")
+        sh(self.repo, "worktree", "add", "-q", "-b", "orchestrate/A", self.wt("A"), "main")
         with open(os.path.join(self.wt("A"), "dirt"), "w") as f:
             f.write("x")
         out = self.launch("A", "--adopt", code=3)
@@ -355,18 +355,18 @@ class GraphTest(unittest.TestCase):
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         sh(self.repo, "worktree", "add", "-q", "-b", "other", self.wt("A"), "main")
         out = self.launch("A", "--adopt", code=3)
-        self.assertIn("expected branch graph/A", out["reason"])
+        self.assertIn("expected branch orchestrate/A", out["reason"])
         self.assertFalse(os.path.isdir(os.path.join(self.store, "args")))
 
     def test_existing_worktree_is_refused_without_adopt(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}, {"id": "B", "title": "b", "paths": ["b/*"]}])
-        sh(self.repo, "worktree", "add", "-q", "-b", "graph/A", self.wt("A"), "main")
+        sh(self.repo, "worktree", "add", "-q", "-b", "orchestrate/A", self.wt("A"), "main")
         os.makedirs(self.wt("B"))
         with open(os.path.join(self.store, "units.tsv"), "rb") as f:
             tsv = f.read()
         for uid in ("A", "B"):
-            p = subprocess.run([sys.executable, GRAPH, "--store", self.store, "launch", uid, "--max", "2"],
+            p = subprocess.run([sys.executable, SCRIPT, "--store", self.store, "launch", uid, "--max", "2"],
                                capture_output=True, text=True, env=self.env)
             self.assertEqual((p.returncode, p.stdout), (3, ""), p.stderr)
             self.assertIn(self.wt(uid), p.stderr)
@@ -389,7 +389,7 @@ class GraphTest(unittest.TestCase):
     def test_adopting_clean_existing_worktree_on_branch_launches(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
-        sh(self.repo, "worktree", "add", "-q", "-b", "graph/A", self.wt("A"), "main")
+        sh(self.repo, "worktree", "add", "-q", "-b", "orchestrate/A", self.wt("A"), "main")
         head = self.commit("A")
         spec = self.launch("A", "--adopt")
         self.assertTrue(os.path.exists(spec["args_path"]))
@@ -415,7 +415,7 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(self.next(), [])
         self.g("set", "A", "merged", "--reason", "landed")
         self.assertEqual(self.next(), [], "head not yet in main")
-        sh(self.repo, "merge", "-q", "--ff-only", "graph/A")
+        sh(self.repo, "merge", "-q", "--ff-only", "orchestrate/A")
         self.assertEqual(self.next(), ["B"])
 
     def test_exclusive_scheduling_without_paths(self):
@@ -645,9 +645,9 @@ class GraphTest(unittest.TestCase):
         with open(workflow, "w") as f:
             f.write("v1\n")
         launch_path = os.path.join(self.store, "args", "A-1.launch.json")
-        old = graph.read_json(launch_path)
+        old = orchestrate.read_json(launch_path)
         del old["workflow_sha256"]
-        graph.write_json(launch_path, old)
+        orchestrate.write_json(launch_path, old)
         out = json.loads(self.g(*reconcile))[0]
         self.assertEqual(out["action"], "hold", "a launch without a recorded digest: %s" % out)
         self.assertEqual(spec["workflow"], workflow)
@@ -718,9 +718,9 @@ class GraphTest(unittest.TestCase):
         self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs, code=3)
         self.assertEqual(self.rows()["A"]["state"], "parked")
         self.assertEqual(self.next(), [])
-        doc = graph.read_json(child)
+        doc = orchestrate.read_json(child)
         doc.update(state="complete", pid=self.dead_pid())
-        graph.write_json(child, doc)
+        orchestrate.write_json(child, doc)
         self.assertNotIn("child-1", self.reconcile()[0]["reason"])
         self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs)
         self.assertEqual(self.reconcile(), [])
@@ -745,9 +745,9 @@ class GraphTest(unittest.TestCase):
         for parent in ("someone-else", "wf-1"):
             shutil.rmtree(os.path.join(self.runs, "child-1"), ignore_errors=True)
             path = self.child("child-1", parent, "A", os.getpid())
-            doc = graph.read_json(path)
+            doc = orchestrate.read_json(path)
             doc.pop("pid")
-            graph.write_json(path, doc)
+            orchestrate.write_json(path, doc)
             out = self.reconcile()[0]
             self.assertEqual(out["action"], "hold", (parent, out))
             self.assertIn("child-1", out["reason"])
@@ -760,7 +760,7 @@ class GraphTest(unittest.TestCase):
         child = self.child("child-1", "wf-1", "A", self.dead_pid(), state="complete")
         output = os.path.join(os.path.dirname(child), "structured-output", "x", "output.json")
         os.makedirs(os.path.dirname(output))
-        graph.write_json(output, {"status": "done", "head": "h", "summary": "s"})
+        orchestrate.write_json(output, {"status": "done", "head": "h", "summary": "s"})
         out = self.reconcile()[0]
         self.assertEqual(out["action"], "hold", out)
         self.assertIn(output, out["reason"])
@@ -800,17 +800,17 @@ class GraphTest(unittest.TestCase):
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         workflow = os.path.join(self.tmp, "custom-loop.js")
         args_path = os.path.join(self.store, "args", "A-1.json")
-        real_write = graph.atomic_write
+        real_write = orchestrate.atomic_write
 
         def crash_after_args(path, text):
             if os.path.exists(args_path):
                 raise RuntimeError("simulated crash")
             real_write(path, text)
-        a = graph.parser().parse_args(["--store", self.store, "launch", "A", "--workflow", workflow])
-        with mock.patch.object(graph, "atomic_write", side_effect=crash_after_args), \
+        a = orchestrate.parser().parse_args(["--store", self.store, "launch", "A", "--workflow", workflow])
+        with mock.patch.object(orchestrate, "atomic_write", side_effect=crash_after_args), \
                 mock.patch("sys.stdout", new=open(os.devnull, "w")):
             try:
-                graph.cmd_launch(self.store, a)
+                orchestrate.cmd_launch(self.store, a)
             except RuntimeError:
                 pass
         with open(args_path, "rb") as f:
@@ -863,9 +863,9 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(self.rows()["A"]["state"], "running")
         self.assertFalse(os.path.exists(os.path.join(self.store, "receipts", "A-1.json")))
         self.launch("A", "--force-window", code=3)
-        doc = graph.read_json(child)
+        doc = orchestrate.read_json(child)
         doc.update(state="complete", pid=self.dead_pid())
-        graph.write_json(child, doc)
+        orchestrate.write_json(child, doc)
         self.assertEqual(self.reconcile()[0]["action"], "record")
         self.g("record", "A", "1", status)
         self.assertEqual(self.rows()["A"]["state"], "unresolved")
@@ -923,12 +923,12 @@ class GraphTest(unittest.TestCase):
         self.g("bind", "A", "1", "wf-2")
         head = self.commit("A")
         status = self.workflow("unresolved", "wf-2", head)
-        doc = graph.read_json(status)
+        doc = orchestrate.read_json(status)
         shared = doc["steps"][0]["runId"]
         for ref in doc["steps"] + doc["workflowChildren"]["children"]:
             if ref["runId"] == shared:
                 ref["runId"] = "child-shared"
-        graph.write_json(status, doc)
+        orchestrate.write_json(status, doc)
         out = self.reconcile()[0]
         self.assertEqual(out["action"], "record", out)
         self.g("record", "A", "1", status)
@@ -948,7 +948,7 @@ class GraphTest(unittest.TestCase):
         self.stopped("wf-2", child="child-shared", edit=failed_after_collecting)
         output = os.path.join(self.runs, "child-shared", "structured-output", "result", "output.json")
         os.makedirs(os.path.dirname(output))
-        graph.write_json(output, {"status": "done", "head": "h", "summary": "s"})
+        orchestrate.write_json(output, {"status": "done", "head": "h", "summary": "s"})
         out = self.reconcile()[0]
         self.assertEqual(out["action"], "hold", out)
         self.assertIn(output, out["reason"])
@@ -1002,7 +1002,7 @@ class GraphTest(unittest.TestCase):
         path = os.path.join(self.tmp, "quick.json")
         with open(path, "w") as f:
             json.dump([{"id": "A", "title": "t", "effort": "quick"}], f)
-        p = subprocess.run([sys.executable, GRAPH, "--store", self.store, "import", path], capture_output=True,
+        p = subprocess.run([sys.executable, SCRIPT, "--store", self.store, "import", path], capture_output=True,
                            text=True, env=self.env)
         self.assertEqual(p.returncode, 2, p.stderr)
         self.assertIn("standard or exhaustive", p.stderr)
@@ -1024,7 +1024,7 @@ class GraphTest(unittest.TestCase):
         with open(os.path.join(self.store, ".lock"), "a+") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             with self.assertRaises(subprocess.TimeoutExpired):
-                subprocess.run([sys.executable, GRAPH, "--store", self.store, "status"], capture_output=True,
+                subprocess.run([sys.executable, SCRIPT, "--store", self.store, "status"], capture_output=True,
                                env=self.env, timeout=1)
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         self.g("status")
@@ -1038,10 +1038,10 @@ class GraphTest(unittest.TestCase):
 
     def test_atomic_write_leaves_no_partial_file(self):
         path = os.path.join(self.tmp, "d", "units.tsv")
-        graph.atomic_write(path, "old\n")
-        with mock.patch.object(graph.os, "replace", side_effect=OSError("disk full")):
+        orchestrate.atomic_write(path, "old\n")
+        with mock.patch.object(orchestrate.os, "replace", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
-                graph.atomic_write(path, "new contents that must not appear\n")
+                orchestrate.atomic_write(path, "new contents that must not appear\n")
         with open(path) as f:
             self.assertEqual(f.read(), "old\n")
         self.assertEqual(os.listdir(os.path.dirname(path)), ["units.tsv"])
