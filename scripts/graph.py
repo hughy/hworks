@@ -843,12 +843,37 @@ def structured_outputs(children):
     return out
 
 
-def replay_hold(row, spec, session, cur, child):
-    """Why relaunching cur's args could start a second writer beside the live child, or ''.
+def journal_children(runs_dir, run):
+    """Run ids of children the controller's journal shows started and never settled, by key, as the runtime reads it."""
+    started, settled = {}, set()
+    try:
+        with open(os.path.join(runs_dir, run, "workflow-children.jsonl")) as f:
+            lines = f.read().split("\n")
+    except OSError:
+        return set()
+    for line in lines:
+        try:
+            rec = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or not isinstance(rec.get("key"), str) or not isinstance(rec.get("fingerprint"), str):
+            continue
+        if rec.get("type") == "start" and isinstance(rec.get("runId"), str):
+            started[rec["key"]] = rec["runId"]
+        elif rec.get("type") == "settle" and isinstance(rec.get("result"), dict):
+            settled.add(rec["key"])
+    return {r for k, r in started.items() if k not in settled}
+
+
+def replay_hold(row, spec, session, runs_dir, cur, st, live):
+    """Why relaunching cur's args could start a second writer beside the live children, or ''.
 
     The runtime re-attaches a running child only when the relaunch happens in the session that ran the
-    stopped workflow and the workflow script is byte-identical; otherwise it starts a fresh coder.
+    stopped workflow, the workflow script is byte-identical, the controller stopped because its runtime was
+    replaced, and the controller's child journal records that child as started and unsettled. Otherwise it
+    starts a fresh coder.
     """
+    child = live[0]
     end = "; child %s must end before the attempt is relaunched" % child
     bound = row["session"]
     if not bound or bound != session:
@@ -859,6 +884,20 @@ def replay_hold(row, spec, session, cur, child):
     if not pinned or file_sha256(workflow) != pinned:
         return ("workflow file %s changed since launch (or its digest was not recorded), and the runtime "
                 "re-attaches child %s only for identical workflow code%s" % (workflow, child, end))
+    if not isinstance(st, dict):
+        return ("workflow %s has no status.json, so nothing shows the runtime can re-attach child %s%s"
+                % (cur or "(missing)", child, end))
+    wf = st.get("workflow")
+    cause = wf.get("stopCause") if isinstance(wf, dict) else None
+    if cause != "runtime-replaced":
+        return ("workflow %s is %s with stop cause %s, and the runtime re-attaches child %s only after a "
+                "runtime replacement%s" % (cur, st.get("state"), cause or "(none)", child, end))
+    journaled = journal_children(runs_dir, cur)
+    missing = [k for k in live if k not in journaled]
+    if missing:
+        return ("workflow %s's child journal does not record child %s as started and unsettled, so the runtime "
+                "cannot re-attach it; child %s must end before the attempt is relaunched"
+                % (cur, missing[0], missing[0]))
     return ""
 
 
@@ -916,10 +955,7 @@ def decide(cfg, store, row, runs_dir, session):
     st = run_status(runs_dir, cur) if cur else None
     if not isinstance(st, dict):
         if live:
-            why = replay_hold(row, spec, session, cur, live[0]["run"])
-            if why:
-                return act("hold", why)
-            return act("relaunch-same-args", "workflow %s missing; child %s still alive" % (cur, live[0]["run"]), **relaunch)
+            return act("hold", replay_hold(row, spec, session, runs_dir, cur, st, [k["run"] for k in live]))
         return act("hold", "workflow %s has no status.json and no live writer" % cur)
     wstate = st.get("state")
     wlive = liveness(st)
@@ -936,7 +972,7 @@ def decide(cfg, store, row, runs_dir, session):
                        % (cur, wstate, live[0]["run"]))
         return act("record", "workflow %s %s with a return value" % (cur, wstate), file=path)
     if live:
-        why = replay_hold(row, spec, session, cur, live[0]["run"])
+        why = replay_hold(row, spec, session, runs_dir, cur, st, [k["run"] for k in live])
         if why:
             return act("hold", why)
         return act("relaunch-same-args", "workflow %s %s; child %s still alive" % (cur, wstate, live[0]["run"]), **relaunch)
