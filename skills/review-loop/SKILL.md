@@ -7,6 +7,8 @@ description: Run one coder change and its review to a verdict as a single pi-sub
 
 Use it when a hughy-mode Fix or Build step is one `coder` run plus its review. It replaces a hand-written workflow per round. It needs pi with pi-subagents. On other harnesses, run the cycle by hand.
 
+For a review-only pass over one or more targets (PRs, plans) with no coder, use `review-fanout` (`../review-fanout/SKILL.md`).
+
 Paths below are relative to this file: the workflow is `../../workflows/review-loop.js` and the args script is `../../scripts/review-loop-args.sh`. Pass both as absolute paths.
 
 ## Steps
