@@ -52,7 +52,9 @@ class MutateTest(unittest.TestCase):
         write(os.path.join(self.repo, "calc.py"), CALC)
         git(self.repo, "commit", "-q", "-am", "fix add")
         self.calc = os.path.join(self.repo, "calc.py")
-        self.env = dict(os.environ, TMPDIR=self.scratch_root, PYTHONDONTWRITEBYTECODE="1")
+        self.env = dict(os.environ, TMPDIR=self.scratch_root)
+        self.env.pop("PYTHONDONTWRITEBYTECODE", None)
+        self.env.pop("PYTHONPYCACHEPREFIX", None)
 
     def mutate(self, spec, *flags, code=None, cwd=None):
         p = subprocess.run([sys.executable, SCRIPT] + list(flags) + ["-"], input=json.dumps(spec), text=True,
@@ -146,12 +148,27 @@ class MutateTest(unittest.TestCase):
 
     def test_mutant_is_applied_while_the_command_runs(self):
         seen = os.path.join(self.tmp, "seen")
-        cmd = [sys.executable, "-c", "import shutil, sys; shutil.copy('calc.py', sys.argv[1]); sys.exit(3)", seen]
+        os.utime(self.calc, ns=(1_000_000_000_123, 1_000_000_000_456))
+        cmd = [sys.executable, "-c", "import os, shutil, sys; shutil.copy('calc.py', sys.argv[1]); "
+               "open(sys.argv[1] + '.mtime', 'w').write(str(os.stat('calc.py').st_mtime_ns)); sys.exit(3)", seen]
         r = self.one({"name": "m", "file": "calc.py", "old": "x * 2", "new": "x * 7", "test": cmd},
                      "--no-baseline", code=0)
         self.assertEqual((r["verdict"], r["exit"]), ("killed", 3))
         self.assertIn(b"x * 7", read(seen))
+        self.assertNotEqual(int(read(seen + ".mtime")) // 10**9, 1_000_000_000_456 // 10**9)
         self.assertEqual(read(self.calc), CALC.encode())
+        self.assertEqual(os.stat(self.calc).st_mtime_ns, 1_000_000_000_456)
+
+    def test_python_bytecode_cache_neither_hides_nor_keeps_the_mutant(self):
+        # Same-size swap, so only the mtime and the cache location tell the versions apart.
+        mutant = {"name": "minus", "file": "calc.py", "old": "a + b", "new": "a - b"}
+        for mtime in (time.time(), 1_000_000_000):
+            os.utime(self.calc, (mtime, mtime))
+            subprocess.run(TEST, cwd=self.repo, env=self.env, check=True)
+            r = self.one(mutant, code=0)
+            self.assertEqual(r["verdict"], "killed", mtime)
+            p = subprocess.run(TEST, cwd=self.repo, env=self.env, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, "the restored file runs the mutant: %s" % p.stderr)
 
     def test_multiple_files_are_all_mutated_and_restored(self):
         check = os.path.join(self.repo, "check.py")
@@ -202,6 +219,89 @@ class MutateTest(unittest.TestCase):
         p.stdout.close()
         p.stderr.close()
 
+    def test_descendant_ignoring_sigterm_is_stopped_before_restore(self):
+        marker, release = os.path.join(self.tmp, "started"), os.path.join(self.tmp, "release")
+        grandchild = ("import os, pathlib, signal, sys, time\n"
+                      "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                      "pathlib.Path(sys.argv[1] + '.tmp').write_text(str(os.getpid()))\n"
+                      "os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+                      "while not os.path.exists(sys.argv[2]):\n"
+                      "    time.sleep(0.02)\n"
+                      "open('calc.py', 'w').write('late child edit')\n")
+        child = ("import subprocess, sys\n"
+                 "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]]).wait()\n")
+        spec = {"test": [sys.executable, "-c", child, grandchild, marker, release],
+                "mutants": [{"name": "slow", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        before = read(self.calc)
+        p = subprocess.Popen([sys.executable, SCRIPT, "--no-baseline", "-"], cwd=self.repo, env=self.env,
+                             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        p.stdin.write(json.dumps(spec))
+        p.stdin.close()
+        deadline = time.monotonic() + 30
+        while not os.path.exists(marker):
+            self.assertLess(time.monotonic(), deadline, "the command never started")
+            time.sleep(0.05)
+        pid = int(read(marker))
+        self.addCleanup(lambda: subprocess.run(["kill", "-9", str(pid)], capture_output=True))
+        p.send_signal(signal.SIGTERM)
+        p.wait(30)
+        p.stderr.close()
+        self.assertEqual(p.returncode, 128 + signal.SIGTERM)
+        write(release, "")
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+        self.assertEqual(read(self.calc), before)
+
+    def test_background_process_is_stopped_before_restore(self):
+        late = ("import time; time.sleep(0.5); open('calc.py', 'w').write('late child edit')")
+        cmd = [sys.executable, "-c", "import subprocess, sys; subprocess.Popen([sys.executable, '-c', sys.argv[1]]); "
+               "sys.exit(1)", late]
+        r = self.one({"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b", "test": cmd},
+                     "--no-baseline", code=0)
+        self.assertEqual(r["verdict"], "killed")
+        time.sleep(1)
+        self.assertEqual(read(self.calc), CALC.encode())
+
+    def test_concurrent_in_place_runs_wait_for_each_other(self):
+        marker, release = os.path.join(self.tmp, "started"), os.path.join(self.tmp, "release")
+        hold = [sys.executable, "-c", "import os, sys, time\nopen(sys.argv[1], 'w').close()\n"
+                "while not os.path.exists(sys.argv[2]):\n    time.sleep(0.02)\nsys.exit(1)", marker, release]
+        first = {"test": hold, "mutants": [{"name": "a", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        second = {"test": TEST, "mutants": [{"name": "b", "file": "calc.py", "old": "a + b", "new": "a * b"}]}
+        procs = []
+        for spec in (first, second):
+            p = subprocess.Popen([sys.executable, SCRIPT, "--no-baseline", "--json", "-"], cwd=self.repo,
+                                 env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True)
+            p.stdin.write(json.dumps(spec))
+            p.stdin.close()
+            procs.append(p)
+            deadline = time.monotonic() + 30
+            while not os.path.exists(marker):
+                self.assertLess(time.monotonic(), deadline, "the first run never started")
+                time.sleep(0.05)
+        time.sleep(1)
+        self.assertIsNone(procs[1].poll(), "the second run did not wait for the first")
+        write(release, "")
+        for p in procs:
+            p.wait(60)
+            out, err = p.stdout.read(), p.stderr.read()
+            p.stdout.close()
+            p.stderr.close()
+            self.assertEqual(p.returncode, 0, out + err)
+            self.assertEqual(json.loads(out)[0]["verdict"], "killed")
+        self.assertIn("waiting for another in-place run", err)
+        self.assertEqual(read(self.calc), CALC.encode())
+        self.assertEqual(git(self.repo, "status", "--porcelain", "--", "calc.py"), "")
+
     def test_sigterm_restores_file_and_stops_command(self):
         self.interrupt(signal.SIGTERM)
 
@@ -218,6 +318,23 @@ class MutateTest(unittest.TestCase):
         r = self.one({"name": "minus", "file": "calc.py", "old": "a + b", "new": "a - b"}, "--allow-dirty", code=0)
         self.assertEqual(r["verdict"], "killed")
         self.assertEqual(read(self.calc), dirty.encode())
+
+    def test_symlink_to_dirty_file_is_refused_in_place(self):
+        os.symlink("calc.py", os.path.join(self.repo, "link.py"))
+        git(self.repo, "add", "link.py")
+        git(self.repo, "commit", "-q", "-m", "link")
+        dirty = CALC + "# local edit\n"
+        write(self.calc, dirty)
+        r = self.one({"name": "minus", "file": "link.py", "old": "a + b", "new": "a - b"}, code=2)
+        self.assertIn("uncommitted changes", r["reason"])
+        self.assertEqual(read(self.calc), dirty.encode())
+        self.assertTrue(os.path.islink(os.path.join(self.repo, "link.py")))
+
+    def test_overlay_mode_needs_a_go_command(self):
+        r = self.one({"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b", "mode": "overlay"},
+                     "--no-baseline", code=2)
+        self.assertIn("needs a go test", r["reason"])
+        self.assertEqual(read(self.calc), CALC.encode())
 
     def test_untracked_file_is_refused_in_place(self):
         write(os.path.join(self.repo, "extra.py"), "X = 1\n")
@@ -338,6 +455,9 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(mutate.go_subcommands(["go", "test", "./..."]), {"test"})
         self.assertEqual(mutate.go_subcommands("cd x && /usr/local/go/bin/go vet ./... && go build ."),
                          {"vet", "build"})
+        self.assertEqual(mutate.go_subcommands(["go", "-C", "/tmp/x", "test", "."]), {"test"})
+        self.assertEqual(mutate.go_subcommands("go --C=sub vet ./..."), {"vet"})
+        self.assertEqual(mutate.go_subcommands(["go", "-C", "test", "mod", "tidy"]), set())
         self.assertEqual(mutate.go_subcommands("make test"), set())
         self.assertEqual(mutate.go_subcommands(["python3", "-m", "pytest"]), set())
 
@@ -364,16 +484,33 @@ class GoOverlayTest(unittest.TestCase):
         git(self.repo, "commit", "-q", "-am", "fix")
         self.env = dict(os.environ, GOFLAGS="", GOTOOLCHAIN="local", GOWORK="off")
 
-    def run_spec(self, mutants, code, cwd=None, env=None):
-        spec = {"test": ["go", "test", "./calc"], "mutants": mutants}
-        st = os.stat(self.sum)
-        before = (read(self.sum), st.st_mtime_ns, st.st_ino)
+    def run_spec(self, mutants, code, cwd=None, env=None, test=None, watch=None):
+        spec = {"test": test or ["go", "test", "./calc"], "mutants": mutants}
+        watch = watch or self.sum
+        st = os.stat(watch)
+        before = (read(watch), st.st_mtime_ns, st.st_ino)
         p = subprocess.run([sys.executable, SCRIPT, "--json", "--keep", "-"], input=json.dumps(spec), text=True,
                            capture_output=True, cwd=cwd or self.repo, env=env or self.env, timeout=300)
         self.assertEqual(p.returncode, code, "stdout: %s\nstderr: %s" % (p.stdout, p.stderr))
-        st = os.stat(self.sum)
-        self.assertEqual((read(self.sum), st.st_mtime_ns, st.st_ino), before, "the worktree file changed")
+        st = os.stat(watch)
+        self.assertEqual((read(watch), st.st_mtime_ns, st.st_ino), before, "the worktree file changed")
         return json.loads(p.stdout)
+
+    def test_go_chdir_flag_still_uses_overlay(self):
+        out = self.run_spec([
+            {"name": "minus", "file": "calc/sum.go", "old": "a + b", "new": "a - b"},
+            {"name": "broken", "file": "calc/sum.go", "old": "a + b", "new": "a +"},
+        ], 1, test=["go", "-C", self.repo, "test", "./calc"])
+        self.assertEqual([(r["verdict"], r["mode"]) for r in out], [("killed", "overlay"), ("build-error", "overlay")])
+
+    def test_go_command_refuses_a_non_go_file_instead_of_writing_it(self):
+        data = os.path.join(self.repo, "calc", "data.txt")
+        write(data, "one\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-q", "-m", "data")
+        [r] = self.run_spec([{"name": "data", "file": "calc/data.txt", "old": "one", "new": "two"}], 2, watch=data)
+        self.assertEqual((r["verdict"], r["mode"]), ("invalid", "overlay"))
+        self.assertIn("only .go files", r["reason"])
 
     def test_overlay_kills_without_touching_worktree(self):
         [r] = self.run_spec([{"name": "minus", "file": "calc/sum.go", "old": "a + b", "new": "a - b"}], 0)
