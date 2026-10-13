@@ -182,7 +182,54 @@ test("findings on the same file and line merge across reviewers", async () => {
     "plan.r1": clean,
     "plan.r2": clean,
   });
-  assert.deepEqual(out.targets[0].merged, [{ ...f("src/a.js", 3, "off by one in the loop bound"), severity: "blocking", raisedBy: ["reviewer", "review2"] }]);
+  assert.deepEqual(out.targets[0].merged, [
+    {
+      ...f("src/a.js", 3, "off by one in the loop bound"),
+      severity: "blocking",
+      raisedBy: ["reviewer", "review2"],
+      otherClaims: [{ raisedBy: ["review2"], severity: "blocking", claim: "loop reads past the end", evidence: "./src/a.js:3" }],
+    },
+  ]);
+});
+
+test("two different claims on one line both survive in merged", async () => {
+  const { out } = await run({
+    "pr-1.r1": reviewed([f("a.js", 7, "token is logged in plain text")]),
+    "pr-1.r2": reviewed([f("a.js", 7, "missing null check on the response", { fix: "guard res before reading res.body" })]),
+    "plan.r1": clean,
+    "plan.r2": clean,
+  });
+  const merged = out.targets[0].merged;
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].claim, "token is logged in plain text");
+  assert.deepEqual(merged[0].raisedBy, ["reviewer", "review2"]);
+  assert.deepEqual(merged[0].otherClaims, [
+    { raisedBy: ["review2"], severity: "non-blocking", claim: "missing null check on the response", evidence: "a.js:7", fix: "guard res before reading res.body" },
+  ]);
+});
+
+test("a line match prefers the entry with the same claim, and repeated other claims collect reviewers", async () => {
+  const reviewers = [{ label: "r1" }, { label: "r2" }, { label: "r3" }];
+  const { out } = await run(
+    {
+      "pr-1.r1": reviewed([f("a.js", 3, "off by one"), f("a.js", 3, "shadowed variable"), f("c.js", 5, "race on cache write")]),
+      "pr-1.r2": reviewed([f("a.js", 3, "shadowed variable"), f("b.js", 1, "unused import"), f("c.js", 5, "leaks file handle")]),
+      "pr-1.r3": reviewed([f("b.js", 1, "error is swallowed"), f("c.js", 5, "Leaks file handle.")]),
+      "plan.r1": clean,
+      "plan.r2": clean,
+      "plan.r3": clean,
+    },
+    { reviewers },
+  );
+  assert.deepEqual(
+    out.targets[0].merged.map((m) => [m.file, m.claim, m.raisedBy, m.otherClaims]),
+    [
+      ["a.js", "off by one", ["r1"], undefined],
+      ["a.js", "shadowed variable", ["r1", "r2"], undefined],
+      ["c.js", "race on cache write", ["r1", "r2", "r3"], [{ raisedBy: ["r2", "r3"], severity: "non-blocking", claim: "leaks file handle", evidence: "c.js:5" }]],
+      ["b.js", "unused import", ["r2", "r3"], [{ raisedBy: ["r3"], severity: "non-blocking", claim: "error is swallowed", evidence: "b.js:1" }]],
+    ],
+  );
 });
 
 test("findings on the same file with near-identical claims merge; different claims or files do not", async () => {
