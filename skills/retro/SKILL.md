@@ -16,11 +16,11 @@ Transcripts hold private content: code, ticket text, tokens, names from every re
 ## Run the reporters
 
 ```sh
-python3 <hworks>/scripts/retro-sessions.py --since 14d > "$TASK_DIR/sessions-<date>.txt"
+python3 <hworks>/scripts/retro-sessions.py --since 14d --min-sessions 5 --top 1000 > "$TASK_DIR/sessions-<date>.txt"
 <hworks>/scripts/blockers.sh --since 14d > "$TASK_DIR/blockers-<date>.txt"
 ```
 
-Both take `--since YYYY-MM-DD|Nd` and `--json`, and read `adapters/local/*.env` for their sources. A missing source is reported in the output, not fatal; say in the findings file which sources were missing.
+`retro-sessions.py` keeps only its top 15 groups per section by default, which hides most groups above the triage threshold; `--min-sessions 5 --top 1000` prints exactly the groups Triage covers. If a section prints 1000 groups, rerun with a larger `--top`. `blockers.sh` prints every class. Both take `--since YYYY-MM-DD|Nd` and `--json`, and read `adapters/local/*.env` for their sources. A missing source is reported in the output, not fatal; say in the findings file which sources were missing.
 
 - `retro-sessions.py` prints four sections ranked by distinct sessions: command shapes, agent-written scripts (with a `where:` split of inline, scratch, and worktree), repeated helpers, and failed-then-retried calls. Each group has `sess`, `calls`, a sample, and example session paths relative to the pi sessions dir. `[exists: <name>]` means the shape names a script or skill in hworks or in `HWORKS_TOOL_DIRS`. Set `HWORKS_TOOL_DIRS` to the companion repo's tool dirs, or it will not flag tools that live there.
 - `blockers.sh` prints classes as `source / kind / rule` with a count, distinct sessions, and the three latest events, then deferred decisions per repo and branch. Sources are guard blocks (`autonomy`), open questions (`open-questions`, by category), subagent runs (`subagents`, `run-history`), and the harness audit log when configured.
@@ -31,7 +31,7 @@ Both reporters are heuristics. A group is a lead, not a fact. Before acting on o
 
 ## Triage
 
-Triage every group in at least 5 sessions and every blocker class in at least 3. Each lands in exactly one outcome. When a finding seems to fit two: an ignored tool (2) beats a new tool (1); a cause in a dependency (4) beats a check in this repo (3), which would only work around it; and a mistake a check can catch (3) beats a guidance edit (5).
+Triage every group in at least 5 sessions and every blocker class in at least 3; expect over a hundred groups in a 14-day window, most of them quick drops. Each lands in exactly one outcome. When a finding seems to fit two: an ignored tool (2) beats a new tool (1); a cause in a dependency (4) beats a check in this repo (3), which would only work around it; and a mistake a check can catch (3) beats a guidance edit (5).
 
 1. Reusable tool worth building. Evidence: verified samples share one purpose; it recurs across at least 10 sessions in more than one repo or parent session; no existing tool covers it (search hworks `scripts/` and `skills/`, the companion repo, pstack, and the harness's own tools). Next step: an orchestrate unit (below).
 2. Existing tool agents ignore. Evidence: a tool that covers the purpose exists (the `[exists]` flag, or one you found while checking outcome 1), and agents rebuild it by hand. Fix the routing, not the tool: the adapter (`adapters/pi.md` or the companion's), the skill's `description`, the router skill, or the prompt that told agents to do it by hand. Do not build a second tool. A tool used as intended (a gate script run on every change) is not a finding; drop it.
