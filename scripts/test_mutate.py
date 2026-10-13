@@ -359,6 +359,38 @@ class MutateTest(unittest.TestCase):
         self.assertEqual(read(self.calc), CALC.encode())
         self.assertEqual(git(self.repo, "status", "--porcelain", "--", "calc.py"), "")
 
+    def test_runs_sharing_an_out_dir_wait_for_each_other(self):
+        other = os.path.join(self.tmp, "other")
+        git(self.tmp, "clone", "-q", self.repo, other)
+        out = os.path.join(self.tmp, "out")
+        marker, release = os.path.join(self.tmp, "started"), os.path.join(self.tmp, "release")
+        hold = [sys.executable, "-c", "import os, sys, time\nopen(sys.argv[1], 'w').close()\n"
+                "while not os.path.exists(sys.argv[2]):\n    time.sleep(0.02)\nsys.exit(1)", marker, release]
+        mutant = {"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b"}
+        procs = []
+        for repo, test in ((self.repo, hold), (other, TEST)):
+            p = subprocess.Popen([sys.executable, SCRIPT, "--no-baseline", "--json", "--out", out, "-"],
+                                 cwd=repo, env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True)
+            p.stdin.write(json.dumps({"test": test, "mutants": [mutant]}))
+            p.stdin.close()
+            procs.append(p)
+            deadline = time.monotonic() + 30
+            while not os.path.exists(marker):
+                self.assertLess(time.monotonic(), deadline, "the first run never started")
+                time.sleep(0.05)
+        time.sleep(1)
+        waited = procs[1].poll() is None
+        write(release, "")
+        for p in procs:
+            p.wait(60)
+            out_text, err = p.stdout.read(), p.stderr.read()
+            p.stdout.close()
+            p.stderr.close()
+            self.assertEqual(p.returncode, 0, out_text + err)
+        self.assertTrue(waited, "the second run did not wait for the first")
+        self.assertIn("waiting for another run using --out", err)
+
     def test_sigterm_restores_file_and_stops_command(self):
         self.interrupt(signal.SIGTERM)
 
@@ -375,6 +407,17 @@ class MutateTest(unittest.TestCase):
         r = self.one({"name": "minus", "file": "calc.py", "old": "a + b", "new": "a - b"}, "--allow-dirty", code=0)
         self.assertEqual(r["verdict"], "killed")
         self.assertEqual(read(self.calc), dirty.encode())
+
+    def test_file_hidden_from_git_status_is_refused_in_place(self):
+        dirty = CALC + "# local edit\n"
+        write(self.calc, dirty)
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            git(self.repo, "update-index", flag, "calc.py")
+            self.assertEqual(git(self.repo, "status", "--porcelain", "--ignored", "--", "calc.py"), "")
+            r = self.one({"name": "minus", "file": "calc.py", "old": "a + b", "new": "a - b"}, code=2)
+            self.assertIn("assume-unchanged or skip-worktree", r["reason"], flag)
+            self.assertEqual(read(self.calc), dirty.encode())
+            git(self.repo, "update-index", flag.replace("--", "--no-", 1), "calc.py")
 
     def test_symlink_to_dirty_file_is_refused_in_place(self):
         os.symlink("calc.py", os.path.join(self.repo, "link.py"))
@@ -559,6 +602,13 @@ class MutateTest(unittest.TestCase):
         self.assertIn("command not found", r["reason"])
         self.assertEqual(read(self.calc), CALC.encode())
 
+    def test_go_words_inside_a_non_shell_argument_stay_in_place(self):
+        test = [sys.executable, "-c", "import calc; assert calc.add(2, 3) == 5, 'go test example failed'"]
+        [r] = self.results({"test": test, "mutants": [{"name": "minus", "file": "calc.py", "old": "a + b",
+                                                       "new": "a - b"}]}, code=0)
+        self.assertEqual((r["verdict"], r["mode"]), ("killed", "in-place"))
+        self.assertEqual(read(self.calc), CALC.encode())
+
     def test_shell_string_command(self):
         r = self.one({"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b",
                       "test": "%s check.py" % sys.executable}, code=0)
@@ -618,6 +668,12 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(mutate.go_subcommands("bash -c 'go build ./...'"), {"build"})
         self.assertEqual(mutate.go_subcommands("make test"), set())
         self.assertEqual(mutate.go_subcommands(["python3", "-m", "pytest"]), set())
+        self.assertEqual(mutate.go_subcommands(["python3", "-c", "assert f(), 'go test failed'"]), set())
+        self.assertEqual(mutate.go_subcommands("python3 -c \"print('go build .')\""), set())
+        self.assertEqual(mutate.go_subcommands(["bash", "script.sh", "go test ./..."]), set())
+        self.assertEqual(mutate.go_subcommands(["bash", "-o", "pipefail", "-c", "go test ./..."]), {"test"})
+        self.assertEqual(mutate.go_subcommands(["bash", "-euo", "pipefail", "-c", "go vet ."]), {"vet"})
+        self.assertEqual(mutate.go_subcommands(["/bin/sh", "-e", "-c", "go build ."]), {"build"})
 
 
 @unittest.skipUnless(shutil.which("go"), "go is not on PATH")

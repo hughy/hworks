@@ -24,15 +24,16 @@ exactly once and differ from "new") or a whole file taken from git ("rev": the c
 Modes:
   overlay   The mutated files go to the scratch dir and the command runs with GOFLAGS=-overlay=<json>,
             so the worktree is never written. auto picks it whenever the command runs go test, go vet,
-            or go build, as an argv list, a shell string, or a string passed to a shell such as
-            ["bash", "-c", "go test ./..."]. A Go run behind any other wrapper (make test, a script)
-            is not detected: set "mode": "overlay" so the wrapper's go command inherits GOFLAGS and
-            compile failures count as build-error. Only .go files can be overlaid; a mutant of any
-            other file is invalid in this mode rather than written in place.
+            or go build, as an argv list, a shell string, or the -c script of sh, bash, zsh, dash,
+            ksh, mksh, or ash such as ["bash", "-c", "go test ./..."]. A Go run behind any other
+            wrapper (make test, a script) is not detected: set "mode": "overlay" so the wrapper's go
+            command inherits GOFLAGS and compile failures count as build-error. Only .go files can be
+            overlaid; a mutant of any other file is invalid in this mode rather than written in place.
   in-place  The mutated files are written over the originals, the command runs, and the original bytes
             are restored, also on SIGINT and SIGTERM, after every process the command started
             has been stopped. Backups stay in the scratch dir. A symlink is followed to its target. A
-            target with uncommitted changes is refused unless --allow-dirty is passed. In-place runs
+            target with uncommitted changes, or marked assume-unchanged or skip-worktree, is refused
+            unless --allow-dirty is passed. In-place runs
             on the same git worktree wait for each other, so one never reads another's mutant as the
             original. Timestamps only move forward: the mutant's mtime is a whole second later than
             the original's and than the time of the swap, and the restored file's is a whole second
@@ -59,7 +60,8 @@ mutant, 3 a file could not be restored (its backup path is printed), 128+N inter
 
 The scratch dir is a new temp dir, or --out DIR. It holds one directory per mutant with the command
 output (output.log), backups, and overlay files. A temp dir is removed when every mutant is killed,
-unless --keep is passed; otherwise its path is printed on stderr.
+unless --keep is passed; otherwise its path is printed on stderr. Runs given the same --out wait for
+each other.
 
 Go example, run from a module root; the worktree is never written:
 
@@ -88,6 +90,7 @@ import tempfile
 import time
 
 GO_SUBCOMMANDS = {"test", "vet", "build"}
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "mksh", "ash"}
 MODES = {"auto", "overlay", "in-place"}
 BUILD_FAILED = re.compile(r"\[(?:build|setup) failed\]")
 TEST_FAILED = re.compile(r"--- FAIL|^FAIL\s+\S+\s+\d+(?:\.\d+)?s\s*$|^panic: ", re.M)
@@ -226,13 +229,30 @@ def shell_tokens(text):
         return []
 
 
+def shell_script(tokens, j):
+    """The script a shell runs from argv tokens[j:] (its options, then the -c operand), or None."""
+    has_c = False
+    while j < len(tokens) and tokens[j][:1] in ("-", "+") and tokens[j] not in ("-", "--"):
+        flag = tokens[j]
+        if not flag.startswith("--") and flag[-1] in "oO":
+            j += 2
+            continue
+        if not flag.startswith("--") and "c" in flag[1:]:
+            has_c = True
+        j += 1
+    if j < len(tokens) and tokens[j] == "--":
+        j += 1
+    return tokens[j] if has_c and j < len(tokens) else None
+
+
 def go_subcommands(cmd, depth=0):
     tokens = shell_tokens(cmd) if isinstance(cmd, str) else cmd
     found = set()
     for i, tok in enumerate(tokens):
-        # A token holding whitespace is likely a script for a shell (bash -c "go test ./...").
-        if depth < 3 and re.search(r"\s", tok):
-            found |= go_subcommands(tok, depth + 1)
+        if os.path.basename(tok) in SHELLS and depth < 3:
+            script = shell_script(tokens, i + 1)
+            if script is not None:
+                found |= go_subcommands(script, depth + 1)
         if os.path.basename(tok) != "go":
             continue
         j = i + 1
@@ -299,6 +319,11 @@ def dirty_reason(path):
         return "is not in a git work tree"
     if p.stdout.strip():
         return "has uncommitted changes"
+    # git status hides local edits to these files, so it cannot vouch that the file is committed.
+    p = git(os.path.dirname(path), "ls-files", "-v", "--", os.path.basename(path))
+    tag = p.stdout[:1].decode()
+    if p.returncode or tag.islower() or tag == "S":
+        return "is marked assume-unchanged or skip-worktree"
     return None
 
 
@@ -326,12 +351,18 @@ def worktree_locks(paths):
         # Sorted, so two runs that need the same locks cannot deadlock.
         for lp in sorted(wanted):
             kind = fcntl.LOCK_EX if wanted[lp] else fcntl.LOCK_SH
-            f = stack.enter_context(open(lp, "a"))
-            try:
-                fcntl.flock(f, kind | fcntl.LOCK_NB)
-            except BlockingIOError:
-                print("mutate: waiting for another in-place run (%s)" % lp, file=sys.stderr, flush=True)
-                fcntl.flock(f, kind)
+            stack.enter_context(file_lock(lp, kind, "another in-place run"))
+        yield
+
+
+@contextlib.contextmanager
+def file_lock(path, kind, holder):
+    with open(path, "a") as f:
+        try:
+            fcntl.flock(f, kind | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("mutate: waiting for %s (%s)" % (holder, path), file=sys.stderr, flush=True)
+            fcntl.flock(f, kind)
         yield
 
 
@@ -590,12 +621,20 @@ def main(argv=None):
         print("mutate: %s" % e, file=sys.stderr)
         return 2
 
-    if args.out:
-        os.makedirs(args.out, exist_ok=True)
-        scratch = os.path.abspath(args.out)
-    else:
-        scratch = tempfile.mkdtemp(prefix="mutate-")
+    with contextlib.ExitStack() as stack:
+        if args.out:
+            os.makedirs(args.out, exist_ok=True)
+            scratch = os.path.abspath(args.out)
+            # Scratch paths depend only on the mutant's index and name, so two runs sharing --out would
+            # overwrite each other's overlay files and logs mid-run.
+            stack.enter_context(file_lock(os.path.join(scratch, ".lock"), fcntl.LOCK_EX,
+                                          "another run using --out " + scratch))
+        else:
+            scratch = tempfile.mkdtemp(prefix="mutate-")
+        return run_all(args, cwd, mutants, scratch)
 
+
+def run_all(args, cwd, mutants, scratch):
     for s in CAUGHT:
         signal.signal(s, on_signal)
     results, code = [], None
