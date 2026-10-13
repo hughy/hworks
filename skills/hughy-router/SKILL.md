@@ -55,7 +55,7 @@ Open a PR: `opening-a-pr.md`. Drive a PR to merge-ready: `babysit.md`, with `../
 
 ### Long run
 
-"Run until done", "going to bed", a predicate to drive to. State the exit condition as a checkable predicate first. Each iteration: smallest change the evidence justifies, verify against the predicate, commit if it advanced, undo it in place or with `git revert` if it did not. Fix mid-run blockers yourself in their own commits. Never relax the predicate. Continue through plateaus. Stop at a dead end and say so. At the end, run `scripts/blockers.sh --since <run start date>` and put the top classes in the reply; a class seen in two runs goes to `/skill:correct`.
+"Run until done", "going to bed", a predicate to drive to. State the exit condition as a checkable predicate first. Each iteration: smallest change the evidence justifies, verify against the predicate, commit if it advanced, undo it in place or with `git revert` if it did not. Fix mid-run blockers yourself in their own commits. Never relax the predicate. Continue through plateaus. Stop at a dead end and say so. At the end, run `scripts/blockers.sh --since <run start date>` and put the top classes in the reply; a class seen in two runs goes to `/skill:correct`. The periodic look across sessions (tooling agents keep rewriting, recurring blockers, harness bugs) is `retro` (`../retro/SKILL.md`); run it every week or two.
 
 Work that outlives one session goes to a multi-agent coordinator only when all of these hold:
 
