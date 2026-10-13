@@ -33,8 +33,8 @@ PLAYWRIGHT_FROM=<project>/package.json node scripts/shot.mjs http://localhost:30
 - Each shot prints one JSON line on stdout: `path`, `viewport`, `file`, `scrollWidth`, `innerWidth`, `scrollHeight`, `innerHeight`, `overflowX`, `overflowY`, and `consoleErrors` (console errors and uncaught exceptions). `overflowX` true means the page scrolls sideways at that width, which is usually a layout bug.
 - `--local-storage key=value` stores `value` as given, before the page's scripts run, on the shot page's origin only. Pass JSON text when the app parses the key as JSON.
 - Each shot gets a fresh browser context, so storage one page writes does not leak into the next.
-- `--wait-for` waits until the selector is visible; `--settle` then waits a fixed time for animations and fonts. `--timeout` (default 30000 ms) limits the load and the wait. `--full-page` captures the whole page instead of the viewport.
-- It exits 1 if any page fails to load, returns HTTP 400 or above, or never shows the selector, naming each on stderr. The JSON line for that shot has an `error` field, and the PNG still holds what rendered, if anything did. It exits 2 on bad arguments.
+- `--wait-for` waits until the selector is visible; `--settle` then waits a fixed time for animations and fonts. `--timeout` (default 30000 ms) limits the load, the wait, and the screenshot. `--full-page` captures the whole page instead of the viewport.
+- It exits 1 if any page fails to load, returns HTTP 400 or above, never shows the selector, or cannot be captured, naming each on stderr and going on to the next shot. The JSON line for that shot has an `error` field, and the PNG still holds what rendered, if anything did. It exits 2 on bad arguments.
 
 ## Workflow
 

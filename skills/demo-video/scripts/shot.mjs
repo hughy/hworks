@@ -17,7 +17,7 @@ const usage = `usage: node shot.mjs <base-url> [options]
   --viewports <list>      comma-separated WxH sizes (default: 1280x800,1920x1080)
   --wait-for <selector>   wait until the selector is visible before the shot
   --settle <ms>           extra wait after load and selector (default: 500)
-  --timeout <ms>          limit for page load and --wait-for (default: 30000)
+  --timeout <ms>          limit for page load, --wait-for, and the screenshot (default: 30000)
   --local-storage k=v     set localStorage k to the text v before the page's scripts run; repeatable
   --full-page             capture the whole scrollable page instead of the viewport
   --out <dir>             output directory (default: a new temp dir)
@@ -150,23 +150,27 @@ async function shoot(browser, opts, target, viewport) {
       }
     }
     if (!result.error && opts.settle) await page.waitForTimeout(opts.settle);
-    Object.assign(
-      result,
-      await page.evaluate(() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        innerWidth: window.innerWidth,
-        scrollHeight: document.documentElement.scrollHeight,
-        innerHeight: window.innerHeight,
-      })),
-    );
-    result.overflowX = result.scrollWidth > result.innerWidth;
-    result.overflowY = result.scrollHeight > result.innerHeight;
-    // A failed shot still saves what rendered, which usually shows why the selector never appeared.
-    await page.screenshot({ path: file, fullPage: opts.fullPage });
-    result.file = file;
+    try {
+      Object.assign(
+        result,
+        await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          innerWidth: window.innerWidth,
+          scrollHeight: document.documentElement.scrollHeight,
+          innerHeight: window.innerHeight,
+        })),
+      );
+      result.overflowX = result.scrollWidth > result.innerWidth;
+      result.overflowY = result.scrollHeight > result.innerHeight;
+      // A failed shot still saves what rendered, which usually shows why the selector never appeared.
+      await page.screenshot({ path: file, fullPage: opts.fullPage, timeout: opts.timeout });
+      result.file = file;
+    } catch (e) {
+      result.error ??= `screenshot failed: ${e.message.split("\n")[0]}`;
+    }
     return result;
   } finally {
-    await context.close();
+    await context.close().catch(() => {});
   }
 }
 
@@ -192,7 +196,11 @@ async function main() {
   try {
     for (const target of opts.targets) {
       for (const viewport of opts.viewports) {
-        const r = await shoot(browser, opts, target, viewport);
+        const r = await shoot(browser, opts, target, viewport).catch((e) => ({
+          path: target.path,
+          viewport: `${viewport.width}x${viewport.height}`,
+          error: e.message.split("\n")[0],
+        }));
         const line = {};
         for (const k of ["path", "viewport", "file", "scrollWidth", "innerWidth", "scrollHeight", "innerHeight", "overflowX", "overflowY", "consoleErrors"]) line[k] = r[k] ?? null;
         if (r.error) line.error = r.error;

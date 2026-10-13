@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks scripts/shot.mjs against two static pages served by python3 -m http.server: names, sizes, overflow, seeding, failures.
+# Checks scripts/shot.mjs against static pages served by python3 -m http.server: names, sizes, overflow, seeding, failures.
 # usage: PLAYWRIGHT_FROM=<project with playwright>/package.json tests/shot.sh
 # Exits 0 with a skip message when Playwright or its browser is not available.
 set -euo pipefail
@@ -20,7 +20,8 @@ fi
 
 work=$(mktemp -d)
 server=
-cleanup() { [[ -n "$server" ]] && kill "$server" 2>/dev/null; true; }
+hang=
+cleanup() { for p in $server $hang; do kill "$p" 2>/dev/null; done; true; }
 trap cleanup EXIT
 
 site=$work/site
@@ -94,5 +95,42 @@ if node "$shot" "$base" --path /narrow/ --viewports 800x600 --wait-for '#never' 
   echo "shot: a missing selector exited 0" >&2; exit 1
 fi
 grep -q "FAILED $base/narrow/ at 800x600: selector #never not visible" "$work/sel.err" || { echo "shot: missing selector not named:" >&2; cat "$work/sel.err" >&2; exit 1; }
+
+# A socket that accepts connections and never answers keeps a font load pending, so page.screenshot waits on fonts and times out.
+python3 -u -c '
+import socket, time
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+s.listen(16)
+print(s.getsockname()[1])
+held = []
+while True:
+    held.append(s.accept()[0])
+' >"$work/hang.port" 2>&1 &
+hang=$!
+hang_port=
+for _ in $(seq 50); do
+  hang_port=$(head -1 "$work/hang.port")
+  [[ -n "$hang_port" ]] && break
+  sleep 0.1
+done
+[[ "$hang_port" =~ ^[0-9]+$ ]] || { echo "shot: hang server did not start: $(cat "$work/hang.port")" >&2; exit 1; }
+mkdir -p "$site/fonts"
+cat >"$site/fonts/index.html" <<EOF
+<!doctype html><html><body><p>font never loads</p><script>
+  addEventListener("load", () => {
+    const f = new FontFace("hang", "url(http://127.0.0.1:$hang_port/hang.woff2)");
+    document.fonts.add(f);
+    f.load().catch(() => {});
+  });
+</script></body></html>
+EOF
+if node "$shot" "$base" --path /fonts/ --path /narrow/ --viewports 800x600 --settle 0 --timeout 1500 --out "$work/cap" >"$work/cap.jsonl" 2>"$work/cap.err"; then
+  echo "shot: a failed screenshot exited 0" >&2; exit 1
+fi
+grep -q "FAILED $base/fonts/ at 800x600: screenshot failed" "$work/cap.err" || { echo "shot: failed screenshot not named:" >&2; cat "$work/cap.err" >&2; exit 1; }
+grep -q '"path":"/fonts/".*"file":null.*"error":"screenshot failed' "$work/cap.jsonl" || { echo "shot: failed screenshot has no JSON line:" >&2; cat "$work/cap.jsonl" >&2; exit 1; }
+grep -q '"path":"/narrow/".*"overflowX":false' "$work/cap.jsonl" || { echo "shot: shot after a failed screenshot did not run:" >&2; cat "$work/cap.jsonl" "$work/cap.err" >&2; exit 1; }
+[[ -f "$work/cap/narrow-800x600.png" ]] || { echo "shot: no PNG for the shot after a failed screenshot" >&2; exit 1; }
 
 echo "shot: ok ($work)"
