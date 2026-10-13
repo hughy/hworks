@@ -1,0 +1,3 @@
+{"type": "session", "version": 3, "id": "2020-01-01_old.jsonl", "timestamp": "2020-01-01T10:00:00.000Z", "cwd": "/w"}
+{"type": "message", "id": "a0", "timestamp": "2020-01-01T10:01:00.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "working"}, {"type": "toolCall", "id": "call_0", "name": "bash", "arguments": {"command": "go test -overlay=/tmp/old/o.json ./old"}}]}}
+{"type": "message", "id": "r0", "timestamp": "2020-01-01T10:01:00.000Z", "message": {"role": "toolResult", "toolCallId": "call_0", "toolName": "bash", "content": [{"type": "text", "text": "ok"}], "isError": false}}
