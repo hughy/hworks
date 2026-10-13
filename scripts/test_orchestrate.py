@@ -901,8 +901,9 @@ class OrchestrateTest(unittest.TestCase):
         out = self.reconcile()[0]
         self.assertEqual(out["action"], "record", out)
         self.assertIn("wf-1", out["reason"])
-        self.g("record", "A", "1", out["file"])
         self.g("record", "A", "1", path, "--runs-dir", self.runs, code=3)
+        self.assertEqual(self.rows()["A"]["state"], "running", "the older bound run is superseded")
+        self.g("record", "A", "1", out["file"])
         self.assertEqual(self.rows()["A"]["state"], "unresolved")
 
     def test_ended_workflow_of_an_earlier_attempt_does_not_hold_the_next(self):
