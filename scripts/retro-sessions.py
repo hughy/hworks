@@ -35,8 +35,9 @@ a cat/tee heredoc, plus inline interpreter code (python -c, node -e, heredocs to
 interpreter, mcpScript code), each at least MIN_SCRIPT_LINES non-blank lines. Each script has
 a location class: scratch (under /tmp, $TMPDIR, or a task dir), worktree (anywhere else), or
 inline; a group lists how many of its scripts fall in each. A worktree file is dropped when a
-later bash call in the same session runs git add or git commit naming that file: it is
-ordinary development, not a throwaway. A directory or a sweep (git add -A, git commit -a) does
+later, successful bash call in the same session runs git add or git commit naming that file
+(paths resolved against the session cwd, cd, and git -C): it is ordinary development, not a
+throwaway. A directory or a sweep (git add -A, git commit -a) does
 not count, since in real sessions those mostly followed throwaways that were deleted or ignored. A fingerprint is the helpers
 a script defines, the modules it imports, the methods it calls (receiver dropped, so renamed
 variables still match), and literal names passed to calls. Features in more than a fifth of
@@ -44,8 +45,8 @@ scripts or in only one session are dropped. Scripts of one language whose finger
 overlap by at least 0.35, weighting rare features higher, are grouped.
 
 Helpers: functions defined in those scripts, grouped by language and name, then split by
-body similarity. Failed then retried: a call whose result was an error followed within three
-calls by one of the same shape (bash: the command shapes; other tools: tool name, argument
+body similarity. Failed then retried: a call whose result was an error followed later in the
+session by one of the same shape (bash: the command shapes; other tools: tool name, argument
 names, and tool/server/action/agent/workflow values). Bash retries made only of ordinary
 shapes are dropped.
 """
@@ -167,15 +168,23 @@ def sources():
 
 
 def read_session(path, since, notes):
-    """Return the tool calls in one transcript after since, each with its error flag."""
-    calls, by_id, bad = [], {}, 0
+    """Return the tool calls in one transcript after since, each with its error flag, and the
+    session's working directory."""
+    calls, by_id, bad, cwd = [], {}, 0, None
     try:
         f = open(path, errors="replace")
     except OSError as e:
         notes.append(f"{path}: {e}")
-        return calls
+        return calls, cwd
     with f:
-        for line in f:
+        for n, line in enumerate(f):
+            if n == 0 and '"session"' in line:
+                try:
+                    head = json.loads(line)
+                    cwd = head.get("cwd") if isinstance(head.get("cwd"), str) else None
+                except (ValueError, AttributeError):
+                    pass
+                continue
             if '"toolCall"' not in line and '"toolResult"' not in line:
                 continue
             try:
@@ -201,7 +210,7 @@ def read_session(path, since, notes):
                 by_id[m["toolCallId"]]["error"] = True
     if bad:
         notes.append(f"{path}: skipped {bad} malformed line(s)")
-    return calls
+    return calls, cwd
 
 
 def split_heredocs(cmd):
@@ -326,9 +335,10 @@ def file_script(path, code, src):
 def heredoc_script(header, body, src):
     """Classify a heredoc: a script file write or interpreter input; None for anything else."""
     head = strip_shell(header)
-    m = re.search(r"\b(cat|tee)\b[^|;&]*?(?:>>?\s*|\btee\s+(?:-a\s+)?)([^\s<>|;&]+)", header)
-    if m and not m.group(2).startswith("/dev/"):
-        return file_script(m.group(2), body, src)
+    m = (re.search(r"\bcat\b[^|;&]*?>>?\s*([^\s<>|;&]+)", header)
+         or re.search(r"\btee\s+(?:-\S+\s+)*([^\s<>|;&-][^\s<>|;&]*)", header))
+    if m and not m.group(1).strip("'\"").startswith("/dev/"):
+        return file_script(m.group(1), body, src)
     m = re.search(r"(?:^|[\s;&|(])((?:\S*/)?(python3?|node|bun|deno|ruby|perl|bash|sh|zsh|osascript))\b[^|;&]*<<", head)
     if m:
         return {"kind": "inline", "path": None, "lang": LANG[m.group(2)], "code": body, "where": "inline"}
@@ -336,8 +346,14 @@ def heredoc_script(header, body, src):
 
 
 def shebang_lang(code):
-    m = re.match(r"#!\S*?(?:env\s+)?(\w+)", code)
-    return LANG.get(m.group(1)) if m else None
+    m = re.match(r"#![ \t]*(\S+)((?:[ \t]+\S+)*)", code)
+    if not m:
+        return None
+    exe = os.path.basename(m.group(1))
+    if exe == "env":
+        args = [a for a in m.group(2).split() if not a.startswith("-") and "=" not in a]
+        exe = os.path.basename(args[0]) if args else ""
+    return LANG.get(exe) or LANG.get(re.sub(r"[\d.]+$", "", exe))
 
 
 def call_scripts(call, src):
@@ -367,8 +383,19 @@ GIT_VALUE_OPTS = {"-m", "-F", "-C", "-c", "--message", "--file", "--author", "--
                   "--fixup", "--squash", "--pathspec-from-file"}
 
 
-def git_adds(cmd):
-    """Paths named by each git add or git commit in shell text."""
+def resolve(path, cwd):
+    """path made absolute against cwd; None when it depends on a variable or cwd is unknown."""
+    path = os.path.expanduser(path)
+    if "$" in path or "`" in path:
+        return None
+    if os.path.isabs(path):
+        return os.path.normpath(path)
+    return os.path.normpath(os.path.join(cwd, path)) if cwd else None
+
+
+def git_adds(cmd, cwd=None):
+    """Paths named by each git add or git commit in shell text, made absolute where the shell's
+    directory (cwd, cd, git -C) is known."""
     rest, _ = split_heredocs(cmd)
     out = []
     for seg in re.split(r"\|\||&&|[|;&\n()]", drop_comments(rest)):
@@ -378,10 +405,15 @@ def git_adds(cmd):
             toks = seg.split()
         while toks and (ASSIGN.match(toks[0]) or toks[0] in PREFIX):
             toks.pop(0)
+        if toks and toks[0] == "cd":
+            cwd = resolve(toks[1], cwd) if len(toks) > 1 and toks[1] != "-" else None
+            continue
         if len(toks) < 2 or os.path.basename(toks[0]) != "git":
             continue
-        i = 1
+        i, repo = 1, cwd
         while i < len(toks) and toks[i].startswith("-"):
+            if toks[i] == "-C" and i + 1 < len(toks):
+                repo = resolve(toks[i + 1], repo)
             i += 2 if toks[i] in ("-C", "-c") else 1
         if i >= len(toks) or toks[i] not in ("add", "commit"):
             continue
@@ -391,21 +423,30 @@ def git_adds(cmd):
             if t in GIT_VALUE_OPTS or (re.fullmatch(r"-[a-zA-Z]*[mFC]", t) and toks[i] == "commit"):
                 j += 2
                 continue
+            if t == "--":
+                j += 1
+                continue
             if not t.startswith("-"):
-                paths.append(t)
+                paths.append(resolve(t, repo) or t)
             j += 1
         if paths:
             out.append(paths)
     return out
 
 
-def committed(path, adds):
-    """Whether any git add or commit argument names the file at path (either may be relative)."""
-    path = path[2:] if path.startswith("./") else path
+def committed(path, adds, cwd=None):
+    """Whether any git add or commit argument names the file at path. Absolute paths must match
+    exactly; a side whose directory is unknown falls back to a suffix match."""
+    path = resolve(path, cwd) or (path[2:] if path.startswith("./") else path)
     for paths in adds:
         for a in paths:
             a = a[2:] if a.startswith("./") else a
-            if a and (path == a or path.endswith("/" + a) or a.endswith("/" + path)):
+            if not a:
+                continue
+            if os.path.isabs(path) and os.path.isabs(a):
+                if path == a:
+                    return True
+            elif path == a or path.endswith("/" + a) or a.endswith("/" + path):
                 return True
     return False
 
@@ -600,14 +641,14 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
         notes.append(f"pi sessions: not found ({sroot})")
         return {}, notes
     cutoff = since.timestamp()
-    sessions = {}
+    sessions, cwds = {}, {}
     for p in sorted(glob.glob(os.path.join(sroot, "**", "*.jsonl"), recursive=True)):
         try:
             if os.path.getmtime(p) < cutoff:
                 continue
         except OSError:
             continue
-        calls = read_session(p, since, notes)
+        calls, cwds[p] = read_session(p, since, notes)
         if calls:
             sessions[p] = calls
 
@@ -654,25 +695,31 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
 
     shapes, scripts_g, helpers_raw, retries = Groups(), [], defaultdict(list), Groups()
     for p, calls in sessions.items():
-        adds = {i: git_adds(c["args"]["command"]) for i, c in enumerate(calls)
-                if c["name"] == "bash" and isinstance(c["args"].get("command"), str)
+        cwd = cwds.get(p)
+        adds = {i: git_adds(c["args"]["command"], cwd) for i, c in enumerate(calls)
+                if c["name"] == "bash" and not c["error"] and isinstance(c["args"].get("command"), str)
                 and "git" in c["args"]["command"]}
         adds = {i: a for i, a in adds.items() if a}
+        shape_of = {}
+        last_at = {}
+        if any(c["error"] for c in calls):
+            for i, c in enumerate(calls):
+                shape_of[i] = call_shape(p, i, c)
+                if shape_of[i]:
+                    last_at[shape_of[i]] = i
         for i, c in enumerate(calls):
             for seg in parsed.get((p, i), []):
                 key = key_of(seg)
                 if not ordinary(*key[0], key[1]):
                     shapes.add(key, p, excerpt(c["args"]["command"], key[0][0], key[0][1]))
             for s in call_scripts(c, src):
-                if s["where"] == "worktree" and any(committed(s["path"], a) for j, a in adds.items() if j > i):
+                if s["where"] == "worktree" and any(committed(s["path"], a, cwd) for j, a in adds.items() if j > i):
                     continue
                 if len([x for x in s["code"].splitlines() if x.strip()]) >= MIN_SCRIPT_LINES:
                     s["session"] = p
                     scripts_g.append(s)
-            if c["error"]:
-                shape = call_shape(p, i, c)
-                if shape and any(call_shape(p, j, calls[j]) == shape for j in range(i + 1, min(i + 4, len(calls)))):
-                    retries.add(shape, p, json.dumps(c["args"])[:400])
+            if c["error"] and shape_of.get(i) and last_at[shape_of[i]] > i:
+                retries.add(shape_of[i], p, json.dumps(c["args"])[:400])
 
     feats = [features(s) for s in scripts_g]
     df = Counter(x for f in feats for x in f)
@@ -702,11 +749,10 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
                 script_groups.add(label, s["session"], (f"{s['path']}: " if s["path"] else "") + s["code"],
                                   s["where"])
 
-        for i in idx:
-            code = scripts_g[i]["code"]
-            for name, start in defs(code):
-                body = def_body(code, start)
-                helpers_raw[(lang, name)].append((body_tokens(body, name), scripts_g[i]["session"], body))
+    for s in scripts_g:
+        for name, start in defs(s["code"]):
+            body = def_body(s["code"], start)
+            helpers_raw[(s["lang"], name)].append((body_tokens(body, name), s["session"], body))
 
     helper_groups = Groups()
     for (lang, name), items in helpers_raw.items():

@@ -56,11 +56,28 @@ class Normalize(unittest.TestCase):
 
     def test_git_add_and_commit_paths(self):
         adds = rs.git_adds("cd /w && git -C /w add a.py ./b/c.mjs && git commit -am 'msg' d.sh; git add -A")
-        self.assertEqual(adds, [["a.py", "./b/c.mjs"], ["d.sh"]])
+        self.assertEqual(adds, [["/w/a.py", "/w/b/c.mjs"], ["/w/d.sh"]])
+        self.assertEqual(rs.git_adds("git add a.py && cd sub && git -C ../r add b.py", "/w"),
+                         [["/w/a.py"], ["/w/r/b.py"]])
+        self.assertFalse(rs.committed("/repo-a/helper.py", rs.git_adds("git -C /repo-b add helper.py")))
+        self.assertTrue(rs.committed("helper.py", rs.git_adds("git add helper.py", "/r"), "/r"))
         self.assertTrue(rs.committed("/w/b/c.mjs", adds))
         self.assertTrue(rs.committed("d.sh", adds))
         self.assertFalse(rs.committed("/w/msg", adds))
         self.assertFalse(rs.committed("/w/e.mjs", rs.git_adds("git add -A /w; git add .; git commit -a -m x")))
+
+    def test_tee_heredoc_writes_a_script_file(self):
+        for cmd in ("tee /tmp/a.py <<'EOF'", "tee -a /tmp/a.py <<'EOF'", "cat <<'EOF' | tee /tmp/a.py >/dev/null"):
+            call = {"name": "bash", "args": {"command": cmd + "\nimport os\nx = 1\nprint(x)\nEOF"}}
+            self.assertEqual([(s["path"], s["lang"]) for s in rs.call_scripts(call, source())],
+                             [("/tmp/a.py", "py")], cmd)
+
+    def test_shebang_language(self):
+        for line, lang in (("#!/usr/bin/env python3", "py"), ("#!/usr/bin/python3.11", "py"), ("#!/bin/bash", "sh"),
+                           ("#!/usr/bin/env node", "js"), ("#!/usr/bin/env -S node --no-warnings", "js")):
+            self.assertEqual(rs.shebang_lang(line + "\nx\n"), lang, line)
+        self.assertIsNone(rs.shebang_lang("#!/usr/bin/env frob\n"))
+        self.assertIsNone(rs.shebang_lang("print(1)\n"))
 
     def test_ordinary_shapes(self):
         self.assertTrue(rs.ordinary("git", ("status",), (), frozenset()))
@@ -132,6 +149,56 @@ class Report(unittest.TestCase):
             rep, _ = run(tool_dirs=[d])
         self.assertEqual(group(rep, "command shapes", "frobctl sync --target")["existing"], ["frobctl"])
         self.assertEqual(group(self.report, "command shapes", "frobctl sync --target")["existing"], [])
+
+
+def write_sessions(d, n, calls):
+    """n transcripts in d, each holding calls: (tool name, arguments, errored)."""
+    for k in range(n):
+        lines = [{"type": "session", "id": str(k), "timestamp": "2026-10-01T10:00:00.000Z", "cwd": "/w"}]
+        for i, (name, args, err) in enumerate(calls):
+            ts = "2026-10-01T10:%02d:00.000Z" % i
+            lines.append({"type": "message", "timestamp": ts, "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": f"c{i}", "name": name, "arguments": args}]}})
+            lines.append({"type": "message", "timestamp": ts, "message": {
+                "role": "toolResult", "toolCallId": f"c{i}", "isError": err, "content": []}})
+        with open(os.path.join(d, f"s{k:02d}.jsonl"), "w") as f:
+            f.write("\n".join(json.dumps(x) for x in lines) + "\n")
+
+
+HELPER = "#!/usr/bin/env python3\nimport sys\ndef unpack(data):\n    return data.strip()\nprint(unpack(sys.argv[1]))\n"
+
+
+class Synthetic(unittest.TestCase):
+    def analyze(self, n, calls):
+        with tempfile.TemporaryDirectory() as d:
+            write_sessions(d, n, calls)
+            rep, _ = rs.analyze(source(sessions=d), rs.parse_since("2026-09-01"), min_sessions=3, top=15)
+        return rep
+
+    def test_retry_found_after_unrelated_calls(self):
+        sync = ("bash", {"command": "frobctl sync --target a"}, False)
+        reads = [("read", {"path": f"/w/f{i}"}, False) for i in range(4)]
+        rep = self.analyze(3, [(sync[0], sync[1], True)] + reads + [sync])
+        self.assertEqual(group(rep, "failed then retried", "bash: frobctl sync --target")["sessions"], 3)
+
+    def test_extensionless_shebang_file_counts(self):
+        rep = self.analyze(3, [("write", {"path": "/w/a/bin/helper", "content": HELPER}, False)])
+        self.assertEqual(rep["stats"]["scripts"], 3)
+
+    def test_commit_in_another_repo_or_failed_keeps_the_script(self):
+        write = ("write", {"path": "/repo-a/helper.py", "content": HELPER}, False)
+        other = self.analyze(3, [write, ("bash", {"command": "git -C /repo-b add helper.py"}, False)])
+        self.assertEqual(other["stats"]["scripts"], 3)
+        failed = self.analyze(3, [write, ("bash", {"command": "git -C /repo-a add helper.py"}, True)])
+        self.assertEqual(failed["stats"]["scripts"], 3)
+        same = self.analyze(3, [write, ("bash", {"command": "cd /repo-a && git add helper.py"}, False)])
+        self.assertEqual(same["stats"]["scripts"], 0)
+
+    def test_helper_reported_however_many_sessions_repeat_it(self):
+        code = "function unpack(data) { return JSON.parse(data); }\nconst r = unpack(x);\nconsole.log(r);\n"
+        for n in (3, 30):
+            rep = self.analyze(n, [("mcpScript", {"code": code}, False)])
+            self.assertEqual(group(rep, "repeated helpers", "[js] unpack")["sessions"], n, n)
 
 
 class Cli(unittest.TestCase):
