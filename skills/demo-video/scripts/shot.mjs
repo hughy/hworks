@@ -113,6 +113,25 @@ function parse(argv) {
   };
 }
 
+const firstLine = (e) => String((e && e.message) || e).split("\n")[0];
+
+function measure() {
+  return {
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+    scrollHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+  };
+}
+
+function withTimeout(promise, ms) {
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+}
+
 async function shoot(browser, opts, target, viewport) {
   const size = `${viewport.width}x${viewport.height}`;
   const file = path.join(opts.out, `${opts.name}${target.slug}-${size}.png`);
@@ -134,40 +153,42 @@ async function shoot(browser, opts, target, viewport) {
     const page = await context.newPage();
     page.on("console", (m) => m.type() === "error" && result.consoleErrors.push(m.text()));
     page.on("pageerror", (e) => result.consoleErrors.push(String(e.message || e)));
+    const errors = [];
+    let capture = true;
     let response;
     try {
       response = await page.goto(target.url, { waitUntil: "load", timeout: opts.timeout });
     } catch (e) {
-      result.error = `load failed: ${e.message.split("\n")[0]}`;
-      return result;
+      errors.push(`load failed: ${firstLine(e)}`);
+      // After a timeout the page usually shows what has rendered so far; other failures leave only Chrome's error page.
+      capture = e.name === "TimeoutError";
     }
-    if (response && response.status() >= 400) result.error = `HTTP ${response.status()}`;
-    if (!result.error && opts.waitFor) {
+    if (response && response.status() >= 400) errors.push(`HTTP ${response.status()}`);
+    if (!errors.length && opts.waitFor) {
       try {
         await page.waitForSelector(opts.waitFor, { state: "visible", timeout: opts.timeout });
       } catch {
-        result.error = `selector ${opts.waitFor} not visible after ${opts.timeout} ms`;
+        errors.push(`selector ${opts.waitFor} not visible after ${opts.timeout} ms`);
       }
     }
-    if (!result.error && opts.settle) await page.waitForTimeout(opts.settle);
-    try {
-      Object.assign(
-        result,
-        await page.evaluate(() => ({
-          scrollWidth: document.documentElement.scrollWidth,
-          innerWidth: window.innerWidth,
-          scrollHeight: document.documentElement.scrollHeight,
-          innerHeight: window.innerHeight,
-        })),
-      );
-      result.overflowX = result.scrollWidth > result.innerWidth;
-      result.overflowY = result.scrollHeight > result.innerHeight;
-      // A failed shot still saves what rendered, which usually shows why the selector never appeared.
-      await page.screenshot({ path: file, fullPage: opts.fullPage, timeout: opts.timeout });
-      result.file = file;
-    } catch (e) {
-      result.error ??= `screenshot failed: ${e.message.split("\n")[0]}`;
+    if (!errors.length && opts.settle) await page.waitForTimeout(opts.settle);
+    if (capture) {
+      try {
+        // page.evaluate has no timeout of its own and never returns while the page's main thread is busy.
+        Object.assign(result, await withTimeout(page.evaluate(measure), opts.timeout));
+        result.overflowX = result.scrollWidth > result.innerWidth;
+        result.overflowY = result.scrollHeight > result.innerHeight;
+      } catch (e) {
+        errors.push(`measure failed: ${firstLine(e)}`);
+      }
+      try {
+        await page.screenshot({ path: file, fullPage: opts.fullPage, timeout: opts.timeout });
+        result.file = file;
+      } catch (e) {
+        errors.push(`screenshot failed: ${firstLine(e)}`);
+      }
     }
+    if (errors.length) result.error = errors.join("; ");
     return result;
   } finally {
     await context.close().catch(() => {});
@@ -189,7 +210,7 @@ async function main() {
   try {
     browser = await chromium.launch(channel === "bundled" ? {} : { channel });
   } catch (e) {
-    console.error(`shot: cannot launch ${channel === "bundled" ? "Playwright's Chromium" : `the ${channel} channel`}: ${e.message.split("\n")[0]}`);
+    console.error(`shot: cannot launch ${channel === "bundled" ? "Playwright's Chromium" : `the ${channel} channel`}: ${firstLine(e)}`);
     process.exit(1);
   }
   const failures = [];
@@ -199,7 +220,7 @@ async function main() {
         const r = await shoot(browser, opts, target, viewport).catch((e) => ({
           path: target.path,
           viewport: `${viewport.width}x${viewport.height}`,
-          error: e.message.split("\n")[0],
+          error: firstLine(e),
         }));
         const line = {};
         for (const k of ["path", "viewport", "file", "scrollWidth", "innerWidth", "scrollHeight", "innerHeight", "overflowX", "overflowY", "consoleErrors"]) line[k] = r[k] ?? null;

@@ -90,11 +90,13 @@ if node "$shot" "$base" --path /narrow/ --path /missing/ --viewports 800x600 --s
 fi
 grep -q "FAILED $base/missing/ at 800x600: HTTP 404" "$work/fail.err" || { echo "shot: missing page not named:" >&2; cat "$work/fail.err" >&2; exit 1; }
 grep -q '"path":"/narrow/".*"overflowX":false' "$work/fail.jsonl" || { echo "shot: good page not reported beside a failed one" >&2; exit 1; }
+[[ -s "$work/fail/missing-800x600.png" ]] || { echo "shot: no PNG of the 404 page" >&2; exit 1; }
 
 if node "$shot" "$base" --path /narrow/ --viewports 800x600 --wait-for '#never' --timeout 500 --out "$work/sel" >/dev/null 2>"$work/sel.err"; then
   echo "shot: a missing selector exited 0" >&2; exit 1
 fi
 grep -q "FAILED $base/narrow/ at 800x600: selector #never not visible" "$work/sel.err" || { echo "shot: missing selector not named:" >&2; cat "$work/sel.err" >&2; exit 1; }
+[[ -s "$work/sel/narrow-800x600.png" ]] || { echo "shot: no PNG of the page that never showed the selector" >&2; exit 1; }
 
 # A socket that accepts connections and never answers keeps a font load pending, so page.screenshot waits on fonts and times out.
 python3 -u -c '
@@ -132,5 +134,41 @@ grep -q "FAILED $base/fonts/ at 800x600: screenshot failed" "$work/cap.err" || {
 grep -q '"path":"/fonts/".*"file":null.*"error":"screenshot failed' "$work/cap.jsonl" || { echo "shot: failed screenshot has no JSON line:" >&2; cat "$work/cap.jsonl" >&2; exit 1; }
 grep -q '"path":"/narrow/".*"overflowX":false' "$work/cap.jsonl" || { echo "shot: shot after a failed screenshot did not run:" >&2; cat "$work/cap.jsonl" "$work/cap.err" >&2; exit 1; }
 [[ -f "$work/cap/narrow-800x600.png" ]] || { echo "shot: no PNG for the shot after a failed screenshot" >&2; exit 1; }
+
+# An image from the hanging socket keeps the load event from firing, so page.goto times out after the text has rendered.
+mkdir -p "$site/slow"
+cat >"$site/slow/index.html" <<EOF
+<!doctype html><html><head><style>body{margin:0}</style></head><body><p>slow page</p>
+<img src="http://127.0.0.1:$hang_port/hang.png"></body></html>
+EOF
+if node "$shot" "$base" --path /slow/ --viewports 800x600 --settle 0 --timeout 1500 --out "$work/slow" >"$work/slow.jsonl" 2>"$work/slow.err"; then
+  echo "shot: a timed-out load exited 0" >&2; exit 1
+fi
+grep -q "FAILED $base/slow/ at 800x600: load failed: .*Timeout" "$work/slow.err" || { echo "shot: timed-out load not named:" >&2; cat "$work/slow.err" >&2; exit 1; }
+grep -q '"path":"/slow/","viewport":"800x600","file":"'"$work"'/slow/slow-800x600.png","scrollWidth":800,"innerWidth":800,.*"overflowX":false,.*"error":"load failed: [^;]*"}$' "$work/slow.jsonl" \
+  || { echo "shot: timed-out load not captured best-effort:" >&2; cat "$work/slow.jsonl" >&2; exit 1; }
+[[ -s "$work/slow/slow-800x600.png" ]] || { echo "shot: no PNG after a timed-out load" >&2; exit 1; }
+
+# A refused connection leaves only Chrome's error page, so there is nothing worth capturing.
+closed_port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+if node "$shot" "http://127.0.0.1:$closed_port" --path /x/ --viewports 800x600 --settle 0 --out "$work/refused" >"$work/refused.jsonl" 2>"$work/refused.err"; then
+  echo "shot: a refused connection exited 0" >&2; exit 1
+fi
+grep -q '"path":"/x/".*"file":null.*"error":"load failed: [^;]*ERR_CONNECTION_REFUSED' "$work/refused.jsonl" || { echo "shot: refused connection not reported:" >&2; cat "$work/refused.jsonl" >&2; exit 1; }
+[[ -z "$(ls -A "$work/refused")" ]] || { echo "shot: refused connection wrote a file: $(ls "$work/refused")" >&2; exit 1; }
+
+# A main thread that never yields blocks page.evaluate, which has no timeout of its own.
+mkdir -p "$site/busy"
+cat >"$site/busy/index.html" <<'EOF'
+<!doctype html><html><body><p>busy page</p><script>
+  addEventListener("load", () => setTimeout(() => { for (;;) {} }, 0));
+</script></body></html>
+EOF
+if node "$shot" "$base" --path /busy/ --path /narrow/ --viewports 800x600 --settle 200 --timeout 1500 --out "$work/busy" >"$work/busy.jsonl" 2>"$work/busy.err"; then
+  echo "shot: a busy page exited 0" >&2; exit 1
+fi
+grep -q "FAILED $base/busy/ at 800x600: measure failed: timed out after 1500 ms" "$work/busy.err" || { echo "shot: failed measure not named:" >&2; cat "$work/busy.err" >&2; exit 1; }
+grep -q '"path":"/busy/".*"overflowX":null.*"error":"measure failed' "$work/busy.jsonl" || { echo "shot: failed measure has no JSON line:" >&2; cat "$work/busy.jsonl" >&2; exit 1; }
+grep -q '"path":"/narrow/".*"overflowX":false' "$work/busy.jsonl" || { echo "shot: shot after a busy page did not run:" >&2; cat "$work/busy.jsonl" "$work/busy.err" >&2; exit 1; }
 
 echo "shot: ok ($work)"
