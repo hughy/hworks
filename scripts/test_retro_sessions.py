@@ -54,6 +54,14 @@ class Normalize(unittest.TestCase):
         self.assertEqual([(s["lang"], s["code"]) for s in rs.call_scripts(call, source())],
                          [("py", "import json\nd = json.load(f)\nprint(d)")])
 
+    def test_git_add_and_commit_paths(self):
+        adds = rs.git_adds("cd /w && git -C /w add a.py ./b/c.mjs && git commit -am 'msg' d.sh; git add -A")
+        self.assertEqual(adds, [["a.py", "./b/c.mjs"], ["d.sh"]])
+        self.assertTrue(rs.committed("/w/b/c.mjs", adds))
+        self.assertTrue(rs.committed("d.sh", adds))
+        self.assertFalse(rs.committed("/w/msg", adds))
+        self.assertFalse(rs.committed("/w/e.mjs", rs.git_adds("git add -A /w; git add .; git commit -a -m x")))
+
     def test_ordinary_shapes(self):
         self.assertTrue(rs.ordinary("git", ("status",), (), frozenset()))
         self.assertTrue(rs.ordinary("go", ("test",), (), frozenset()))
@@ -83,6 +91,17 @@ class Report(unittest.TestCase):
         self.assertEqual(rows[0]["sessions"], 3)
         self.assertTrue(rows[0]["shape"].startswith("[js]"))
 
+    def test_scripts_count_worktree_files_and_label_location(self):
+        rows = [r for r in self.report["agent-written scripts"] if ".screenshot()" in r["shape"]]
+        self.assertEqual(rows[0]["where"], {"scratch": 2, "worktree": 1})
+        g = group(self.report, "agent-written scripts", "[js] .call(), call(\"gw_call\"), def call")
+        self.assertEqual(g["where"], {"inline": 3})
+
+    def test_worktree_scripts_committed_later_are_dropped(self):
+        every, _ = rs.analyze(source(), rs.parse_since("2026-09-01"), min_sessions=1, top=50)
+        self.assertFalse([r for r in every["agent-written scripts"] if r["shape"].startswith("[py]")])
+        self.assertEqual(self.report["stats"]["scripts"], 6)
+
     def test_repeated_helper_definitions(self):
         g = group(self.report, "repeated helpers", "[js] call")
         self.assertEqual((g["sessions"], g["calls"]), (3, 3))
@@ -97,7 +116,7 @@ class Report(unittest.TestCase):
         self.assertEqual(group(self.report, "command shapes", "go test -overlay")["existing"], [])
 
     def test_malformed_line_is_skipped_and_reported(self):
-        self.assertEqual(self.report["stats"]["calls"], 22)
+        self.assertEqual(self.report["stats"]["calls"], 28)
         self.assertTrue(any("2026-10-02_s2.jsonl: skipped 1 malformed" in n for n in self.notes))
 
     def test_since_filter(self):

@@ -30,9 +30,14 @@ or a build, test, lint, or interpreter runner (RUNNERS) left with no flag and no
 Both lists came from the most common shapes in two weeks of real sessions, where they filled
 the top of the report and hid everything else.
 
-Scripts: files written under /tmp, $TMPDIR, or a task dir by the write tool or a cat/tee
-heredoc, plus inline interpreter code (python -c, node -e, heredocs to an interpreter,
-mcpScript code), each at least MIN_SCRIPT_LINES non-blank lines. A fingerprint is the helpers
+Scripts: script files (a script extension or a shebang) written anywhere by the write tool or
+a cat/tee heredoc, plus inline interpreter code (python -c, node -e, heredocs to an
+interpreter, mcpScript code), each at least MIN_SCRIPT_LINES non-blank lines. Each script has
+a location class: scratch (under /tmp, $TMPDIR, or a task dir), worktree (anywhere else), or
+inline; a group lists how many of its scripts fall in each. A worktree file is dropped when a
+later bash call in the same session runs git add or git commit naming that file: it is
+ordinary development, not a throwaway. A directory or a sweep (git add -A, git commit -a) does
+not count, since in real sessions those mostly followed throwaways that were deleted or ignored. A fingerprint is the helpers
 a script defines, the modules it imports, the methods it calls (receiver dropped, so renamed
 variables still match), and literal names passed to calls. Features in more than a fifth of
 scripts or in only one session are dropped. Scripts of one language whose fingerprints
@@ -50,6 +55,7 @@ import json
 import math
 import os
 import re
+import shlex
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -308,19 +314,24 @@ def is_scratch(path, src):
     return any(p.startswith(r) for r in roots)
 
 
+def file_script(path, code, src):
+    path = path.strip("'\"")
+    lang = EXT_LANG.get(os.path.splitext(path)[1].lstrip(".")) or shebang_lang(code)
+    if not lang:
+        return None
+    return {"kind": "file", "path": path, "lang": lang, "code": code,
+            "where": "scratch" if is_scratch(path, src) else "worktree"}
+
+
 def heredoc_script(header, body, src):
-    """Classify a heredoc: a scratch file write or interpreter input; None for anything else."""
+    """Classify a heredoc: a script file write or interpreter input; None for anything else."""
     head = strip_shell(header)
     m = re.search(r"\b(cat|tee)\b[^|;&]*?(?:>>?\s*|\btee\s+(?:-a\s+)?)([^\s<>|;&]+)", header)
-    if m and is_scratch(m.group(2), src):
-        ext = os.path.splitext(m.group(2).strip("'\""))[1].lstrip(".")
-        lang = EXT_LANG.get(ext) or shebang_lang(body)
-        if lang:
-            return {"kind": "file", "path": m.group(2), "lang": lang, "code": body}
-        return None
+    if m and not m.group(2).startswith("/dev/"):
+        return file_script(m.group(2), body, src)
     m = re.search(r"(?:^|[\s;&|(])((?:\S*/)?(python3?|node|bun|deno|ruby|perl|bash|sh|zsh|osascript))\b[^|;&]*<<", head)
     if m:
-        return {"kind": "inline", "path": None, "lang": LANG[m.group(2)], "code": body}
+        return {"kind": "inline", "path": None, "lang": LANG[m.group(2)], "code": body, "where": "inline"}
     return None
 
 
@@ -333,13 +344,12 @@ def call_scripts(call, src):
     """Scripts written or run inline by one tool call."""
     name, a = call["name"], call["args"]
     out = []
-    if name == "write" and is_scratch(a.get("path"), src) and isinstance(a.get("content"), str):
-        ext = os.path.splitext(a["path"])[1].lstrip(".")
-        lang = EXT_LANG.get(ext) or shebang_lang(a["content"])
-        if lang:
-            out.append({"kind": "file", "path": a["path"], "lang": lang, "code": a["content"]})
+    if name == "write" and isinstance(a.get("path"), str) and isinstance(a.get("content"), str):
+        s = file_script(a["path"], a["content"], src)
+        if s:
+            out.append(s)
     elif name == "mcpScript" and isinstance(a.get("code"), str):
-        out.append({"kind": "inline", "path": None, "lang": "js", "code": a["code"]})
+        out.append({"kind": "inline", "path": None, "lang": "js", "code": a["code"], "where": "inline"})
     elif name == "bash" and isinstance(a.get("command"), str):
         rest, docs = split_heredocs(a["command"])
         for header, body in docs:
@@ -349,8 +359,55 @@ def call_scripts(call, src):
         for m in INLINE.finditer(rest):
             q = m.group(3)
             code = q[1:-1].replace('\\"', '"') if q[0] == '"' else q[1:-1]
-            out.append({"kind": "inline", "path": None, "lang": LANG[m.group(1)], "code": code})
+            out.append({"kind": "inline", "path": None, "lang": LANG[m.group(1)], "code": code, "where": "inline"})
     return out
+
+
+GIT_VALUE_OPTS = {"-m", "-F", "-C", "-c", "--message", "--file", "--author", "--date", "--reuse-message",
+                  "--fixup", "--squash", "--pathspec-from-file"}
+
+
+def git_adds(cmd):
+    """Paths named by each git add or git commit in shell text."""
+    rest, _ = split_heredocs(cmd)
+    out = []
+    for seg in re.split(r"\|\||&&|[|;&\n()]", drop_comments(rest)):
+        try:
+            toks = shlex.split(seg)
+        except ValueError:
+            toks = seg.split()
+        while toks and (ASSIGN.match(toks[0]) or toks[0] in PREFIX):
+            toks.pop(0)
+        if len(toks) < 2 or os.path.basename(toks[0]) != "git":
+            continue
+        i = 1
+        while i < len(toks) and toks[i].startswith("-"):
+            i += 2 if toks[i] in ("-C", "-c") else 1
+        if i >= len(toks) or toks[i] not in ("add", "commit"):
+            continue
+        paths, j = [], i + 1
+        while j < len(toks):
+            t = toks[j]
+            if t in GIT_VALUE_OPTS or (re.fullmatch(r"-[a-zA-Z]*[mFC]", t) and toks[i] == "commit"):
+                j += 2
+                continue
+            if not t.startswith("-"):
+                paths.append(t)
+            j += 1
+        if paths:
+            out.append(paths)
+    return out
+
+
+def committed(path, adds):
+    """Whether any git add or commit argument names the file at path (either may be relative)."""
+    path = path[2:] if path.startswith("./") else path
+    for paths in adds:
+        for a in paths:
+            a = a[2:] if a.startswith("./") else a
+            if a and (path == a or path.endswith("/" + a) or a.endswith("/" + path)):
+                return True
+    return False
 
 
 DEF_PATTERNS = [
@@ -449,21 +506,20 @@ class UnionFind:
 
 
 def cluster(sets, threshold=0.5, max_df=400, weight=None):
-    """Group indexes of sets whose Jaccard similarity reaches threshold; candidates share a rare item."""
+    """Group indexes of sets whose Jaccard similarity reaches threshold; candidates share an item in at
+    most max_df sets."""
     uf, index = UnionFind(len(sets)), defaultdict(list)
     for i, s in enumerate(sets):
         for x in s:
             index[x].append(i)
-    seen = set()
     for i, s in enumerate(sets):
-        rare = sorted((x for x in s if len(index[x]) <= max_df), key=lambda x: len(index[x]))[:3]
-        for x in rare:
-            for j in index[x]:
-                if j <= i or (i, j) in seen:
-                    continue
-                seen.add((i, j))
-                if uf.find(i) != uf.find(j) and jaccard(s, sets[j], weight) >= threshold:
-                    uf.union(i, j)
+        cand = set()
+        for x in s:
+            if len(index[x]) <= max_df:
+                cand.update(j for j in index[x] if j > i)
+        for j in cand:
+            if uf.find(i) != uf.find(j) and jaccard(s, sets[j], weight) >= threshold:
+                uf.union(i, j)
     groups = defaultdict(list)
     for i in range(len(sets)):
         groups[uf.find(i)].append(i)
@@ -496,8 +552,11 @@ class Groups:
         self.calls = Counter()
         self.sessions = defaultdict(set)
         self.samples = {}
+        self.where = defaultdict(Counter)
 
-    def add(self, key, session, sample):
+    def add(self, key, session, sample, where=None):
+        if where:
+            self.where[key][where] += 1
         self.calls[key] += 1
         self.sessions[key].add(session)
         if key not in self.samples or (len(self.sessions[key]) == 1 and len(sample) < len(self.samples[key])):
@@ -510,9 +569,12 @@ def ranked(section, groups, label, min_sessions, top, names, root):
         if len(sess) < min_sessions:
             continue
         text = label(key)
-        rows.append({"section": section, "shape": text, "sessions": len(sess), "calls": groups.calls[key],
-                     "examples": [os.path.relpath(p, root) for p in sorted(sess)[:3]],
-                     "sample": short(groups.samples[key]), "existing": tool_hits(text, names)})
+        row = {"section": section, "shape": text, "sessions": len(sess), "calls": groups.calls[key],
+               "examples": [os.path.relpath(p, root) for p in sorted(sess)[:3]],
+               "sample": short(groups.samples[key]), "existing": tool_hits(text, names)}
+        if key in groups.where:
+            row["where"] = dict(sorted(groups.where[key].items()))
+        rows.append(row)
     rows.sort(key=lambda r: (-r["sessions"], -r["calls"], r["shape"]))
     return rows[:top]
 
@@ -592,12 +654,18 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
 
     shapes, scripts_g, helpers_raw, retries = Groups(), [], defaultdict(list), Groups()
     for p, calls in sessions.items():
+        adds = {i: git_adds(c["args"]["command"]) for i, c in enumerate(calls)
+                if c["name"] == "bash" and isinstance(c["args"].get("command"), str)
+                and "git" in c["args"]["command"]}
+        adds = {i: a for i, a in adds.items() if a}
         for i, c in enumerate(calls):
             for seg in parsed.get((p, i), []):
                 key = key_of(seg)
                 if not ordinary(*key[0], key[1]):
                     shapes.add(key, p, excerpt(c["args"]["command"], key[0][0], key[0][1]))
             for s in call_scripts(c, src):
+                if s["where"] == "worktree" and any(committed(s["path"], a) for j, a in adds.items() if j > i):
+                    continue
                 if len([x for x in s["code"].splitlines() if x.strip()]) >= MIN_SCRIPT_LINES:
                     s["session"] = p
                     scripts_g.append(s)
@@ -631,7 +699,8 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
             label = f"[{lang}] " + ", ".join(top_f)
             for m in members:
                 s = scripts_g[m]
-                script_groups.add(label, s["session"], (f"{s['path']}: " if s["path"] else "") + s["code"])
+                script_groups.add(label, s["session"], (f"{s['path']}: " if s["path"] else "") + s["code"],
+                                  s["where"])
 
         for i in idx:
             code = scripts_g[i]["code"]
@@ -694,6 +763,8 @@ def main(argv=None):
             for r in rows:
                 flag = f"  [exists: {', '.join(r['existing'])}]" if r["existing"] else ""
                 print(f"{r['sessions']:>5} {r['calls']:>5}  {r['shape']}{flag}")
+                if "where" in r:
+                    print(f"             where: {', '.join(f'{k} {n}' for k, n in r['where'].items())}")
                 print(f"             e.g. {', '.join(r['examples'])}")
                 print(f"             sample: {r['sample']}")
     for n in notes:
