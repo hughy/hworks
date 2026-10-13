@@ -34,13 +34,13 @@ Scripts: script files (a script extension or a shebang) written anywhere by the 
 a cat/tee heredoc, plus inline interpreter code (python -c, node -e, heredocs to an
 interpreter, mcpScript code), each at least MIN_SCRIPT_LINES non-blank lines. Each script has
 a location class: scratch (under /tmp, $TMPDIR, or a task dir), worktree (anywhere else), or
-inline; a group lists how many of its scripts fall in each. A worktree file is dropped when a
-later, successful bash call in the same session runs git add or git commit naming that file
-(both paths resolved against the session cwd and any cd before them, plus git -C): it is ordinary development, not a
-throwaway. A directory or a sweep (git add -A, git commit -a) does
-not count, since in real sessions those mostly followed throwaways that were deleted or ignored. A fingerprint is the helpers
-a script defines, the modules it imports, the methods it calls (receiver dropped, so renamed
-variables still match), and literal names passed to calls. Features in more than a fifth of
+inline; a group lists how many of its scripts fall in each. The class comes from the path as
+written: an absolute path as given, a relative path joined to the session cwd. No cd is
+tracked, so the class is a hint and can be wrong for a relative path written after a cd.
+No script is dropped for being committed later: a group marked [exists] already shows a
+script that became a tool. A fingerprint is the helpers a script defines, the modules it
+imports, the methods it calls (receiver dropped, so renamed variables still match), and
+literal names passed to calls. Features in more than a fifth of
 scripts or in only one session are dropped. Scripts of one language whose fingerprints
 overlap by at least 0.35, weighting rare features higher, are grouped.
 
@@ -56,7 +56,6 @@ import json
 import math
 import os
 import re
-import shlex
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -334,13 +333,11 @@ def file_script(path, code, src, cwd=None):
 
 
 def heredoc_script(header, body, src, cwd=None):
-    """Classify a heredoc: a script file write or interpreter input; None for anything else.
-    cwd is the shell's directory where the header line starts; a cd earlier on the line applies."""
+    """Classify a heredoc: a script file write or interpreter input; None for anything else."""
     head = strip_shell(header)
     m = (re.search(r"\bcat\b[^|;&]*?>>?\s*([^\s<>|;&]+)", header)
          or re.search(r"\btee\s+(?:-\S+\s+)*([^\s<>|;&-][^\s<>|;&]*)", header))
     if m and not m.group(1).strip("'\"").startswith("/dev/"):
-        cwd = shell_dir(header[:m.start()], cwd)
         return file_script(m.group(1), body, src, cwd)
     m = re.search(r"(?:^|[\s;&|(])((?:\S*/)?(python3?|node|bun|deno|ruby|perl|bash|sh|zsh|osascript))\b[^|;&]*<<", head)
     if m:
@@ -360,8 +357,8 @@ def shebang_lang(code):
 
 
 def call_scripts(call, src, cwd=None):
-    """Scripts written or run inline by one tool call. cwd is the session's directory; a file
-    script's path is made absolute against the shell's directory where it was written."""
+    """Scripts written or run inline by one tool call. cwd is the session's directory, used to
+    make a relative file script path absolute."""
     name, a = call["name"], call["args"]
     out = []
     if name == "write" and isinstance(a.get("path"), str) and isinstance(a.get("content"), str):
@@ -372,11 +369,8 @@ def call_scripts(call, src, cwd=None):
         out.append({"kind": "inline", "path": None, "lang": "js", "code": a["code"], "where": "inline"})
     elif name == "bash" and isinstance(a.get("command"), str):
         rest, docs = split_heredocs(a["command"])
-        lines, at = rest.split("\n"), 0
         for header, body in docs:
-            while at < len(lines) and lines[at] != header:
-                at += 1
-            s = heredoc_script(header, body, src, shell_dir("\n".join(lines[:at]), cwd))
+            s = heredoc_script(header, body, src, cwd)
             if s:
                 out.append(s)
         for m in INLINE.finditer(rest):
@@ -384,10 +378,6 @@ def call_scripts(call, src, cwd=None):
             code = q[1:-1].replace('\\"', '"') if q[0] == '"' else q[1:-1]
             out.append({"kind": "inline", "path": None, "lang": LANG[m.group(1)], "code": code, "where": "inline"})
     return out
-
-
-GIT_VALUE_OPTS = {"-m", "-F", "-C", "-c", "--message", "--file", "--author", "--date", "--reuse-message",
-                  "--fixup", "--squash", "--pathspec-from-file"}
 
 
 def resolve(path, cwd):
@@ -398,82 +388,6 @@ def resolve(path, cwd):
     if os.path.isabs(path):
         return os.path.normpath(path)
     return os.path.normpath(os.path.join(cwd, path)) if cwd else None
-
-
-def shell_words(text):
-    """Words of each simple command in shell text (heredoc bodies already removed)."""
-    for seg in re.split(r"\|\||&&|[|;&\n()]", drop_comments(text)):
-        try:
-            toks = shlex.split(seg)
-        except ValueError:
-            toks = seg.split()
-        while toks and (ASSIGN.match(toks[0]) or toks[0] in PREFIX):
-            toks.pop(0)
-        yield toks
-
-
-def cd(toks, cwd):
-    return resolve(toks[1], cwd) if len(toks) > 1 and toks[1] != "-" else None
-
-
-def shell_dir(text, cwd):
-    """The shell's directory after text runs from cwd; None once it depends on something unknown."""
-    for toks in shell_words(text):
-        if toks and toks[0] == "cd":
-            cwd = cd(toks, cwd)
-    return cwd
-
-
-def git_adds(cmd, cwd=None):
-    """Paths named by each git add or git commit in shell text, made absolute where the shell's
-    directory (cwd, cd, git -C) is known."""
-    rest, _ = split_heredocs(cmd)
-    out = []
-    for toks in shell_words(rest):
-        if toks and toks[0] == "cd":
-            cwd = cd(toks, cwd)
-            continue
-        if len(toks) < 2 or os.path.basename(toks[0]) != "git":
-            continue
-        i, repo = 1, cwd
-        while i < len(toks) and toks[i].startswith("-"):
-            if toks[i] == "-C" and i + 1 < len(toks):
-                repo = resolve(toks[i + 1], repo)
-            i += 2 if toks[i] in ("-C", "-c") else 1
-        if i >= len(toks) or toks[i] not in ("add", "commit"):
-            continue
-        paths, j = [], i + 1
-        while j < len(toks):
-            t = toks[j]
-            if t in GIT_VALUE_OPTS or (re.fullmatch(r"-[a-zA-Z]*[mFC]", t) and toks[i] == "commit"):
-                j += 2
-                continue
-            if t == "--":
-                j += 1
-                continue
-            if not t.startswith("-"):
-                paths.append(resolve(t, repo) or t)
-            j += 1
-        if paths:
-            out.append(paths)
-    return out
-
-
-def committed(path, adds, cwd=None):
-    """Whether any git add or commit argument names the file at path. Absolute paths must match
-    exactly; a side whose directory is unknown falls back to a suffix match."""
-    path = resolve(path, cwd) or (path[2:] if path.startswith("./") else path)
-    for paths in adds:
-        for a in paths:
-            a = a[2:] if a.startswith("./") else a
-            if not a:
-                continue
-            if os.path.isabs(path) and os.path.isabs(a):
-                if path == a:
-                    return True
-            elif path == a or path.endswith("/" + a) or a.endswith("/" + path):
-                return True
-    return False
 
 
 DEF_PATTERNS = [
@@ -721,10 +635,6 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
     shapes, scripts_g, helpers_raw, retries = Groups(), [], defaultdict(list), Groups()
     for p, calls in sessions.items():
         cwd = cwds.get(p)
-        adds = {i: git_adds(c["args"]["command"], cwd) for i, c in enumerate(calls)
-                if c["name"] == "bash" and not c["error"] and isinstance(c["args"].get("command"), str)
-                and "git" in c["args"]["command"]}
-        adds = {i: a for i, a in adds.items() if a}
         shape_of = {}
         last_at = {}
         if any(c["error"] for c in calls):
@@ -738,8 +648,6 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
                 if not ordinary(*key[0], key[1]):
                     shapes.add(key, p, excerpt(c["args"]["command"], key[0][0], key[0][1]))
             for s in call_scripts(c, src, cwd):
-                if s["where"] == "worktree" and any(committed(s["path"], a) for j, a in adds.items() if j > i):
-                    continue
                 if len([x for x in s["code"].splitlines() if x.strip()]) >= MIN_SCRIPT_LINES:
                     s["session"] = p
                     scripts_g.append(s)

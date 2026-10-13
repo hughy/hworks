@@ -54,18 +54,6 @@ class Normalize(unittest.TestCase):
         self.assertEqual([(s["lang"], s["code"]) for s in rs.call_scripts(call, source())],
                          [("py", "import json\nd = json.load(f)\nprint(d)")])
 
-    def test_git_add_and_commit_paths(self):
-        adds = rs.git_adds("cd /w && git -C /w add a.py ./b/c.mjs && git commit -am 'msg' d.sh; git add -A")
-        self.assertEqual(adds, [["/w/a.py", "/w/b/c.mjs"], ["/w/d.sh"]])
-        self.assertEqual(rs.git_adds("git add a.py && cd sub && git -C ../r add b.py", "/w"),
-                         [["/w/a.py"], ["/w/r/b.py"]])
-        self.assertFalse(rs.committed("/repo-a/helper.py", rs.git_adds("git -C /repo-b add helper.py")))
-        self.assertTrue(rs.committed("helper.py", rs.git_adds("git add helper.py", "/r"), "/r"))
-        self.assertTrue(rs.committed("/w/b/c.mjs", adds))
-        self.assertTrue(rs.committed("d.sh", adds))
-        self.assertFalse(rs.committed("/w/msg", adds))
-        self.assertFalse(rs.committed("/w/e.mjs", rs.git_adds("git add -A /w; git add .; git commit -a -m x")))
-
     def test_tee_heredoc_writes_a_script_file(self):
         for cmd in ("tee /tmp/a.py <<'EOF'", "tee -a /tmp/a.py <<'EOF'", "cat <<'EOF' | tee /tmp/a.py >/dev/null"):
             call = {"name": "bash", "args": {"command": cmd + "\nimport os\nx = 1\nprint(x)\nEOF"}}
@@ -114,10 +102,10 @@ class Report(unittest.TestCase):
         g = group(self.report, "agent-written scripts", "[js] .call(), call(\"gw_call\"), def call")
         self.assertEqual(g["where"], {"inline": 3})
 
-    def test_worktree_scripts_committed_later_are_dropped(self):
-        every, _ = rs.analyze(source(), rs.parse_since("2026-09-01"), min_sessions=1, top=50)
-        self.assertFalse([r for r in every["agent-written scripts"] if r["shape"].startswith("[py]")])
-        self.assertEqual(self.report["stats"]["scripts"], 6)
+    def test_worktree_scripts_committed_later_are_kept(self):
+        g = [r for r in self.report["agent-written scripts"] if r["shape"].startswith("[py]")]
+        self.assertEqual((g[0]["sessions"], g[0]["where"]), (3, {"worktree": 3}))
+        self.assertEqual(self.report["stats"]["scripts"], 9)
 
     def test_repeated_helper_definitions(self):
         g = group(self.report, "repeated helpers", "[js] call")
@@ -185,24 +173,18 @@ class Synthetic(unittest.TestCase):
         rep = self.analyze(3, [("write", {"path": "/w/a/bin/helper", "content": HELPER}, False)])
         self.assertEqual(rep["stats"]["scripts"], 3)
 
-    def test_commit_in_another_repo_or_failed_keeps_the_script(self):
-        write = ("write", {"path": "/repo-a/helper.py", "content": HELPER}, False)
-        other = self.analyze(3, [write, ("bash", {"command": "git -C /repo-b add helper.py"}, False)])
-        self.assertEqual(other["stats"]["scripts"], 3)
-        failed = self.analyze(3, [write, ("bash", {"command": "git -C /repo-a add helper.py"}, True)])
-        self.assertEqual(failed["stats"]["scripts"], 3)
-        same = self.analyze(3, [write, ("bash", {"command": "cd /repo-a && git add helper.py"}, False)])
-        self.assertEqual(same["stats"]["scripts"], 0)
-
-    def test_heredoc_path_resolves_against_its_own_cd(self):
-        heredoc = ("bash", {"command": "cd /repo-a && cat > helper.py <<'EOF'\n" + HELPER + "EOF"}, False)
-        other = self.analyze(3, [heredoc, ("bash", {"command": "git -C /w add helper.py"}, False)])
-        self.assertEqual(other["stats"]["scripts"], 3)
-        same = self.analyze(3, [heredoc, ("bash", {"command": "git -C /repo-a add helper.py"}, False)])
-        self.assertEqual(same["stats"]["scripts"], 0)
-        call = {"name": "bash", "args": {"command": "cd /a\ncd b && tee c.py <<'X'\nx\nX\ncd /tmp; cat > d.py <<'Y'\ny\nY"}}
+    def test_relative_path_is_labelled_against_the_session_cwd_without_cd_tracking(self):
+        call = {"name": "bash", "args": {"command": "cd /tmp && cat > a.py <<'X'\nx\nX\ntee /tmp/b.py <<'Y'\ny\nY"}}
         self.assertEqual([(s["path"], s["where"]) for s in rs.call_scripts(call, source(), "/w")],
-                         [("/a/b/c.py", "worktree"), ("/tmp/d.py", "scratch")])
+                         [("/w/a.py", "worktree"), ("/tmp/b.py", "scratch")])
+        write = {"name": "write", "args": {"path": "notes/c.py", "content": "x"}}
+        self.assertEqual([(s["path"], s["where"]) for s in rs.call_scripts(write, source(), "/tmp/t")],
+                         [("/tmp/t/notes/c.py", "scratch")])
+
+    def test_committed_script_is_never_dropped(self):
+        write = ("write", {"path": "/w/helper.py", "content": HELPER}, False)
+        rep = self.analyze(3, [write, ("bash", {"command": "cd /w && git add helper.py && git commit -m x"}, False)])
+        self.assertEqual(rep["stats"]["scripts"], 3)
 
     def test_helper_reported_however_many_sessions_repeat_it(self):
         code = "function unpack(data) { return JSON.parse(data); }\nconst r = unpack(x);\nconsole.log(r);\n"
