@@ -27,12 +27,12 @@ Modes:
             or go build (also after go -C DIR). Only .go files can be overlaid; a mutant of any other
             file is invalid in this mode rather than written in place.
   in-place  The mutated files are written over the originals, the command runs, and the original bytes
-            and mtime are restored, also on SIGINT and SIGTERM, after every process the command started
+            are restored, also on SIGINT and SIGTERM, after every process the command started
             has been stopped. Backups stay in the scratch dir. A symlink is followed to its target. A
             target with uncommitted changes is refused unless --allow-dirty is passed. In-place runs
             on the same git worktree wait for each other, so one never reads another's mutant as the
-            original. Python bytecode for the run goes to the scratch dir (PYTHONPYCACHEPREFIX), so a
-            stale cache can neither hide the mutant nor outlive it.
+            original. Python bytecode for each run goes to a fresh dir under the scratch dir
+            (PYTHONPYCACHEPREFIX), so a stale cache can neither hide the mutant nor outlive it.
 
 Before any mutant runs, each distinct command runs once unmutated and must pass; otherwise a failure under
 a mutant proves nothing and its mutants are invalid. --no-baseline skips this.
@@ -376,8 +376,8 @@ def mutant_mtime(path, st):
     """A whole-second mtime unlike the original's and any earlier mutant's of path.
 
     Python and other tools trust a cache whose recorded mtime and size match the source; a same-size
-    mutant written in the same second as the original would reuse the original's cache, and restoring
-    the original in the mutant's second would reuse the mutant's.
+    mutant written in the same second as the original would reuse the original's cache. The restore
+    keeps the current time, so a build the mutant triggered is older than the restored source.
     """
     s = max(time.time_ns() // NS, _last_mtime.get(path, 0) + 1)
     if s == st.st_mtime_ns // NS:
@@ -392,7 +392,6 @@ def restore(applied):
         try:
             with open(path, "wb") as f:
                 f.write(original)
-            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
             with open(path, "rb") as f:
                 if f.read() == original:
                     continue
@@ -417,7 +416,8 @@ def run_in_place(edits, cmd, cwd, workdir, log_path):
                 with open(path, "wb") as f:
                     f.write(mutated)
                 os.utime(path, ns=(st.st_atime_ns, mutant_mtime(path, st)))
-        env = dict(os.environ, PYTHONPYCACHEPREFIX=os.path.join(workdir, "pycache"))
+        # A fresh dir per run: a reused --out must not hold bytecode whose recorded mtime and size match.
+        env = dict(os.environ, PYTHONPYCACHEPREFIX=tempfile.mkdtemp(prefix="pycache-", dir=workdir))
         return run(cmd, cwd, env, log_path)
     finally:
         failed = []

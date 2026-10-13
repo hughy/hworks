@@ -157,7 +157,15 @@ class MutateTest(unittest.TestCase):
         self.assertIn(b"x * 7", read(seen))
         self.assertNotEqual(int(read(seen + ".mtime")) // 10**9, 1_000_000_000_456 // 10**9)
         self.assertEqual(read(self.calc), CALC.encode())
-        self.assertEqual(os.stat(self.calc).st_mtime_ns, 1_000_000_000_456)
+
+    def test_restored_file_is_newer_than_what_the_mutant_built(self):
+        # make and similar tools rebuild only when a source is newer than its artifact.
+        artifact = os.path.join(self.tmp, "artifact")
+        cmd = [sys.executable, "-c", "import sys; open(sys.argv[1], 'w').write('x'); sys.exit(2)", artifact]
+        self.one({"name": "m", "file": "calc.py", "old": "x * 2", "new": "x * 7", "test": cmd},
+                 "--no-baseline", code=0)
+        self.assertEqual(read(self.calc), CALC.encode())
+        self.assertGreater(os.stat(self.calc).st_mtime_ns, os.stat(artifact).st_mtime_ns)
 
     def test_python_bytecode_cache_neither_hides_nor_keeps_the_mutant(self):
         # Same-size swap, so only the mtime and the cache location tell the versions apart.
@@ -169,6 +177,13 @@ class MutateTest(unittest.TestCase):
             self.assertEqual(r["verdict"], "killed", mtime)
             p = subprocess.run(TEST, cwd=self.repo, env=self.env, capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, "the restored file runs the mutant: %s" % p.stderr)
+
+    def test_reused_out_dir_does_not_reuse_an_earlier_runs_bytecode(self):
+        out = os.path.join(self.tmp, "out")
+        spec = {"test": TEST, "mutants": [{"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        self.assertEqual(self.results(spec, "--out", out, code=0)[0]["verdict"], "killed")
+        spec["mutants"][0]["new"] = "b + a"
+        self.assertEqual(self.results(spec, "--out", out, code=1)[0]["verdict"], "survived")
 
     def test_multiple_files_are_all_mutated_and_restored(self):
         check = os.path.join(self.repo, "check.py")
