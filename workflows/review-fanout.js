@@ -171,12 +171,18 @@ function sameFinding(a, b) {
   return normalFile(a.file) === normalFile(b.file) && sameClaim(a.claim, b.claim);
 }
 
+function sameLine(a, b) {
+  return a.line !== undefined && a.line !== null && a.line === b.line;
+}
+
 // A reviewer's own findings never merge with each other: two issues on one line stay two entries.
+// When a claim is open at several lines, the same-line entry wins so raisedBy points at the right place.
 function mergeFindings(entries) {
   const merged = [];
   for (const entry of entries) {
     for (const finding of entry.findings || []) {
-      const match = merged.find((m) => !m.raisedBy.includes(entry.label) && sameFinding(m, finding));
+      const open = merged.filter((m) => !m.raisedBy.includes(entry.label) && sameFinding(m, finding));
+      const match = open.find((m) => sameLine(m, finding)) || open[0];
       if (!match) {
         merged.push(Object.assign({}, finding, { raisedBy: [entry.label] }));
         continue;

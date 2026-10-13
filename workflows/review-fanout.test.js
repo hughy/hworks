@@ -222,6 +222,22 @@ test("a repeated claim merges once across reviewers and lines, with its own seve
   );
 });
 
+test("a claim repeated at two lines joins the entry on the same line when one is open", async () => {
+  const { out } = await run({
+    "pr-1.r1": reviewed([f("a.js", 3, "unchecked error from write"), f("a.js", 9, "unchecked error from write")]),
+    "pr-1.r2": reviewed([f("a.js", 9, "Unchecked error from write.")]),
+    "plan.r1": clean,
+    "plan.r2": clean,
+  });
+  assert.deepEqual(
+    out.targets[0].merged.map((m) => [m.line, m.raisedBy]),
+    [
+      [3, ["reviewer"]],
+      [9, ["reviewer", "review2"]],
+    ],
+  );
+});
+
 test("findings on the same file with near-identical claims merge; different claims or files do not", async () => {
   const { out } = await run({
     "pr-1.r1": reviewed([f("a.js", undefined, "The retry loop never resets the backoff."), f("a.js", 10, "missing test for timeout"), f("b.js", 1, "unused import")]),
