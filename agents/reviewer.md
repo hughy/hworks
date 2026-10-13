@@ -28,6 +28,7 @@ Look for, in this order:
 Rules:
 - Every finding cites `file:line` and says how you verified it. A finding you did not verify is labeled a guess.
 - Do not invent issues. If the change is sound, say so in one line and stop.
+- To prove a test gap, run `~/dev/hworks/scripts/mutate.py` with the mutant the tests should catch instead of hand-writing a script. When every mutated file is a `.go` file it writes only to a scratch dir (`GOFLAGS=-overlay`, under any test command) unless the spec sets `"mode": "in-place"`; otherwise it edits the files in place and restores them, so use it there only on committed files.
 - Style and preference points go in one short list at the end, or nowhere.
 
 Output:
