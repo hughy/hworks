@@ -674,6 +674,11 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(mutate.go_subcommands(["bash", "-o", "pipefail", "-c", "go test ./..."]), {"test"})
         self.assertEqual(mutate.go_subcommands(["bash", "-euo", "pipefail", "-c", "go vet ."]), {"vet"})
         self.assertEqual(mutate.go_subcommands(["/bin/sh", "-e", "-c", "go build ."]), {"build"})
+        self.assertEqual(mutate.go_subcommands(["bash", "-co", "pipefail", "go test ."]), {"test"})
+        self.assertEqual(mutate.go_subcommands(["bash", "-ceuo", "pipefail", "go vet ."]), {"vet"})
+        self.assertEqual(mutate.go_subcommands(["bash", "-oc", "pipefail", "go build ."]), {"build"})
+        self.assertEqual(mutate.go_subcommands(["bash", "-ooc", "pipefail", "errexit", "go test ."]), {"test"})
+        self.assertEqual(mutate.go_subcommands("bash -co pipefail 'go test ./...'"), {"test"})
 
 
 @unittest.skipUnless(shutil.which("go"), "go is not on PATH")

@@ -234,12 +234,14 @@ def shell_script(tokens, j):
     has_c = False
     while j < len(tokens) and tokens[j][:1] in ("-", "+") and tokens[j] not in ("-", "--"):
         flag = tokens[j]
-        if not flag.startswith("--") and flag[-1] in "oO":
-            j += 2
-            continue
-        if not flag.startswith("--") and "c" in flag[1:]:
-            has_c = True
         j += 1
+        if flag.startswith("--"):
+            continue
+        letters = flag[1:]
+        if "c" in letters:
+            has_c = True
+        # Each o or O in a group consumes the next word as its option name (bash -oc pipefail 'cmd').
+        j += letters.count("o") + letters.count("O")
     if j < len(tokens) and tokens[j] == "--":
         j += 1
     return tokens[j] if has_c and j < len(tokens) else None
