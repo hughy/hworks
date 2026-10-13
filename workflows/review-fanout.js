@@ -129,7 +129,8 @@ function reviewerEntry(reviewer, result) {
     return entry;
   }
   const out = result.structuredOutput;
-  if (!isObject(out)) {
+  const missing = customSchema ? out === undefined || out === null : !isObject(out);
+  if (missing) {
     entry.error = "reviewer returned no structured output";
     return entry;
   }
@@ -138,8 +139,8 @@ function reviewerEntry(reviewer, result) {
     return entry;
   }
   entry.ok = true;
-  if (typeof out.summary === "string") entry.summary = out.summary;
-  if (Array.isArray(out.findings)) entry.findings = out.findings.filter(isObject);
+  if (isObject(out) && typeof out.summary === "string") entry.summary = out.summary;
+  if (isObject(out) && Array.isArray(out.findings)) entry.findings = out.findings.filter(isObject);
   if (customSchema) entry.structuredOutput = out;
   return entry;
 }
