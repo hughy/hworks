@@ -165,37 +165,24 @@ function sameClaim(a, b) {
   return shared / (wa.size + wb.size - shared) >= 0.8;
 }
 
+// Claims must match even on the same line: a line match alone can join two different defects,
+// and the second would vanish from merged.
 function sameFinding(a, b) {
-  if (normalFile(a.file) !== normalFile(b.file)) return false;
-  if (Number.isInteger(a.line) && a.line === b.line) return true;
-  return sameClaim(a.claim, b.claim);
+  return normalFile(a.file) === normalFile(b.file) && sameClaim(a.claim, b.claim);
 }
 
 // A reviewer's own findings never merge with each other: two issues on one line stay two entries.
-// A line match alone can join two different defects, so a merged claim that differs from the kept one
-// goes to otherClaims instead of being dropped.
 function mergeFindings(entries) {
   const merged = [];
   for (const entry of entries) {
     for (const finding of entry.findings || []) {
-      const open = merged.filter((m) => !m.raisedBy.includes(entry.label) && sameFinding(m, finding));
-      const match = open.find((m) => sameClaim(m.claim, finding.claim)) || open[0];
+      const match = merged.find((m) => !m.raisedBy.includes(entry.label) && sameFinding(m, finding));
       if (!match) {
         merged.push(Object.assign({}, finding, { raisedBy: [entry.label] }));
         continue;
       }
       match.raisedBy.push(entry.label);
       if (finding.severity === "blocking") match.severity = "blocking";
-      if (sameClaim(match.claim, finding.claim)) continue;
-      match.otherClaims = match.otherClaims || [];
-      const other = match.otherClaims.find((o) => sameClaim(o.claim, finding.claim));
-      if (other) {
-        other.raisedBy.push(entry.label);
-      } else {
-        const kept = { raisedBy: [entry.label], severity: finding.severity, claim: finding.claim, evidence: finding.evidence };
-        if (finding.fix !== undefined) kept.fix = finding.fix;
-        match.otherClaims.push(kept);
-      }
     }
   }
   return merged;
