@@ -1,0 +1,14 @@
+{
+  "voices": {
+    "narrator": { "voice": "af_heart", "speed": 1.0, "lang": "en-us" },
+    "rival": { "voice": "bm_george", "speed": 0.95, "lang": "en-gb", "prefix": "v-", "label": "RIVAL", "alt": true }
+  },
+  "speak": { "USD": "U S D" },
+  "lines": {
+    "intro": "This account has a per-transfer limit. Watch what it allows.",
+    "small-a": "First, an ordinary fifty-dollar transfer.",
+    "small-b": "It goes through.",
+    "v-large": "Now five thousand USD, all at once.",
+    "large-b": "Over the limit, so it is blocked."
+  }
+}
