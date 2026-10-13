@@ -1,6 +1,6 @@
 ---
 name: demo-video
-description: Record a short narrated demo video of a running web app by screen capture, with on-page annotations (captions, rings, callout bubbles with arrows, stamps, a fake cursor) and local neural text-to-speech, one or two voices. Use when asked to make a demo, walkthrough, or scenario video of a live web UI, or to re-cut one after feedback on voice, wording, pacing, or length.
+description: Record a short narrated demo video of a running web app by screen capture, with on-page annotations (captions, rings, callout bubbles with arrows, stamps, a fake cursor) and local neural text-to-speech, one or two voices. Use when asked to make a demo, walkthrough, or scenario video of a live web UI, or to re-cut one after feedback on voice, wording, pacing, or length. Also use it to screenshot a running web UI at several viewports and check for overflow, without recording a video.
 ---
 
 # demo-video
@@ -13,9 +13,28 @@ The pipeline drives a real Chrome page with Playwright, injects an annotation la
 - `scripts/overlay.js` is the annotation layer the recorder injects.
 - `scripts/compose.py <dir> <out.mp4>` builds the video.
 - `scripts/review.py <dir> <video>` prints a per-line timing table and writes a contact sheet of stills.
-- `tests/smoke.sh` runs the whole chain on `examples/app.html` with tones in place of speech.
+- `scripts/shot.mjs <base-url>` screenshots pages at several viewports and reports overflow, with no video (see Screenshots).
+- `tests/smoke.sh` runs the whole chain on `examples/app.html` with tones in place of speech. `tests/shot.sh` checks `shot.mjs` on two static pages.
 
-Playwright comes from the project under demo: set `PLAYWRIGHT_FROM=<project>/package.json` (any package.json whose project resolves `playwright`, `playwright-core`, or `@playwright/test`). The recorder launches installed Chrome by default; set `PLAYWRIGHT_CHANNEL=bundled` to use Playwright's browser instead.
+Playwright comes from the project under demo: set `PLAYWRIGHT_FROM=<project>/package.json` (any package.json whose project resolves `playwright`, `playwright-core`, or `@playwright/test`). The recorder and `shot.mjs` launch installed Chrome by default; set `PLAYWRIGHT_CHANNEL=bundled` to use Playwright's browser instead.
+
+## Screenshots
+
+For UI review, use `scripts/shot.mjs` instead of writing a one-off Playwright script. It needs only `node` and the Playwright setup above, not `setup.sh`.
+
+```sh
+PLAYWRIGHT_FROM=<project>/package.json node scripts/shot.mjs http://localhost:3000 \
+  --path / --path /settings --viewports 1280x800,1920x1080 \
+  --wait-for '[data-testid="app"]' --settle 500 \
+  --local-storage 'prefs={"theme":"dark"}' --out "$TASK_DIR/shots" --name before-
+```
+
+- It writes `<name><slug>-<w>x<h>.png` per path and viewport, where the slug is the path with each run of non-alphanumeric characters turned into `-` (`/` is `root`). Without `--out` it writes to a new temp dir and prints the dir on stderr.
+- Each shot prints one JSON line on stdout: `path`, `viewport`, `file`, `scrollWidth`, `innerWidth`, `scrollHeight`, `innerHeight`, `overflowX`, `overflowY`, and `consoleErrors` (console errors and uncaught exceptions). `overflowX` true means the page scrolls sideways at that width, which is usually a layout bug.
+- `--local-storage key=value` stores `value` as given, before the page's scripts run, on the shot page's origin only. Pass JSON text when the app parses the key as JSON.
+- Each shot gets a fresh browser context, so storage one page writes does not leak into the next.
+- `--wait-for` waits until the selector is visible; `--settle` then waits a fixed time for animations and fonts. `--timeout` (default 30000 ms) limits the load, the wait, the measurement, and the screenshot. `--full-page` captures the whole page instead of the viewport.
+- It exits 1 if any page fails to load, returns HTTP 400 or above, never shows the selector, or cannot be measured or captured, naming each on stderr and going on to the next shot. The JSON line for that shot has an `error` field naming every step that failed (`load failed`, `HTTP <code>`, `selector ... not visible`, `measure failed`, `screenshot failed`), joined by `; `. A failed shot is still measured and captured when the page rendered: after an HTTP error or a missing selector, the PNG holds what was on screen. After a load timeout it does the same only when the page had started rendering (the main document arrived); when the server never answered, the shot reports the load error alone and writes no PNG. A load that failed any other way (refused connection, DNS error) writes no PNG either, and `file` is null whenever no PNG was written. It exits 2 on bad arguments.
 
 ## Workflow
 
