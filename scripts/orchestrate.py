@@ -868,12 +868,8 @@ def decide(cfg, store, row, runs_dir):
     if unknown:
         return act("hold", "%s; its liveness is unknown" % describe(unknown[0]))
     brief = (read_json(args_path) or {}).get("brief")
-    # An ended run older than the latest bound one is harmless; binding it would supersede the newer run.
-    since = next((e["status"].get("startedAt") for e in entries if runs and e["run"] == runs[-1] and e["status"]), 0)
     ended = [e for e in entries if e["kind"] == "workflow" and not e["bound"] and brief
-             and ((e["status"].get("workflow") or {}).get("args") or {}).get("brief") == brief
-             and not (isinstance(since, int) and isinstance(e["status"].get("startedAt"), int)
-                      and e["status"]["startedAt"] < since)]
+             and ((e["status"].get("workflow") or {}).get("args") or {}).get("brief") == brief]
     if ended:
         e = ended[0]
         return act("hold", "workflow %s ran this attempt's args, ended %s, and is not bound; bind %s %d %s "
@@ -891,7 +887,10 @@ def decide(cfg, store, row, runs_dir):
         spec = read_json(os.path.join(store, "args", tag + ".launch.json"), {})
         return act("relaunch-same-args", "intent written, nothing dispatched, no writer", args_path=args_path,
                    workflow=spec.get("workflow", DEFAULT_WORKFLOW), cwd=cfg["repo"])
-    cur = runs[-1] if runs else ""
+    # bind appends, so a late-bound older run must not displace the newest one as the attempt's outcome.
+    started = {e["run"]: e["status"].get("startedAt") for e in entries if e["kind"] == "workflow" and e["status"]}
+    cur = max(reversed(runs), key=lambda r: started.get(r) if isinstance(started.get(r), int) else -1,
+              default="")
     st = run_status(runs_dir, cur) if cur else None
     if not isinstance(st, dict):
         return act("hold", "workflow %s has no status.json" % (cur or "(none bound)"))

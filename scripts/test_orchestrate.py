@@ -883,7 +883,7 @@ class OrchestrateTest(unittest.TestCase):
         self.assertIn("bind A 1 wf-2", out["reason"])
         self.assertNotIn("file", out)
 
-    def test_ended_unbound_workflow_older_than_the_bound_run_does_not_hold(self):
+    def test_ended_unbound_workflow_older_than_the_bound_run_holds_and_binding_it_keeps_the_newer_outcome(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A", "wf-1")
@@ -894,12 +894,13 @@ class OrchestrateTest(unittest.TestCase):
         doc = orchestrate.read_json(path)
         doc["startedAt"] = bound_start - 1000
         orchestrate.write_json(path, doc)
-        self.assertEqual(self.reconcile()[0]["action"], "record")
-        doc["startedAt"] = bound_start + 1000
-        orchestrate.write_json(path, doc)
         out = self.reconcile()[0]
         self.assertEqual(out["action"], "hold", out)
         self.assertIn("bind A 1 wf-0", out["reason"])
+        self.g("bind", "A", "1", "wf-0")
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "record", out)
+        self.assertIn("wf-1", out["reason"])
 
     def test_ended_workflow_of_an_earlier_attempt_does_not_hold_the_next(self):
         self.init()
