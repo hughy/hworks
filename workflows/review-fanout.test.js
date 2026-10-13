@@ -147,7 +147,7 @@ test("a custom schema goes to every child and its output comes back whole", asyn
 test("a custom schema keeps non-object output and fails only a missing one", async () => {
   const schema = { type: "array", items: { type: "string" } };
   const { out } = await run(
-    { "plan.r1": { ok: true, structuredOutput: ["valid finding"] }, "plan.r2": { ok: true, structuredOutput: null } },
+    { "plan.r1": { ok: true, structuredOutput: ["valid finding"] }, "plan.r2": { ok: true } },
     { targets: [targetB], schema },
   );
   assert.equal(out.ok, false);
@@ -158,6 +158,21 @@ test("a custom schema keeps non-object output and fails only a missing one", asy
   assert.equal(r2.ok, false);
   assert.match(r2.error, /no structured output/);
   assert.deepEqual(out.targets[0].merged, []);
+});
+
+test("a custom schema keeps schema-valid null output", async () => {
+  const schema = { type: "null" };
+  const { out } = await run(
+    { "plan.r1": { ok: true, structuredOutput: null }, "plan.r2": { ok: true, structuredOutput: null } },
+    { targets: [targetB], schema },
+  );
+  assert.equal(out.ok, true);
+  for (const r of out.targets[0].reviewers) {
+    assert.equal(r.ok, true);
+    assert.ok(Object.hasOwn(r, "structuredOutput"));
+    assert.equal(r.structuredOutput, null);
+    assert.equal(r.error, undefined);
+  }
 });
 
 test("findings on the same file and line merge across reviewers", async () => {

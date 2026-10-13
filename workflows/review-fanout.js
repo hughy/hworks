@@ -129,7 +129,8 @@ function reviewerEntry(reviewer, result) {
     return entry;
   }
   const out = result.structuredOutput;
-  const missing = customSchema ? out === undefined || out === null : !isObject(out);
+  // The runtime leaves structuredOutput undefined when none was captured; null can be schema-valid output.
+  const missing = customSchema ? out === undefined : !isObject(out);
   if (missing) {
     entry.error = "reviewer returned no structured output";
     return entry;
