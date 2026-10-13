@@ -64,6 +64,8 @@ Work that outlives one session goes to a multi-agent coordinator only when all o
 - Follow-ups must route to the thread that owns an area, or shared memory or independent review by default is wanted.
 - Several times the tokens of direct work is acceptable.
 
+On pi without such a coordinator, a set of independent items (issue ids, a milestone, a label) goes to `orchestrate` (`../orchestrate/SKILL.md`) even below the days-long threshold, because it keeps one writer per branch and survives a reload. It is experimental: run it with window 1 until a pilot passes, and use the loop below for work with dependencies.
+
 Otherwise, and always on Claude Code and Codex, run this loop across sessions with `$TASK_DIR/progress.md` (`scripts/task-dir.sh <slug>`) and git as the record: read both before resuming, and update progress.md at each commit. Plan a multi-PR program with an issue-planning skill when one is installed; otherwise draft the issues in the reply.
 
 ## Deltas

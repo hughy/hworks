@@ -1,86 +1,127 @@
 ---
-name: graph
-description: Drive a set of work units (issues, tasks) to reviewed, gate-passing branches with local pi subagents, several at once, one branch worktree per unit, surviving session restarts without starting a second writer. The session is the coordinator; scripts/graph.py holds all state and safety decisions; each unit runs through the review-loop workflow. Use for the hughy-mode Long run route on pi when the work is a backlog of independent units, or for "/graph", "work through this milestone", "drive these issues".
+name: orchestrate
+description: Experimental coordinator for pi with pi-subagents, adapted from pstack's orchestrate playbook. Drives the work items the user names (issue ids, a label, a milestone, "the top three ready") to reviewed, gate-passing branches, several at once, one fresh branch worktree per item, and recovers after a reload without starting a second writer. The session coordinates; scripts/orchestrate.py keeps the state and the safety checks; each item runs through the review-loop workflow. Use for the hughy-mode Long run route when the work is a set of independent items, or for "/orchestrate", "work through these issues", "drive this milestone".
 ---
 
-# graph
+# orchestrate
 
-The session is the coordinator. It decides what each unit needs, dispatches workflows, and reads results. `scripts/graph.py` keeps every fact that must survive a restart and makes every safety decision: which unit may launch, which worktree it owns, whether a result is accepted, and what to do after a restart. Each unit runs through `workflows/review-loop.js`. Read `../review-loop/SKILL.md` first; this skill does not repeat it.
+This adapts pstack's orchestrate playbook (`../../pstack/skills/poteto-mode/playbooks/orchestrate.md`) to pi with pi-subagents. It keeps the playbook's standing orders, status derived at each drain, verdicts keyed to a head SHA, a rolling window, a one-unit pilot, and retry by failure mode then park. It replaces Cursor's Task tool, cloud agents, `gt`, and the bun store with local workflows, one branch worktree per unit, and `scripts/orchestrate.py`. Follow this file, not the playbook.
 
-Paths below are relative to this file: the CLI is `../../scripts/graph.py`, the workflow `../../workflows/review-loop.js`. Pass both as absolute paths. Needs pi with pi-subagents.
+The session is the coordinator. It selects units, writes their briefs, dispatches workflows, reads results, and ships. `scripts/orchestrate.py` is bookkeeping over the pi-subagents runtime: it keeps what must survive a restart and refuses unsafe steps (a launch into a busy window or a foreign worktree, a result whose head moved, a relaunch that could start a second writer). Each unit runs through `workflows/review-loop.js`; read `../review-loop/SKILL.md` first. This skill does not repeat it, the runtime docs, or `global/AGENTS.md`.
 
-## Terms
+Resolve hworks paths absolutely: `O=<hworks>/scripts/orchestrate.py`, `WF=<hworks>/workflows/review-loop.js`. Every command below takes `--store "$S"`.
 
-- Unit: one item of work, one branch, one worktree. Its source fields come from `units.json`: `{id, title, priority?, blockedBy?, branch?, url?, body?, paths?, effort?, claimedBy?}`.
-- Attempt: one dispatch of review-loop for a unit. `graph.py launch` creates it; the attempt's args file is fixed for life.
-- Store: `$TASK_DIR/graph/<slug>/`, written only by `graph.py`. Never edit it by hand.
-- Runs dir: where pi-subagents keeps async run directories, the parent of the "Retention-managed async directory" a launch prints (`$TMPDIR/pi-subagents-uid-<uid>/async-subagent-runs`).
+## Scope
+
+The user's prompt decides which items are worked on. Fetch only those, never a whole backlog. This version drives independent units only. Exclude, with a reason in the inventory:
+
+- Items with an open blocker. orchestrate.py launches a dependent only after its dependency is `merged` with a head that is an ancestor of base, which a squash merge never satisfies.
+- Follow-ups to an open PR. `pr-open` units are not relaunched; report PR activity instead.
+- Items already claimed: an open PR, a branch, or a worktree someone else owns.
+
+A unit without `paths` runs alone. Once it is `clean`, `stale`, or `pr-open`, it blocks every launch until `set <id> merged`, so schedule pathless units last. Add `paths` only from evidence (the issue names the files, or the code makes the scope plain) and note the evidence in `knowledge.md`.
+
+## Files
+
+`$S = $TASK_DIR/orchestrate/<slug>/` is written only by orchestrate.py. The coordinator's own files live in `$TASK_DIR`:
+
+- `progress.md`: store path, runs dir, mission id, window, the end predicate, and before every yield, the live units and the next check.
+- `inventory.json`: the frozen inventory with each item's disposition (included, or excluded and why).
+- `knowledge.md`: lessons for the coordinator. Children never read it; a lesson a coder needs goes into that unit's `body`.
+- `open-questions.md`: per `global/AGENTS.md`.
+
+The runs dir is where pi-subagents keeps async run directories, the parent of the "Retention-managed async directory" a launch prints.
 
 ## Start
 
-1. Get the units. A source adapter writes `units.json`; for example a tracker report with a units output. Write it by hand for a short list. A unit without `paths` runs alone, with nothing else active; add `paths` only from evidence (the issue names the files, or the code makes the scope plain) and say which in `knowledge.md`.
-2. `TASK_DIR=$(scripts/task-dir.sh <slug>)`, store `S=$TASK_DIR/graph/<slug>`.
-3. `graph.py --store $S init --repo <coordinator checkout> --base <trunk> --worktrees <dir> --gate '<gate>' --effort <effort>`. The gate must be the repo's check command and should finish in seconds; see Known runtime defects. Add `--grant '<the user's exact words>'` only when the user granted push and draft PRs; that line in `standing.md` is the only authority to ship. Never write a grant yourself.
-4. `graph.py --store $S import units.json`. Copy the file to `$S/inventory.json`: the frozen inventory the end predicate is checked against.
-5. Create one mission for the program: `subagent({ action: "mission.create", cwd: <coordinator checkout>, mission: { title } })`. Record the id as a line in `standing.md` notes is not allowed (the CLI owns that file), so keep it in `$TASK_DIR/progress.md` with the store path.
-5. Create one mission for the program: `subagent({ action: "mission.create", cwd: <coordinator checkout>, mission: { title } })`. Keep its id and the store path in `$TASK_DIR/progress.md`; `standing.md` belongs to the CLI.
+1. Turn the prompt into a selection: explicit ids, or a query (label, milestone, project) with a limit. Fetch exactly those items from the tracker, with title, description, status, priority, blockers, and branch name. If the selection is a query, state the resolved ids before launching.
+2. Check each item against Scope: blockers resolved, no open PR, branch, or worktree for it (`gh pr list`, `git branch -a`, `git worktree list`). Write `inventory.json`, then `units.json` for the included items: `[{id, title, priority?, blockedBy?, branch?, url?, body?, paths?, effort?, gate?, claimedBy?}]`. `body` is the item's description plus anything the coder needs.
+3. Pick a worktrees dir nobody else uses. Branches default to `orchestrate/<id>`; a unit's `branch` overrides it.
+4. `python3 $O --store "$S" init --repo <coordinator checkout> --base <trunk> --worktrees <dir> --gate '<gate>' --effort standard --max-attempts 2`.
+   - Effort is `standard` or `exhaustive`; orchestrate.py refuses `quick`, which has no reviewer.
+   - The gate is the repo's full check. Do not drop checks to make it fast; see Known runtime defects.
+   - Add `--grant '<the user's exact words>'` only when the user granted push and draft PRs. The `Authority granted` line in `$S/standing.md` is the only authority to ship, and orchestrate.py does not enforce it, so this skill does. To add a grant mid-program, rerun `init` with identical flags plus `--grant`. Never write a grant yourself.
+5. `python3 $O --store "$S" import units.json`. Import adds or updates the units in the file and keeps the rest, so more items can join later the same way.
+6. Create one mission: `subagent({ action: "mission.create", cwd: <coordinator checkout>, mission: { title } })`.
+7. Write `progress.md`, including the end predicate. On the frozen inventory: every unit is `clean` (or `pr-open` under a grant), `parked` with a reason, or excluded with a reason; at least one unit is `clean` with a receipt head equal to its live branch head; every state change came from an orchestrate.py command; zero live or unknown writers; mission closed. No launchable work left with the predicate unmet is a stalled run, not success.
 
 ## Launch
 
-Pilot with a window of 1. Raise it to 3 only after one unit went from launch to an accepted record without hand repair.
+Pilot with window 1. Raise it to 3 only after one unit went from launch to an accepted record with no hand repair, and never while any unit is on `hold`.
 
-For each id from `graph.py --store $S next --max <window> --json`:
+For each id in `.selected` of `python3 $O --store "$S" next --max <window> --json` (`.refused` maps every other unit to the reason it is not launchable):
 
-1. `graph.py --store $S launch <id> --workflow <abs review-loop.js>` prints `{id, attempt, cwd, args_path, workflow}`. It writes the intent, creates or adopts the worktree, renders the brief, and writes the args file. Exit 3 means the unit is not launchable; read why from `status`.
-2. Dispatch with the args file contents verbatim: `subagent({ workflow, cwd, args: <JSON of args_path>, async: true, missionId })`. Never rebuild args: a relaunch after a restart re-attaches running children only for identical script and args.
-3. `graph.py --store $S bind <id> <attempt> <workflow run id>`.
+1. `python3 $O --store "$S" launch <id> --max <window> --workflow $WF` prints `{id, attempt, cwd, args_path, workflow}`.
+   - Exit 3 with the store unchanged is a refusal; the reason is on stderr. Do not dispatch.
+   - Exit 3 with `status` now showing `blocked` (dirty worktree, args script failure) spent the attempt. Fix the cause, then `set <id> queued --reason <fix>`.
+   - A worktree path that exists from outside this store is refused. Pass `--adopt` only when you established it is unowned and its branch is the unit's.
+2. Dispatch the args file contents verbatim: `subagent({ workflow: <workflow>, cwd: <cwd>, args: <args_path JSON>, async: true, missionId })`. Never rebuild args.
+3. `python3 $O --store "$S" bind <id> <attempt> <workflow run id>`. It records this session (`$PI_SESSION_FILE`).
 
-Launch the whole window in one message: the launches, then the dispatches, then the binds.
+If dispatch returns an error, the launch outcome is uncertain. Run `reconcile`; it finds a started run by its args. Bind what it finds. After two failed dispatches with no run found, `set <id> parked --reason <error>`.
 
 ## Drain
 
-On every completion notice:
+On every completion notice, success or failure:
 
-1. Record from the run's `status.json`, never from the notice preview, which truncates: `graph.py --store $S record <id> <attempt> <runs dir>/<run id>/status.json`. Record refuses while any writer for the attempt may still run; that is correct, wait for the next notice.
-2. Act on the recorded state:
-   - `clean`: the envelope matched the live branch head on a clean tree with every required reviewer. Read `nonBlocking`, including downgraded findings. With a grant: push the branch, `gh pr create --draft`, track it with the harness PR tracker if there is one, then `graph.py set <id> pr-open --reason <url>`. Without one, leave it clean.
-   - `stale`: the branch moved or the tree is dirty after review. Find out who wrote there before anything else.
-   - `unresolved`, `gate-failed`, `review-failed`: read the blocking findings and the run. Either fix the brief (edit the unit's `body` in units.json, re-import, put the lesson in `knowledge.md`) so the next attempt can succeed, or park it. `next` retries until the attempt cap, then parks.
-   - `blocked`: the coder needs a decision. `graph.py set <id> parked --reason <question>` and add the question to `open-questions.md`.
-3. `graph.py --store $S status`, then launch the next window in the same message.
+1. Record from the run's `status.json`, never the notice preview: `python3 $O --store "$S" record <id> <attempt> <runs dir>/<run id>/status.json`.
+2. If record refuses (a writer may be alive, or the run is not the bound one), or the run failed, go to Restart for that unit. Do not wait for another notice; one may never come.
+3. Act on the recorded state:
+   - `clean`: read `nonBlocking`, including downgraded findings, and note anything worth a follow-up. Ship under the grant (below); without one, leave it clean.
+   - `stale`: the branch moved or the tree changed after review. Find out who wrote there first. Then `set <id> queued --reason <cause>` for a fresh attempt (commits stay; the next review covers them), or park.
+   - `unresolved`, `gate-failed`, `review-failed`: read the blocking findings. If the brief was wrong or thin, edit only that unit's `body` (keep its acceptance; add the surviving findings), re-import, and let `next` retry it. Otherwise park it. Do not reset the attempt cap by requeueing.
+   - `blocked`: `set <id> parked --reason <question>` and add the question to `open-questions.md`. After the answer, add it to the body, re-import, and `set <id> queued --reason <answer>`.
+4. `python3 $O --store "$S" status`, then launch the next window in the same message.
 
-Never review or fix a unit's code inline; that is a second writer. A unit's follow-up work is a new attempt or a new unit.
+Ship one clean unit:
+
+1. Confirm the `Authority granted` line in `$S/standing.md`.
+2. Run `status` and require the unit still `clean`.
+3. Check the remote for the branch and for an existing PR; never repeat an external action that already happened.
+4. From the unit worktree: `git push -u origin <branch>`, then `gh pr create --draft --base <trunk> --head <branch>` with the unit's title and a body per the repo template.
+5. Track the PR with the harness PR tracker if there is one. `set <id> pr-open --reason <url>` and write the URL to `progress.md`.
+
+The coordinator never edits a unit's code or reviews it in place of the workflow. Reading a worktree, a run, or a diff to decide what to do is fine.
 
 ## Restart
 
-After a reload, a new session, or any doubt:
+After a reload, a new session, a refused record, a failed run, or any doubt:
 
-1. `graph.py --store $S status` and `graph.py --store $S reconcile --runs-dir <runs dir> --json`.
-2. Do exactly what each unit's action says:
-   - `wait`: nothing; its completion notice may not reach this session, so reconcile again later.
+1. `python3 $O --store "$S" status` and `python3 $O --store "$S" reconcile --runs-dir <runs dir> --json`.
+2. Do what each unit's action says:
+   - `wait`: a writer is live. Its notice may not reach this session; check again before yielding.
    - `record`: record the printed file.
-   - `relaunch-same-args`: dispatch the existing args file for that attempt, unchanged, with the same missionId, then `bind` the same attempt to the new run id.
-   - `retry`: record the file, then the unit is eligible through `next`.
-   - `hold`: launch nothing for it. Report the reason. Hold covers live or unknown writers, superseded controllers that may still write, and failed runs that left commits or structured output (possibly finished work: read the commits and the output before deciding).
-3. Mission records are not evidence of liveness: after a reload they mark live children failed. Only `reconcile` decides.
+   - `relaunch-same-args`: dispatch the existing args file unchanged with the same missionId, then `bind` the same attempt to the new run id. With a live child, orchestrate.py returns this only when the stopped workflow's own record shows the runtime will re-attach it: same session, same script, stopped by a runtime replacement, the child journaled as running, and no failed child the relaunch would rerun first.
+   - `retry`: record the printed file; the unit becomes eligible through `next`.
+   - `hold`: launch nothing for that unit. If the reason names a run to bind, bind it. If a failed run left commits or structured output, read both: record the output if there is one, else park with what you found. If the hold says the runtime cannot re-attach a live child, wait until the child is terminal. Otherwise report it.
+3. Mission records do not show liveness; after a reload they mark live children failed. Only `reconcile` decides.
+
+Before ending any turn with live units, write them and the next check to `progress.md`, and say in the reply which units are live and that `reconcile` resumes them. Goal-mission idle notices did not fire in testing, so unattended runs need someone or something to start the next turn.
+
+## Question a unit
+
+`status` shows each unit's run ids. Tail a live child with `subagent({ action: "status", id, view: "transcript" })` and guide it with `steer`. Question a finished coder or reviewer with `subagent({ action: "resume", id: <child run id>, message })`, and tell it to answer without editing files. Never resume a coder whose unit has a live writer.
 
 ## End
 
-When the predicate holds, or nothing is launchable and nothing is live:
+When the predicate holds, or nothing is launchable:
 
-1. `graph.py status` for the final table; every parked unit with its reason.
-2. Close the mission (`mission.close`).
-3. Run `scripts/blockers.sh --since <start date>` and report the top classes.
-4. Questions that evidence could not settle go last, with options and a recommendation.
+1. `reconcile`, and account for every launch: no unit `launching` or `running`, no live or unknown writer. Do not close the mission until this holds.
+2. `status` for the final table, with every parked and excluded item and its reason.
+3. Close the mission (`mission.close`).
+4. Report per unit: attempts, review rounds, wall time, manual interventions, gate run by host or reviewers, and downgraded findings. Read token use from the run status files; mission totals stayed at zero in testing.
+5. Run `scripts/blockers.sh --since <start date>` and report the top classes.
+6. Questions evidence could not settle go last, with options and a recommendation.
+
+Stopping early: launch nothing new and drain. Never kill a child to stop; a parked unit keeps its reservation until `reconcile` shows its writers terminal.
 
 ## Rules
 
-- One writer per worktree, ever. Only `graph.py` decides ownership; `hold` is final until evidence changes.
+- One writer per worktree. orchestrate.py refuses the unsafe launches it can see; it cannot see a writer outside its store, which is why worktrees start fresh.
 - No merges, no pushes to trunk, no history rewrites, no deleting worktrees or branches. Ship only under the grant.
-- Do not raise the window while any unit is `hold`.
-- Goal-mission idle notices did not fire in testing; completion notices drive the loop. Before ending a turn with live units, say which units are live and that `reconcile` resumes them.
+- Cost is bounded by count, not tokens: each unit runs at most `max-attempts` workflows of up to `maxRounds` rounds of a coder and its reviewers. Keep the selection small until the pilot measured real cost.
 
 ## Known runtime defects
 
-- A host gate longer than about five seconds can outlive the async runner, which exits without a result after the coder finished. review-loop then has reviewers run the gate (`gateBy: reviewers`). Prefer a fast gate.
-- After a reload, the workflow script stops but its children keep running; relaunching with identical args re-attaches them.
+- A host gate longer than about five seconds can outlive the async runner, which exits without a result after the coder finished. review-loop then has the reviewers run the gate (`gateBy: reviewers`).
+- After a reload, the workflow script stops and its children keep running. Relaunching with identical args in the same session re-attaches them.
