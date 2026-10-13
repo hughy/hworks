@@ -334,12 +334,12 @@ def file_script(path, code, src, cwd=None):
 
 def heredoc_script(header, body, src, cwd=None):
     """Classify a heredoc: a script file write or interpreter input; None for anything else."""
-    head = strip_shell(header)
+    head = strip_shell(re.sub(r"(?<!<)<<(?!<)-?\s*\S+", " HEREDOC_IN ", header))
     m = (re.search(r"\bcat\b[^|;&]*?>>?\s*([^\s<>|;&]+)", header)
          or re.search(r"\btee\s+(?:-\S+\s+)*([^\s<>|;&-][^\s<>|;&]*)", header))
     if m and not m.group(1).strip("'\"").startswith("/dev/"):
         return file_script(m.group(1), body, src, cwd)
-    m = re.search(r"(?:^|[\s;&|(])((?:\S*/)?(python3?|node|bun|deno|ruby|perl|bash|sh|zsh|osascript))\b[^|;&]*<<", head)
+    m = re.search(r"(?:^|[\s;&|(])((?:\S*/)?(python3?|node|bun|deno|ruby|perl|bash|sh|zsh|osascript))\b[^|;&]*\bHEREDOC_IN\b", head)
     if m:
         return {"kind": "inline", "path": None, "lang": LANG[m.group(2)], "code": body, "where": "inline"}
     return None

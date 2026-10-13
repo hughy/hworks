@@ -54,6 +54,13 @@ class Normalize(unittest.TestCase):
         self.assertEqual([(s["lang"], s["code"]) for s in rs.call_scripts(call, source())],
                          [("py", "import json\nd = json.load(f)\nprint(d)")])
 
+    def test_interpreter_heredoc_becomes_an_inline_script(self):
+        for cmd, lang in (("python3 <<'EOF'", "py"), ("python3 - <<EOF", "py"), ("cd /w && node <<-\"EOF\"", "js"),
+                          ("bash << EOF", "sh")):
+            call = {"name": "bash", "args": {"command": cmd + "\nimport os\nprint(1)\nEOF"}}
+            self.assertEqual([(s["kind"], s["lang"], s["code"]) for s in rs.call_scripts(call, source())],
+                             [("inline", lang, "import os\nprint(1)")], cmd)
+
     def test_tee_heredoc_writes_a_script_file(self):
         for cmd in ("tee /tmp/a.py <<'EOF'", "tee -a /tmp/a.py <<'EOF'", "cat <<'EOF' | tee /tmp/a.py >/dev/null"):
             call = {"name": "bash", "args": {"command": cmd + "\nimport os\nx = 1\nprint(x)\nEOF"}}
