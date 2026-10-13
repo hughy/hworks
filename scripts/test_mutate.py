@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 import shutil
@@ -565,6 +566,24 @@ class MutateTest(unittest.TestCase):
             subprocess.Popen = real
         [proc] = started
         self.assertIsNotNone(proc.poll(), "the command outlived the interrupted run")
+
+    def test_stop_group_reaps_the_child_when_the_group_probe_reports_eperm(self):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+        self.addCleanup(proc.wait)
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        real = os.killpg
+
+        def killpg(pid, sig):
+            if sig == 0:
+                raise PermissionError(errno.EPERM, "zombie-only group")
+            real(pid, sig)
+
+        mutate.os.killpg = killpg
+        try:
+            mutate.stop_group(proc)
+        finally:
+            mutate.os.killpg = real
+        self.assertIsNotNone(proc.poll(), "stop_group returned before reaping the child")
 
     def test_command_that_cannot_start_names_the_command(self):
         log = os.path.join(self.tmp, "log")

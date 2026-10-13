@@ -341,15 +341,28 @@ def stop_group(proc):
         try:
             os.killpg(proc.pid, sig)
         except (ProcessLookupError, PermissionError):
-            return
+            if reaped(proc):
+                return
+            continue
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             proc.poll()
             try:
                 os.killpg(proc.pid, 0)
             except (ProcessLookupError, PermissionError):
-                return
+                if reaped(proc):
+                    return
+                break
             time.sleep(0.02)
+
+
+def reaped(proc):
+    """Reap proc once its group is gone; the child can die between poll() and the group probe."""
+    try:
+        proc.wait(timeout=5)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
 
 
 def unblock_signals():
