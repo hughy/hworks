@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Experimental coordinator for pi with pi-subagents, adapted from pstack's orchestrate playbook. Drives the work items the user names (issue ids, a label, a milestone, "the top three ready") to reviewed, gate-passing branches, several at once, one fresh branch worktree per item, and recovers after a reload without starting a second writer. The session coordinates; scripts/orchestrate.py keeps the state and the safety checks; each item runs through the review-loop workflow. Use for the hughy-mode Long run route when the work is a set of independent items, or for "/orchestrate", "work through these issues", "drive this milestone".
+description: Experimental coordinator for pi with pi-subagents, adapted from pstack's orchestrate playbook. Drives the work items the user names (issue ids, a label, a milestone, "the top three ready") to reviewed, gate-passing branches, several at once, one fresh branch worktree per item, and recovers after a reload without starting a second writer. The session coordinates; scripts/orchestrate.py keeps the state and the safety checks; each item runs through the review-loop workflow. Use only for "/orchestrate" or an explicit request to drive several independent items at once; a short sequential list stays a plain brief with review-loop.
 ---
 
 # orchestrate
@@ -69,7 +69,7 @@ On every completion notice:
 2. Otherwise record from the run's `status.json`, never the notice preview: `python3 $O --store "$S" record <id> <attempt> <runs dir>/<run id>/status.json`. If record refuses (a writer may be alive, or the run is not the bound one), go to Restart. Do not wait for another notice; one may never come.
 3. Act on the recorded state:
    - `clean`: read `nonBlocking`, including downgraded findings, and note anything worth a follow-up. Ship under the grant (below); without one, leave it clean.
-   - `stale`: the branch moved or the tree changed after review. Find out who wrote there first. Then `set <id> queued --reason <cause>` for a fresh attempt (commits stay; the next review covers them), or park.
+   - `stale`: the branch moved or the tree changed after review. Find out who wrote there first. Then `set <id> queued --reason <cause>` for a fresh attempt (commits stay; the next review covers them), or park. A `pr-open` unit that turns `stale` has an open PR that no longer matches the reviewed head: report it and who wrote there, do not requeue it, and do not count it toward the predicate.
    - `unresolved`, `gate-failed`, `review-failed`: read the blocking findings. If record already parked it at the attempt cap, leave it parked. If the brief was wrong or thin, edit only that unit's `body` (keep its acceptance; add the surviving findings), re-import, and let `next` retry it. Otherwise park it. Do not reset the attempt cap by requeueing.
    - `blocked`: `set <id> parked --reason <question>` and add the question to `open-questions.md`. After the answer, add it to the body, re-import, and `set <id> queued --reason <answer>`.
 4. `python3 $O --store "$S" status`, then launch the next window in the same message.
@@ -93,13 +93,13 @@ After a reload, a new session, a refused record, a failed run, or any doubt:
    - `wait`: a writer is live. After a reload this includes children whose workflow script stopped; they finish on their own, and the workflow does not resume. Their notice may not reach this session; check again before yielding.
    - `record`: record the printed file.
    - `relaunch-same-args`: nothing was dispatched for the attempt. Dispatch the existing args file unchanged with the same missionId, then `bind` the attempt to the new run id. orchestrate.py never returns this while any writer for the unit is alive.
-   - `retry`: record the printed file; the unit becomes eligible through `next`.
-   - `hold`: launch nothing for that unit. If the reason names a run to bind, bind it. If a failed or stopped run left commits or structured output (a workflow cut off by a reload ends this way), read both. When the work looks finished or worth keeping, `set <id> queued --reason <what you found> --runs-dir <runs dir>`: the next attempt starts from the branch, and its coder checks `git log` before redoing anything. Otherwise park with what you found. Otherwise report it.
+   - `retry`: record the printed file. Below the attempt cap the unit becomes eligible through `next`; at the cap it is parked, so leave it parked.
+   - `hold`: launch nothing for that unit. If the reason names a run to bind, bind it. If a failed or stopped run left commits or structured output (a workflow cut off by a reload ends this way), read both, then record the bound run's `<runs dir>/<run id>/status.json`. Below the attempt cap the unit becomes `run-failed` and `next` retries it from the branch, with a brief that tells the coder to read `git log` first; at the cap, record parks it. Otherwise report it.
 3. Mission records do not show liveness; after a reload they mark live children failed. Only `reconcile` decides.
 
 Before ending any turn with live units, write them and the next check to `progress.md`, and say in the reply which units are live and that `reconcile` resumes them. Goal-mission idle notices did not fire in testing, so a run is attended: someone starts the next turn.
 
-The first pilot passes only if it also survives one reload while a coder runs: `reconcile` then answers `wait` or `hold` for that unit, never a second writer, and the unit later reaches an accepted record or a reasoned park.
+The first pilot passes only if it also survives one reload while a coder runs: `reconcile` then answers `wait` or `hold` for that unit, never a second writer, and the unit later reaches an accepted record or a reasoned park. A workflow cut off by a reload never returns a result, so that attempt ends `run-failed`: plan the reload on attempt 1.
 
 ## Question a unit
 

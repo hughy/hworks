@@ -639,6 +639,24 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(out["action"], "hold", out)
         self.assertIn("1 commits since start head", out["reason"])
 
+    def test_held_finished_work_is_recorded_then_retried_from_the_kept_commit(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        status = self.stopped("wf-1", edit=lambda d: d.update(state="failed"))
+        self.child("child-1", "wf-1", "A", self.dead_pid(), state="complete")
+        head = self.commit("A")
+        self.assertEqual(self.reconcile()[0]["action"], "hold")
+        self.g("set", "A", "queued", "--reason", "keep", "--runs-dir", self.runs, code=3)
+        self.g("record", "A", "1", status)
+        self.assertEqual(self.rows()["A"]["state"], "run-failed")
+        self.assertEqual(self.next(), ["A"])
+        spec = self.launch("A")
+        self.assertEqual(spec["attempt"], 2)
+        self.assertEqual(sh(self.wt("A"), "rev-parse", "HEAD"), head)
+        with open(orchestrate.read_json(spec["args_path"])["brief"]) as f:
+            self.assertIn("git log", f.read())
+
     def test_merged_dependency_without_recorded_head_blocks(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]},
