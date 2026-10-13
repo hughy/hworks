@@ -11,7 +11,6 @@ import argparse
 import contextlib
 import datetime
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -27,9 +26,8 @@ DEFAULT_WORKFLOW = os.path.normpath(os.path.join(HERE, "..", "workflows", "revie
 # cleared only by a requeue that finds every bound controller and child terminal.
 # created: the worktree path this store's git worktree add made for the unit; launch reuses only that
 # path without --adopt.
-# session: the pi session file that bound the latest run ($PI_SESSION_FILE, what the runtime records); the runtime re-attaches live children only there.
 COLUMNS = ["id", "state", "deps", "paths", "branch", "worktree", "effort", "attempt", "run",
-           "start_head", "head", "claim", "reason", "reserved", "created", "session"]
+           "start_head", "head", "claim", "reason", "reserved", "created"]
 LIVE = {"launching", "running"}
 WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "blocked"}
 # run-failed: the workflow ended without a return value (stopped, failed, cancelled) and no writer is left.
@@ -186,14 +184,6 @@ def pid_alive(pid):
     except PermissionError:
         return True
     return True
-
-
-def file_sha256(path):
-    try:
-        with open(path, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
-    except OSError:
-        return ""
 
 
 def real(path):
@@ -520,9 +510,8 @@ def cmd_launch(store, a):
             return block("%s already exists" % args_path)
         if p.stderr.strip():
             sys.stderr.write(p.stderr)
-        workflow = os.path.abspath(a.workflow)
         spec = {"id": row["id"], "attempt": row["attempt"], "cwd": cfg["repo"], "args_path": args_path,
-                "workflow": workflow, "workflow_sha256": file_sha256(workflow)}
+                "workflow": os.path.abspath(a.workflow)}
         write_json(os.path.join(store, "args", tag + ".launch.json"), spec)
         # The args file is written last: reconcile treats it as the point after which the attempt
         # resumes with these exact args, and its absence as a launch that never finished.
@@ -556,7 +545,7 @@ def cmd_bind(store, a):
             runs.append(a.run_id)
         else:
             raise Refused("%s is %s; only a launching or running attempt can be bound" % (a.id, row["state"]))
-        row.update(state="running", run=",".join(runs), session=a.session)
+        row.update(state="running", run=",".join(runs))
         write_rows(store, rows)
     print("%s attempt %d running as %s" % (a.id, a.attempt, a.run_id))
     return 0
@@ -843,87 +832,12 @@ def structured_outputs(children):
     return out
 
 
-def read_journal(runs_dir, run):
-    """The controller's child journal as the runtime reads it: last start and last settle per key."""
-    started, settled = {}, {}
-    try:
-        with open(os.path.join(runs_dir, run, "workflow-children.jsonl")) as f:
-            lines = f.read().split("\n")
-    except OSError:
-        return started, settled
-    for line in lines:
-        try:
-            rec = json.loads(line) if line.strip() else None
-        except ValueError:
-            continue
-        if not isinstance(rec, dict) or not isinstance(rec.get("key"), str) or not isinstance(rec.get("fingerprint"), str):
-            continue
-        if rec.get("type") == "start" and isinstance(rec.get("runId"), str):
-            started[rec["key"]] = rec["runId"]
-        elif rec.get("type") == "settle" and isinstance(rec.get("result"), dict):
-            settled[rec["key"]] = rec["result"]
-    return started, settled
-
-
-def journal_children(runs_dir, run):
-    """Run ids of children the controller's journal shows started and never settled."""
-    started, settled = read_journal(runs_dir, run)
-    return {r for k, r in started.items() if k not in settled}
-
-
-def replay_hold(row, spec, session, runs_dir, cur, st, live):
-    """Why relaunching cur's args could start a second writer beside the live children, or ''.
-
-    The runtime re-attaches a running child only when the relaunch runs in the session recorded in the stopped
-    workflow's status.json, with the script digest recorded there, after a runtime replacement, and its child
-    journal records that child as started and unsettled. A relaunch reruns every journaled child that settled
-    without ok before it reaches a live one, so a failed predecessor (a coder whose retry is live) also holds.
-    """
-    child = live[0]
-    end = "; child %s must end before the attempt is relaunched" % child
-    bound = row["session"]
-    if not session or bound != session:
-        return ("workflow %s was bound in session %s, not the current session %s, and the runtime re-attaches "
-                "child %s only in the session that ran it%s"
-                % (cur or "(missing)", bound or "(unknown)", session or "(unknown)", child, end))
-    if not isinstance(st, dict):
-        return ("workflow %s has no status.json, so nothing shows the runtime can re-attach child %s%s"
-                % (cur or "(missing)", child, end))
-    owner = st.get("sessionId")
-    if owner != session:
-        return ("workflow %s ran in session %s, not the current session %s, and the runtime re-attaches "
-                "child %s only in the session that ran it%s" % (cur, owner or "(unknown)", session, child, end))
-    wf = st.get("workflow") if isinstance(st.get("workflow"), dict) else {}
-    workflow, pinned = spec.get("workflow", DEFAULT_WORKFLOW), spec.get("workflow_sha256")
-    if not pinned or file_sha256(workflow) != pinned or wf.get("scriptDigest") != pinned:
-        return ("workflow file %s changed since launch (or its digest was not recorded, or the run recorded "
-                "another script), and the runtime re-attaches child %s only for identical workflow code%s"
-                % (workflow, child, end))
-    cause = wf.get("stopCause")
-    if cause != "runtime-replaced":
-        return ("workflow %s is %s with stop cause %s, and the runtime re-attaches child %s only after a "
-                "runtime replacement%s" % (cur, st.get("state"), cause or "(none)", child, end))
-    started, settled = read_journal(runs_dir, cur)
-    failed = sorted(k for k, res in settled.items() if res.get("ok") is not True)
-    if failed:
-        return ("workflow %s's child journal records %s as settled without ok, and a relaunch reruns it before "
-                "reaching child %s%s" % (cur, failed[0], child, end))
-    journaled = {r for k, r in started.items() if k not in settled}
-    missing = [k for k in live if k not in journaled]
-    if missing:
-        return ("workflow %s's child journal does not record child %s as started and unsettled, so the runtime "
-                "cannot re-attach it; child %s must end before the attempt is relaunched"
-                % (cur, missing[0], missing[0]))
-    return ""
-
-
-def decide(cfg, store, row, runs_dir, session):
+def decide(cfg, store, row, runs_dir):
     tag = "%s-%d" % (row["id"], row["attempt"])
     args_path = os.path.join(store, "args", tag + ".json")
     runs = split_list(row["run"])
     entries = scan_runs(runs_dir, row)
     kids = [e for e in entries if e["kind"] == "child" and e["bound"]]
-    live = [k for k in kids if k["liveness"] == "alive"]
     res = {"id": row["id"], "attempt": row["attempt"], "state": row["state"], "runs": runs,
            "live_children": [k["run"] for k in entries if k["kind"] == "child" and k["liveness"] == "alive"]}
 
@@ -940,8 +854,6 @@ def decide(cfg, store, row, runs_dir, session):
                    "set %s queued --reason TEXT --runs-dir %s releases it"
                    % (row["state"], row["reserved"], row["id"], runs_dir))
 
-    spec = read_json(os.path.join(store, "args", tag + ".launch.json"), {})
-    relaunch = {"args_path": args_path, "workflow": spec.get("workflow", DEFAULT_WORKFLOW), "cwd": cfg["repo"]}
     foreign = [e for e in entries if not e["bound"] and e["liveness"] in ("alive", "unknown")]
     if foreign:
         e = foreign[0]
@@ -949,13 +861,12 @@ def decide(cfg, store, row, runs_dir, session):
             return act("hold", "%s targets %s; if it is this attempt's run, bind %s %d %s"
                        % (describe(e), row["worktree"], row["id"], row["attempt"], e["run"]))
         return act("hold", "%s writes in %s and is not owned by this attempt" % (describe(e), row["worktree"]))
-    unknown = [k for k in kids if k["liveness"] == "unknown"]
+    live = [e["run"] for e in entries if e["bound"] and e["liveness"] == "alive"]
+    if live:
+        return act("wait", "%s alive; reconcile again after every writer ends" % ", ".join(live), live=live)
+    unknown = [e for e in entries if e["bound"] and e["liveness"] == "unknown"]
     if unknown:
         return act("hold", "%s; its liveness is unknown" % describe(unknown[0]))
-    older = [e for e in entries if e["kind"] == "workflow" and e["run"] in runs[:-1]
-             and e["liveness"] in ("alive", "unknown")]
-    if older:
-        return act("hold", "%s; it was superseded but may still write" % describe(older[0]))
     commits = ""
     if row["start_head"]:
         _, commits, _ = git(row["worktree"], "rev-list", "--count", row["start_head"] + "..HEAD")
@@ -966,32 +877,19 @@ def decide(cfg, store, row, runs_dir, session):
                        % (row["id"], row["id"], runs_dir))
         if commits not in ("", "0"):
             return act("hold", "no run bound but %s commits since start head %s" % (commits, row["start_head"][:12]))
-        return act("relaunch-same-args", "intent written, no run bound, no live writer", **relaunch)
+        spec = read_json(os.path.join(store, "args", tag + ".launch.json"), {})
+        return act("relaunch-same-args", "intent written, nothing dispatched, no writer", args_path=args_path,
+                   workflow=spec.get("workflow", DEFAULT_WORKFLOW), cwd=cfg["repo"])
     cur = runs[-1] if runs else ""
     st = run_status(runs_dir, cur) if cur else None
     if not isinstance(st, dict):
-        if live:
-            return act("hold", replay_hold(row, spec, session, runs_dir, cur, st, [k["run"] for k in live]))
-        return act("hold", "workflow %s has no status.json and no live writer" % cur)
+        return act("hold", "workflow %s has no status.json" % (cur or "(none bound)"))
     wstate = st.get("state")
-    wlive = liveness(st)
-    if wlive == "alive":
-        return act("wait", "workflow %s is %s" % (cur, wstate))
-    if wlive == "unknown":
-        return act("hold", "workflow %s is %s with no usable pid" % (cur, wstate))
     path = os.path.join(runs_dir, cur, "status.json")
     if workflow_value(st) is not None:
         if wstate not in RUNTIME_TERMINAL:
             return act("hold", "workflow %s has a value but is %s with a dead pid" % (cur, wstate))
-        if live:
-            return act("hold", "workflow %s %s with a return value but child %s is still alive; record after it ends"
-                       % (cur, wstate, live[0]["run"]))
         return act("record", "workflow %s %s with a return value" % (cur, wstate), file=path)
-    if live:
-        why = replay_hold(row, spec, session, runs_dir, cur, st, [k["run"] for k in live])
-        if why:
-            return act("hold", why)
-        return act("relaunch-same-args", "workflow %s %s; child %s still alive" % (cur, wstate, live[0]["run"]), **relaunch)
     if wstate not in RUNTIME_TERMINAL:
         return act("hold", "workflow %s is %s but its process is gone and no writer is alive" % (cur, wstate))
     evidence = []
@@ -1012,7 +910,7 @@ def cmd_reconcile(store, a):
     with locked(store):
         cfg = load_config(store)
         rows = read_rows(store)
-    out = [decide(cfg, store, r, a.runs_dir, a.session) for r in rows if r["state"] in LIVE or r["reserved"]]
+    out = [decide(cfg, store, r, a.runs_dir) for r in rows if r["state"] in LIVE or r["reserved"]]
     if a.json:
         print(json.dumps(out, indent=2))
     else:
@@ -1084,8 +982,6 @@ def parser():
     s.add_argument("id")
     s.add_argument("attempt", type=int)
     s.add_argument("run_id")
-    s.add_argument("--session", default=os.environ.get("PI_SESSION_FILE", ""),
-                   help="pi session that dispatched the run, as the runtime records it (default: $PI_SESSION_FILE)")
 
     s = sub.add_parser("record", parents=[common])
     s.add_argument("id")
@@ -1098,8 +994,6 @@ def parser():
 
     s = sub.add_parser("reconcile", parents=[common])
     s.add_argument("--runs-dir", required=True)
-    s.add_argument("--session", default=os.environ.get("PI_SESSION_FILE", ""),
-                   help="current pi session, as the runtime records it (default: $PI_SESSION_FILE)")
     s.add_argument("--json", action="store_true")
 
     s = sub.add_parser("set", parents=[common])

@@ -1,5 +1,4 @@
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -41,7 +40,6 @@ class OrchestrateTest(unittest.TestCase):
         self.env.pop("PI_PROVIDER", None)
         self.env.pop("PI_MODEL", None)
         self.env.pop("PI_SESSION_ID", None)
-        self.env.pop("PI_SESSION_FILE", None)
         self.seq = 0
 
     # ---------- helpers ----------
@@ -111,8 +109,6 @@ class OrchestrateTest(unittest.TestCase):
     def stopped(self, run, child="child-1", edit=None):
         """The stopped fixture, with its one child reference renamed to child, or removed when child is None."""
         def rename(doc):
-            doc["sessionId"] = "sess-1"
-            doc["workflow"]["scriptDigest"] = orchestrate.file_sha256(orchestrate.DEFAULT_WORKFLOW)
             for ref in doc["steps"] + doc["workflowChildren"]["children"]:
                 ref["runId"] = child
             if child is None:
@@ -125,20 +121,6 @@ class OrchestrateTest(unittest.TestCase):
         def edit(doc):
             doc.update(cwd=self.wt(uid), parentWorkflowRunId=parent, pid=pid, state=state)
         return self.fixture("stopped-child", run, edit)
-
-    def journal(self, run, *records):
-        """Write the controller's child journal; each record is (type, key, child run id); type "fail" writes a settle without ok."""
-        lines = []
-        for kind, key, child in records:
-            rec = {"type": kind, "key": key, "fingerprint": "fp-" + key}
-            if kind == "start":
-                rec["runId"] = child
-            else:
-                rec["type"] = "settle"
-                rec["result"] = {"ok": kind == "settle", "runId": child}
-            lines.append(json.dumps(rec))
-        with open(os.path.join(self.runs, run, "workflow-children.jsonl"), "w") as f:
-            f.write("\n".join(lines) + "\n")
 
     def dead_pid(self):
         p = subprocess.Popen(["true"])
@@ -527,147 +509,17 @@ class OrchestrateTest(unittest.TestCase):
         self.assertIn("attempt 2 of 2", r["reason"])
         self.assertEqual(self.next(), [])
 
-    def test_reconcile_stopped_workflow_with_live_child_relaunches_same_args(self):
-        self.init()
-        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
-        spec = self.launch("A")
-        self.env["PI_SESSION_FILE"] = "sess-1"
-        self.g("bind", "A", "1", "wf-1")
-        self.stopped("wf-1")
-        self.journal("wf-1", ("start", "code-1", "child-1"))
-        self.child("child-1", "wf-1", "A", os.getpid())
-        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))[0]
-        self.assertEqual(out["action"], "relaunch-same-args", out)
-        self.assertEqual(out["args_path"], spec["args_path"])
-        self.assertEqual(out["live_children"], ["child-1"])
-        del self.env["PI_SESSION_FILE"]
-        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json"))[0]
-        self.assertEqual(out["action"], "relaunch-same-args", out)
-
-    def test_live_child_from_another_session_holds_instead_of_relaunching(self):
-        self.init()
-        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
-        self.launch("A")
-        self.g("bind", "A", "1", "wf-1", "--session", "sess-old")
-        self.stopped("wf-1")
-        self.child("child-1", "wf-1", "A", os.getpid())
-        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-new", "--json"))[0]
-        self.assertEqual(out["action"], "hold", out)
-        self.assertIn("sess-old", out["reason"])
-        self.assertIn("child-1", out["reason"])
-        self.assertIn("end", out["reason"])
-        self.assertNotIn("args_path", out)
-        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--json"))[0]
-        self.assertEqual(out["action"], "hold", "no current session is never the binding session")
-        shutil.rmtree(os.path.join(self.runs, "wf-1"))
-        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-new", "--json"))[0]
-        self.assertEqual(out["action"], "hold", "missing controller with a live child: %s" % out)
-        self.assertIn("sess-old", out["reason"])
-
-    def test_live_child_holds_without_runtime_replacement_and_journal_evidence(self):
-        self.init()
-        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
-        self.launch("A")
-        self.g("bind", "A", "1", "wf-1", "--session", "sess-1")
-        self.child("child-1", "wf-1", "A", os.getpid())
-        reconcile = ("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json")
-
-        out = json.loads(self.g(*reconcile))[0]
-        self.assertEqual(out["action"], "hold", "missing controller status: %s" % out)
-        self.assertIn("no status.json", out["reason"])
-        self.assertIn("child-1", out["reason"])
-
-        def no_cause(doc):
-            del doc["workflow"]["stopCause"]
-        for state in ("stopped", "failed"):
-            shutil.rmtree(os.path.join(self.runs, "wf-1"), ignore_errors=True)
-            self.stopped("wf-1", edit=lambda d, s=state: (no_cause(d), d.update(state=s)))
-            self.journal("wf-1", ("start", "code-1", "child-1"))
-            out = json.loads(self.g(*reconcile))[0]
-            self.assertEqual(out["action"], "hold", "%s without runtime replacement: %s" % (state, out))
-            self.assertIn("runtime replacement", out["reason"])
-            self.assertNotIn("args_path", out)
-
-        shutil.rmtree(os.path.join(self.runs, "wf-1"))
-        self.stopped("wf-1")
-        out = json.loads(self.g(*reconcile))[0]
-        self.assertEqual(out["action"], "hold", "runtime replaced without a journal: %s" % out)
-        self.assertIn("journal", out["reason"])
-
-        self.journal("wf-1", ("start", "code-1", "child-0"))
-        self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "hold", "journal names another child")
-        self.journal("wf-1", ("start", "code-1", "child-1"), ("settle", "code-1", "child-1"))
-        self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "hold", "journal settled the child")
-        self.journal("wf-1", ("start", "code-1", "child-1"), ("start", "code-1", "child-2"))
-        self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "hold", "a later start replaced the child")
-        self.journal("wf-1", ("start", "code-1", "child-1"))
-        self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "relaunch-same-args")
-
-        # A failed coder whose retry is live: a relaunch reruns code-1 before it reaches the retry.
-        self.journal("wf-1", ("start", "code-1", "child-0"), ("fail", "code-1", "child-0"),
-                     ("start", "code-1-retry", "child-1"))
-        out = json.loads(self.g(*reconcile))[0]
-        self.assertEqual(out["action"], "hold", "failed predecessor of a live retry: %s" % out)
-        self.assertIn("code-1", out["reason"])
-        self.assertIn("without ok", out["reason"])
-
-        # The runtime matches the session recorded in status.json, not the one passed to bind.
-        shutil.rmtree(os.path.join(self.runs, "wf-1"))
-        self.stopped("wf-1", edit=lambda d: d.update(sessionId="sess-other"))
-        self.journal("wf-1", ("start", "code-1", "child-1"))
-        out = json.loads(self.g(*reconcile))[0]
-        self.assertEqual(out["action"], "hold", "status.json names another session: %s" % out)
-        self.assertIn("sess-other", out["reason"])
-
-    def test_live_child_bound_without_a_session_holds(self):
+    def test_reconcile_waits_and_never_relaunches_beside_a_live_child(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A", "wf-1")
-        self.assertEqual(self.rows()["A"]["session"], "")
         self.stopped("wf-1")
         self.child("child-1", "wf-1", "A", os.getpid())
-        out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json"))[0]
-        self.assertEqual(out["action"], "hold", out)
-        self.assertIn("unknown", out["reason"])
-
-    def test_live_child_holds_when_the_workflow_file_changed_since_launch(self):
-        self.init()
-        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
-        workflow = os.path.join(self.tmp, "loop.js")
-        with open(workflow, "w") as f:
-            f.write("v1\n")
-        spec = self.launch("A", "--workflow", workflow)
-        with open(os.path.join(self.store, "args", "A-1.launch.json")) as f:
-            self.assertEqual(json.load(f)["workflow_sha256"], hashlib.sha256(b"v1\n").hexdigest())
-        self.g("bind", "A", "1", "wf-1", "--session", "sess-1")
-        self.stopped("wf-1", edit=lambda d: d["workflow"].update(scriptDigest="0" * 64))
-        self.journal("wf-1", ("start", "code-1", "child-1"))
-        self.child("child-1", "wf-1", "A", os.getpid())
-        reconcile = ("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json")
-        out = json.loads(self.g(*reconcile))[0]
-        self.assertEqual(out["action"], "hold", "the run recorded another script: %s" % out)
-        shutil.rmtree(os.path.join(self.runs, "wf-1"))
-        self.stopped("wf-1", edit=lambda d: d["workflow"].update(scriptDigest=hashlib.sha256(b"v1\n").hexdigest()))
-        self.journal("wf-1", ("start", "code-1", "child-1"))
-        self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "relaunch-same-args")
-        with open(workflow, "w") as f:
-            f.write("v2\n")
-        out = json.loads(self.g(*reconcile))[0]
-        self.assertEqual(out["action"], "hold", out)
-        self.assertIn(workflow, out["reason"])
-        self.assertIn("changed", out["reason"])
+        out = self.reconcile()[0]
+        self.assertEqual(out["action"], "wait", out)
+        self.assertEqual(out["live"], ["child-1"])
         self.assertIn("child-1", out["reason"])
-        os.unlink(workflow)
-        self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "hold")
-        with open(workflow, "w") as f:
-            f.write("v1\n")
-        launch_path = os.path.join(self.store, "args", "A-1.launch.json")
-        old = orchestrate.read_json(launch_path)
-        del old["workflow_sha256"]
-        orchestrate.write_json(launch_path, old)
-        out = json.loads(self.g(*reconcile))[0]
-        self.assertEqual(out["action"], "hold", "a launch without a recorded digest: %s" % out)
-        self.assertEqual(spec["workflow"], workflow)
+        self.assertNotIn("args_path", out)
 
     def test_reconcile_stopped_workflow_with_dead_child_retries(self):
         self.init()
@@ -743,7 +595,7 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(self.reconcile(), [])
         self.assertEqual(self.launch("A")["attempt"], 2)
 
-    def test_reconcile_holds_while_an_older_bound_controller_runs(self):
+    def test_reconcile_waits_while_an_older_bound_controller_runs(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.started("A", "wf-1")
@@ -751,8 +603,7 @@ class OrchestrateTest(unittest.TestCase):
         self.g("bind", "A", "1", "wf-2")
         self.stopped("wf-2", child=None)
         out = self.reconcile()[0]
-        self.assertEqual(out["action"], "hold", out)
-        self.assertIn("wf-1", out["reason"])
+        self.assertEqual((out["action"], out["live"]), ("wait", ["wf-1"]), out)
 
     def test_reconcile_holds_for_nonterminal_child_with_unknown_pid(self):
         self.init()
@@ -873,8 +724,7 @@ class OrchestrateTest(unittest.TestCase):
         status = self.workflow("unresolved", "wf-1", head)
         child = self.child("child-1", "wf-1", "A", os.getpid())
         out = self.reconcile()[0]
-        self.assertEqual(out["action"], "hold", out)
-        self.assertIn("child-1", out["reason"])
+        self.assertEqual((out["action"], out["live"]), ("wait", ["child-1"]), out)
         self.g("record", "A", "1", status, code=3)
         self.g("record", "A", "1", status, "--runs-dir", self.runs, code=3)
         self.assertEqual(self.rows()["A"]["state"], "running")
@@ -980,6 +830,23 @@ class OrchestrateTest(unittest.TestCase):
         out = self.reconcile()[0]
         self.assertEqual(out["action"], "hold", out)
         self.assertIn("wf-x", out["reason"])
+
+    def test_store_with_a_session_column_still_loads(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A", "wf-1")
+        path = os.path.join(self.store, "units.tsv")
+        with open(path) as f:
+            lines = f.read().splitlines()
+        with open(path, "w") as f:
+            f.write("\n".join([lines[0] + "\tsession"] + [l + "\tsess-old" for l in lines[1:]]) + "\n")
+        r = self.rows()["A"]
+        self.assertEqual((r["state"], r["run"], r["attempt"]), ("running", "wf-1", 1))
+        self.assertNotIn("session", r)
+        self.g("bind", "A", "1", "wf-2")
+        with open(path) as f:
+            self.assertNotIn("sess-old", f.read())
+        self.assertEqual(self.rows()["A"]["run"], "wf-1,wf-2")
 
     def test_set_refuses_live_attempt_except_parked(self):
         self.init()
