@@ -41,6 +41,7 @@ class GraphTest(unittest.TestCase):
         self.env.pop("PI_PROVIDER", None)
         self.env.pop("PI_MODEL", None)
         self.env.pop("PI_SESSION_ID", None)
+        self.env.pop("PI_SESSION_FILE", None)
         self.seq = 0
 
     # ---------- helpers ----------
@@ -110,6 +111,8 @@ class GraphTest(unittest.TestCase):
     def stopped(self, run, child="child-1", edit=None):
         """The stopped fixture, with its one child reference renamed to child, or removed when child is None."""
         def rename(doc):
+            doc["sessionId"] = "sess-1"
+            doc["workflow"]["scriptDigest"] = graph.file_sha256(graph.DEFAULT_WORKFLOW)
             for ref in doc["steps"] + doc["workflowChildren"]["children"]:
                 ref["runId"] = child
             if child is None:
@@ -124,14 +127,15 @@ class GraphTest(unittest.TestCase):
         return self.fixture("stopped-child", run, edit)
 
     def journal(self, run, *records):
-        """Write the controller's child journal; each record is (type, key, child run id)."""
+        """Write the controller's child journal; each record is (type, key, child run id); type "fail" writes a settle without ok."""
         lines = []
         for kind, key, child in records:
             rec = {"type": kind, "key": key, "fingerprint": "fp-" + key}
             if kind == "start":
                 rec["runId"] = child
             else:
-                rec["result"] = {"ok": True, "runId": child}
+                rec["type"] = "settle"
+                rec["result"] = {"ok": kind == "settle", "runId": child}
             lines.append(json.dumps(rec))
         with open(os.path.join(self.runs, run, "workflow-children.jsonl"), "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -510,7 +514,7 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         spec = self.launch("A")
-        self.env["PI_SESSION_ID"] = "sess-1"
+        self.env["PI_SESSION_FILE"] = "sess-1"
         self.g("bind", "A", "1", "wf-1")
         self.stopped("wf-1")
         self.journal("wf-1", ("start", "code-1", "child-1"))
@@ -519,7 +523,7 @@ class GraphTest(unittest.TestCase):
         self.assertEqual(out["action"], "relaunch-same-args", out)
         self.assertEqual(out["args_path"], spec["args_path"])
         self.assertEqual(out["live_children"], ["child-1"])
-        del self.env["PI_SESSION_ID"]
+        del self.env["PI_SESSION_FILE"]
         out = json.loads(self.g("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json"))[0]
         self.assertEqual(out["action"], "relaunch-same-args", out)
 
@@ -547,9 +551,9 @@ class GraphTest(unittest.TestCase):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
         self.launch("A")
-        self.g("bind", "A", "1", "wf-1", "--session", "s")
+        self.g("bind", "A", "1", "wf-1", "--session", "sess-1")
         self.child("child-1", "wf-1", "A", os.getpid())
-        reconcile = ("reconcile", "--runs-dir", self.runs, "--session", "s", "--json")
+        reconcile = ("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json")
 
         out = json.loads(self.g(*reconcile))[0]
         self.assertEqual(out["action"], "hold", "missing controller status: %s" % out)
@@ -582,6 +586,22 @@ class GraphTest(unittest.TestCase):
         self.journal("wf-1", ("start", "code-1", "child-1"))
         self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "relaunch-same-args")
 
+        # A failed coder whose retry is live: a relaunch reruns code-1 before it reaches the retry.
+        self.journal("wf-1", ("start", "code-1", "child-0"), ("fail", "code-1", "child-0"),
+                     ("start", "code-1-retry", "child-1"))
+        out = json.loads(self.g(*reconcile))[0]
+        self.assertEqual(out["action"], "hold", "failed predecessor of a live retry: %s" % out)
+        self.assertIn("code-1", out["reason"])
+        self.assertIn("without ok", out["reason"])
+
+        # The runtime matches the session recorded in status.json, not the one passed to bind.
+        shutil.rmtree(os.path.join(self.runs, "wf-1"))
+        self.stopped("wf-1", edit=lambda d: d.update(sessionId="sess-other"))
+        self.journal("wf-1", ("start", "code-1", "child-1"))
+        out = json.loads(self.g(*reconcile))[0]
+        self.assertEqual(out["action"], "hold", "status.json names another session: %s" % out)
+        self.assertIn("sess-other", out["reason"])
+
     def test_live_child_bound_without_a_session_holds(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
@@ -602,11 +622,16 @@ class GraphTest(unittest.TestCase):
         spec = self.launch("A", "--workflow", workflow)
         with open(os.path.join(self.store, "args", "A-1.launch.json")) as f:
             self.assertEqual(json.load(f)["workflow_sha256"], hashlib.sha256(b"v1\n").hexdigest())
-        self.g("bind", "A", "1", "wf-1", "--session", "s")
-        self.stopped("wf-1")
+        self.g("bind", "A", "1", "wf-1", "--session", "sess-1")
+        self.stopped("wf-1", edit=lambda d: d["workflow"].update(scriptDigest="0" * 64))
         self.journal("wf-1", ("start", "code-1", "child-1"))
         self.child("child-1", "wf-1", "A", os.getpid())
-        reconcile = ("reconcile", "--runs-dir", self.runs, "--session", "s", "--json")
+        reconcile = ("reconcile", "--runs-dir", self.runs, "--session", "sess-1", "--json")
+        out = json.loads(self.g(*reconcile))[0]
+        self.assertEqual(out["action"], "hold", "the run recorded another script: %s" % out)
+        shutil.rmtree(os.path.join(self.runs, "wf-1"))
+        self.stopped("wf-1", edit=lambda d: d["workflow"].update(scriptDigest=hashlib.sha256(b"v1\n").hexdigest()))
+        self.journal("wf-1", ("start", "code-1", "child-1"))
         self.assertEqual(json.loads(self.g(*reconcile))[0]["action"], "relaunch-same-args")
         with open(workflow, "w") as f:
             f.write("v2\n")
