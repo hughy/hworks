@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bookkeeping for an agent graph: units driven through workflows/review-loop.js, one branch worktree each.
+"""Bookkeeping for orchestrate: units driven through workflows/review-loop.js, one branch worktree each.
 
 The CLI never launches agents, pushes, deletes a worktree or branch, or discards uncommitted work.
 A coordinator runs it, dispatches the workflow itself, and feeds results back with bind and record.
@@ -24,15 +24,19 @@ DEFAULT_WORKFLOW = os.path.normpath(os.path.join(HERE, "..", "workflows", "revie
 
 # reserved: the attempt number whose writers may still own the worktree. Set when a live attempt is parked;
 # cleared only by a requeue that finds every bound controller and child terminal.
+# created: the worktree path this store's git worktree add made for the unit; launch reuses only that
+# path without --adopt.
 COLUMNS = ["id", "state", "deps", "paths", "branch", "worktree", "effort", "attempt", "run",
-           "start_head", "head", "claim", "reason", "reserved"]
+           "start_head", "head", "claim", "reason", "reserved", "created"]
 LIVE = {"launching", "running"}
 WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "blocked"}
 # run-failed: the workflow ended without a return value (stopped, failed, cancelled) and no writer is left.
 RETRYABLE = {"unresolved", "gate-failed", "review-failed", "run-failed"}
 ACCEPTED_UNMERGED = {"clean", "stale", "pr-open"}
 SET_TARGETS = {"parked", "abandoned", "queued", "pr-open", "merged"}
-EFFORTS = {"quick", "standard", "exhaustive"}
+# quick runs no reviewer and can return a result whose gate nobody verified, so orchestrate never uses it.
+EFFORTS = {"standard", "exhaustive"}
+EFFORT_ERROR = "effort must be standard or exhaustive (quick runs no reviewer)"
 RUNTIME_TERMINAL = {"complete", "completed", "failed", "stopped", "cancelled", "canceled", "error",
                     "timeout", "timed-out", "aborted"}
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -239,7 +243,7 @@ def validate_units(data):
             raise BadInput("%s: branch %r is not usable" % (where, b))
         e = u.get("effort")
         if e is not None and e not in EFFORTS:
-            raise BadInput("%s: effort must be one of %s" % (where, ", ".join(sorted(EFFORTS))))
+            raise BadInput("%s: %s" % (where, EFFORT_ERROR))
 
 
 def cmd_import(store, a):
@@ -265,7 +269,7 @@ def cmd_import(store, a):
                 by_id[u["id"]] = r
             r["deps"] = ",".join(u.get("blockedBy") or [])
             r["paths"] = ",".join(u.get("paths") or [])
-            r["branch"] = u.get("branch") or "graph/" + u["id"]
+            r["branch"] = u.get("branch") or "orchestrate/" + u["id"]
             r["effort"] = u.get("effort") or cfg["effort"]
             r["claim"] = " | ".join(one_line(c) for c in u.get("claimedBy") or [])
         for r in rows:
@@ -292,7 +296,7 @@ STANDING_HEADER = """# Standing orders
 
 def cmd_init(store, a):
     if a.effort not in EFFORTS:
-        raise BadInput("effort must be one of %s" % ", ".join(sorted(EFFORTS)))
+        raise BadInput(EFFORT_ERROR)
     if a.max_attempts < 1:
         raise BadInput("--max-attempts must be at least 1")
     repo = os.path.abspath(a.repo)
@@ -412,9 +416,9 @@ def plan(cfg, rows, units, window):
 def cmd_next(store, a):
     with locked(store):
         cfg = load_config(store)
-        ids, _ = plan(cfg, read_rows(store), load_units(store), a.max)
+        ids, why = plan(cfg, read_rows(store), load_units(store), a.max)
     if a.json:
-        print(json.dumps(ids))
+        print(json.dumps({"selected": ids, "refused": why}))
     else:
         for i in ids:
             print(i)
@@ -444,7 +448,10 @@ def prepare_worktree(cfg, row):
     if not os.path.lexists(wt):
         os.makedirs(os.path.dirname(wt), exist_ok=True)
         rc, _, err = git(cfg["repo"], "worktree", "add", "-q", "-b", branch, wt, cfg["base"])
-        return "" if rc == 0 else "git worktree add failed: %s" % err
+        if rc != 0:
+            return "git worktree add failed: %s" % err
+        row["created"] = wt
+        return ""
     rc, top, _ = git(wt, "rev-parse", "--show-toplevel")
     if rc != 0 or real(top) != real(wt):
         return "%s exists and is not a worktree root" % wt
@@ -466,9 +473,13 @@ def cmd_launch(store, a):
         ids, why = plan(cfg, rows, units, 10 ** 9 if a.force_window else a.max)
         if a.id not in ids:
             raise Refused("%s is not launchable: %s" % (a.id, why.get(a.id, "not selected")))
+        wt = os.path.join(cfg["worktrees"], row["id"])
+        if os.path.lexists(wt) and row["created"] != wt and not a.adopt:
+            raise Refused("%s already exists and this store did not create it, so another writer may own it; "
+                          "pass --adopt to launch in it anyway" % wt)
         prev_state, prev_reason = row["state"], row["reason"]
         row.update(state="launching", attempt=row["attempt"] + 1, run="", start_head="", head="", reason="",
-                   worktree=os.path.join(cfg["worktrees"], row["id"]))
+                   worktree=wt)
         write_rows(store, rows)
         tag = "%s-%d" % (row["id"], row["attempt"])
 
@@ -625,9 +636,10 @@ def cmd_record(store, a):
         bound = split_list(row["run"])
         if run not in bound:
             raise Refused("run %s is not bound to %s attempt %d" % (run, a.id, a.attempt))
-        if run != bound[-1]:
+        cur = current_run(runs_dir, bound)
+        if run != cur:
             raise Refused("run %s was superseded by %s for %s attempt %d; record the latest bound run"
-                          % (run, bound[-1], a.id, a.attempt))
+                          % (run, cur, a.id, a.attempt))
         if status.get("state") not in RUNTIME_TERMINAL:
             raise BadInput("run %s is %s, not terminal; nothing to record yet" % (run, status.get("state")))
         blockers = ownership_blockers(runs_dir, row)
@@ -677,7 +689,7 @@ def cmd_status(store, a):
     out = []
     for r in rows:
         state, reason = r["state"], r["reason"]
-        if state == "clean":
+        if state in ("clean", "pr-open"):
             stale = freshness(cfg, r, r["head"])
             if stale:
                 state, reason = "stale", stale
@@ -694,6 +706,16 @@ def cmd_status(store, a):
 
 def run_status(runs_dir, run):
     return read_json(os.path.join(runs_dir, run, "status.json"))
+
+
+def current_run(runs_dir, bound):
+    """The bound run that is the attempt's outcome: the newest started, ties going to the last bound.
+
+    bind appends, so a late-bound older run must not displace the newest one."""
+    def started(r):
+        v = (run_status(runs_dir, r) or {}).get("startedAt")
+        return v if isinstance(v, int) else -1
+    return max(reversed(bound), key=started, default="")
 
 
 def liveness(st):
@@ -827,7 +849,6 @@ def decide(cfg, store, row, runs_dir):
     runs = split_list(row["run"])
     entries = scan_runs(runs_dir, row)
     kids = [e for e in entries if e["kind"] == "child" and e["bound"]]
-    live = [k for k in kids if k["liveness"] == "alive"]
     res = {"id": row["id"], "attempt": row["attempt"], "state": row["state"], "runs": runs,
            "live_children": [k["run"] for k in entries if k["kind"] == "child" and k["liveness"] == "alive"]}
 
@@ -844,8 +865,6 @@ def decide(cfg, store, row, runs_dir):
                    "set %s queued --reason TEXT --runs-dir %s releases it"
                    % (row["state"], row["reserved"], row["id"], runs_dir))
 
-    spec = read_json(os.path.join(store, "args", tag + ".launch.json"), {})
-    relaunch = {"args_path": args_path, "workflow": spec.get("workflow", DEFAULT_WORKFLOW), "cwd": cfg["repo"]}
     foreign = [e for e in entries if not e["bound"] and e["liveness"] in ("alive", "unknown")]
     if foreign:
         e = foreign[0]
@@ -853,13 +872,19 @@ def decide(cfg, store, row, runs_dir):
             return act("hold", "%s targets %s; if it is this attempt's run, bind %s %d %s"
                        % (describe(e), row["worktree"], row["id"], row["attempt"], e["run"]))
         return act("hold", "%s writes in %s and is not owned by this attempt" % (describe(e), row["worktree"]))
-    unknown = [k for k in kids if k["liveness"] == "unknown"]
+    live = [e["run"] for e in entries if e["bound"] and e["liveness"] == "alive"]
+    if live:
+        return act("wait", "%s alive; reconcile again after every writer ends" % ", ".join(live), live=live)
+    unknown = [e for e in entries if e["bound"] and e["liveness"] == "unknown"]
     if unknown:
         return act("hold", "%s; its liveness is unknown" % describe(unknown[0]))
-    older = [e for e in entries if e["kind"] == "workflow" and e["run"] in runs[:-1]
-             and e["liveness"] in ("alive", "unknown")]
-    if older:
-        return act("hold", "%s; it was superseded but may still write" % describe(older[0]))
+    brief = (read_json(args_path) or {}).get("brief")
+    ended = [e for e in entries if e["kind"] == "workflow" and not e["bound"] and brief
+             and ((e["status"].get("workflow") or {}).get("args") or {}).get("brief") == brief]
+    if ended:
+        e = ended[0]
+        return act("hold", "workflow %s ran this attempt's args, ended %s, and is not bound; bind %s %d %s "
+                   "so its outcome is recorded" % (e["run"], e["state"], row["id"], row["attempt"], e["run"]))
     commits = ""
     if row["start_head"]:
         _, commits, _ = git(row["worktree"], "rev-list", "--count", row["start_head"] + "..HEAD")
@@ -870,29 +895,19 @@ def decide(cfg, store, row, runs_dir):
                        % (row["id"], row["id"], runs_dir))
         if commits not in ("", "0"):
             return act("hold", "no run bound but %s commits since start head %s" % (commits, row["start_head"][:12]))
-        return act("relaunch-same-args", "intent written, no run bound, no live writer", **relaunch)
-    cur = runs[-1] if runs else ""
+        spec = read_json(os.path.join(store, "args", tag + ".launch.json"), {})
+        return act("relaunch-same-args", "intent written, nothing dispatched, no writer", args_path=args_path,
+                   workflow=spec.get("workflow", DEFAULT_WORKFLOW), cwd=cfg["repo"])
+    cur = current_run(runs_dir, runs)
     st = run_status(runs_dir, cur) if cur else None
     if not isinstance(st, dict):
-        if live:
-            return act("relaunch-same-args", "workflow %s missing; child %s still alive" % (cur, live[0]["run"]), **relaunch)
-        return act("hold", "workflow %s has no status.json and no live writer" % cur)
+        return act("hold", "workflow %s has no status.json" % (cur or "(none bound)"))
     wstate = st.get("state")
-    wlive = liveness(st)
-    if wlive == "alive":
-        return act("wait", "workflow %s is %s" % (cur, wstate))
-    if wlive == "unknown":
-        return act("hold", "workflow %s is %s with no usable pid" % (cur, wstate))
     path = os.path.join(runs_dir, cur, "status.json")
     if workflow_value(st) is not None:
         if wstate not in RUNTIME_TERMINAL:
             return act("hold", "workflow %s has a value but is %s with a dead pid" % (cur, wstate))
-        if live:
-            return act("hold", "workflow %s %s with a return value but child %s is still alive; record after it ends"
-                       % (cur, wstate, live[0]["run"]))
         return act("record", "workflow %s %s with a return value" % (cur, wstate), file=path)
-    if live:
-        return act("relaunch-same-args", "workflow %s %s; child %s still alive" % (cur, wstate, live[0]["run"]), **relaunch)
     if wstate not in RUNTIME_TERMINAL:
         return act("hold", "workflow %s is %s but its process is gone and no writer is alive" % (cur, wstate))
     evidence = []
@@ -952,9 +967,9 @@ def cmd_set(store, a):
 
 def parser():
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--store", default=argparse.SUPPRESS, help="graph store directory")
-    p = argparse.ArgumentParser(prog="graph.py", description=__doc__.split("\n")[0])
-    p.add_argument("--store", help="graph store directory")
+    common.add_argument("--store", default=argparse.SUPPRESS, help="orchestrate store directory")
+    p = argparse.ArgumentParser(prog="orchestrate.py", description=__doc__.split("\n")[0])
+    p.add_argument("--store", help="orchestrate store directory")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("init", parents=[common])
@@ -977,6 +992,8 @@ def parser():
     s.add_argument("id")
     s.add_argument("--max", type=int, default=1)
     s.add_argument("--force-window", action="store_true")
+    s.add_argument("--adopt", action="store_true",
+                   help="launch in an existing worktree this store did not create (it must be clean, on the unit branch)")
     s.add_argument("--workflow", default=DEFAULT_WORKFLOW)
 
     s = sub.add_parser("bind", parents=[common])
@@ -1018,10 +1035,10 @@ def main(argv=None):
     try:
         return COMMANDS[a.cmd](store, a) or 0
     except BadInput as e:
-        print("graph: %s" % e, file=sys.stderr)
+        print("orchestrate: %s" % e, file=sys.stderr)
         return 2
     except Refused as e:
-        print("graph: refused: %s" % e, file=sys.stderr)
+        print("orchestrate: refused: %s" % e, file=sys.stderr)
         return 3
 
 
