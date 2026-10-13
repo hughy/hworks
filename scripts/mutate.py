@@ -24,15 +24,25 @@ exactly once and differ from "new") or a whole file taken from git ("rev": the c
 Modes:
   overlay   The mutated files go to the scratch dir and the command runs with GOFLAGS=-overlay=<json>,
             so the worktree is never written. auto picks it whenever the command runs go test, go vet,
-            or go build (also after go -C DIR). Only .go files can be overlaid; a mutant of any other
-            file is invalid in this mode rather than written in place.
+            or go build, as an argv list, a shell string, or a string passed to a shell such as
+            ["bash", "-c", "go test ./..."]. A Go run behind any other wrapper (make test, a script)
+            is not detected: set "mode": "overlay" so the wrapper's go command inherits GOFLAGS and
+            compile failures count as build-error. Only .go files can be overlaid; a mutant of any
+            other file is invalid in this mode rather than written in place.
   in-place  The mutated files are written over the originals, the command runs, and the original bytes
             are restored, also on SIGINT and SIGTERM, after every process the command started
             has been stopped. Backups stay in the scratch dir. A symlink is followed to its target. A
             target with uncommitted changes is refused unless --allow-dirty is passed. In-place runs
             on the same git worktree wait for each other, so one never reads another's mutant as the
-            original. Python bytecode for each run goes to a fresh dir under the scratch dir
-            (PYTHONPYCACHEPREFIX), so a stale cache can neither hide the mutant nor outlive it.
+            original. Timestamps only move forward: the mutant's mtime is a whole second later than
+            the original's and than the time of the swap, and the restored file's is a whole second
+            later than the mutant's and than the time of the restore, so any cache keyed on source
+            mtime (Python .pyc, make) sees a change both ways. Either may sit up to two seconds in
+            the future. Python bytecode for each run also goes to a fresh dir under the scratch dir
+            (PYTHONPYCACHEPREFIX).
+
+Overlay runs take a shared lock on the same worktree lock, so they wait for an in-place run there and
+never read its mutant as the original; overlay runs do not wait for each other.
 
 Before any mutant runs, each distinct command runs once unmutated and must pass; otherwise a failure under
 a mutant proves nothing and its mutants are invalid. --no-baseline skips this.
@@ -134,7 +144,7 @@ def check_command(cmd, where):
 
 
 def check_mode(mode, where):
-    if mode not in MODES:
+    if not isinstance(mode, str) or mode not in MODES:
         raise SpecError("%s: mode must be one of %s" % (where, ", ".join(sorted(MODES))))
     return mode
 
@@ -207,24 +217,28 @@ def load_spec(text):
     return os.path.abspath(cwd), mutants
 
 
-def go_subcommands(cmd):
-    if isinstance(cmd, str):
-        try:
-            tokens = shlex.split(cmd)
-        except ValueError:
-            return set()
-    else:
-        tokens = cmd
+def shell_tokens(text):
+    lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    try:
+        return list(lex)
+    except ValueError:
+        return []
+
+
+def go_subcommands(cmd, depth=0):
+    tokens = shell_tokens(cmd) if isinstance(cmd, str) else cmd
     found = set()
     for i, tok in enumerate(tokens):
+        # A token holding whitespace is likely a script for a shell (bash -c "go test ./...").
+        if depth < 3 and re.search(r"\s", tok):
+            found |= go_subcommands(tok, depth + 1)
         if os.path.basename(tok) != "go":
             continue
         j = i + 1
-        # -C DIR is the only flag the go command accepts before its subcommand.
-        if j < len(tokens) and tokens[j] in ("-C", "--C"):
-            j += 2
-        elif j < len(tokens) and tokens[j].startswith(("-C=", "--C=")):
-            j += 1
+        while j < len(tokens) and tokens[j].startswith("-"):
+            # -C takes a separate value; any other flag before the subcommand is taken as boolean.
+            j += 2 if tokens[j] in ("-C", "--C") else 1
         if j < len(tokens) and tokens[j] in GO_SUBCOMMANDS:
             found.add(tokens[j])
     return found
@@ -297,17 +311,27 @@ def lock_path(path):
 
 
 @contextlib.contextmanager
-def in_place_locks(paths):
-    """Hold an exclusive lock on the git worktree of each path, or its directory outside git."""
+def worktree_locks(paths):
+    """Lock the git worktree of each path, or its directory outside git.
+
+    paths maps a path to True when it is edited in place (exclusive lock) or False when it is only read
+    for an overlay (shared lock).
+    """
+    wanted = {}
+    for p, exclusive in paths.items():
+        if os.path.isdir(os.path.dirname(p)):
+            lp = lock_path(p)
+            wanted[lp] = wanted.get(lp, False) or exclusive
     with contextlib.ExitStack() as stack:
         # Sorted, so two runs that need the same locks cannot deadlock.
-        for lp in sorted({lock_path(p) for p in paths if os.path.isdir(os.path.dirname(p))}):
+        for lp in sorted(wanted):
+            kind = fcntl.LOCK_EX if wanted[lp] else fcntl.LOCK_SH
             f = stack.enter_context(open(lp, "a"))
             try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(f, kind | fcntl.LOCK_NB)
             except BlockingIOError:
                 print("mutate: waiting for another in-place run (%s)" % lp, file=sys.stderr, flush=True)
-                fcntl.flock(f, fcntl.LOCK_EX)
+                fcntl.flock(f, kind)
         yield
 
 
@@ -329,25 +353,36 @@ def stop_group(proc):
             time.sleep(0.02)
 
 
+def unblock_signals():
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, CAUGHT)
+
+
 def run(cmd, cwd, env, log_path):
     """Run cmd with output to log_path; return (exit code, output). Raises Invalid when cmd cannot start."""
     shell = isinstance(cmd, str)
     # The go command resolves files from $PWD when it names the working directory, and overlay keys must
     # match that spelling; an inherited $PWD would point at the caller's directory instead.
     env = dict(os.environ if env is None else env, PWD=cwd)
+    proc = None
     with open(log_path, "wb") as log:
         try:
-            # A new session lets stop() kill the whole tree (go test spawns test binaries).
-            proc = subprocess.Popen(cmd, cwd=cwd, env=env, shell=shell, stdin=subprocess.DEVNULL, stdout=log,
-                                    stderr=subprocess.STDOUT, start_new_session=True)
-        except OSError as e:
-            raise Invalid("cannot run %s: %s" % (cmd[0], e.strerror))
-        try:
+            # Blocked until proc is bound, so a signal cannot leave a started command unstopped. The child
+            # inherits the mask, so it unblocks them before exec.
+            with signals_blocked():
+                try:
+                    # A new session lets stop_group() kill the whole tree (go test spawns test binaries).
+                    proc = subprocess.Popen(cmd, cwd=cwd, env=env, shell=shell, stdin=subprocess.DEVNULL,
+                                            stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+                                            preexec_fn=unblock_signals)
+                except OSError as e:
+                    what = "shell /bin/sh for %r" % cmd if shell else cmd[0]
+                    raise Invalid("cannot run %s: %s" % (what, e.strerror))
             code = proc.wait()
         finally:
             # A descendant left running could still write a file after it is restored.
-            with signals_blocked():
-                stop_group(proc)
+            if proc is not None:
+                with signals_blocked():
+                    stop_group(proc)
     with open(log_path, "rb") as f:
         output = f.read().decode("utf-8", "replace")
     if shell and code in (126, 127):
@@ -369,32 +404,27 @@ def classify(code, output, go_kinds):
     return "build-error", "the go command failed without a test failure"
 
 
-_last_mtime = {}
+def later_mtime(prev_ns):
+    """A whole-second mtime after both prev_ns and now, in ns.
 
-
-def mutant_mtime(path, st):
-    """A whole-second mtime unlike the original's and any earlier mutant's of path.
-
-    Python and other tools trust a cache whose recorded mtime and size match the source; a same-size
-    mutant written in the same second as the original would reuse the original's cache. The restore
-    keeps the current time, so a build the mutant triggered is older than the restored source.
+    .pyc headers store integer seconds and make wants strictly newer sources, so the next whole second
+    is the earliest stamp every such cache reads as a change. Never earlier than now, so nothing a
+    command built before the swap looks newer than the swapped-in file.
     """
-    s = max(time.time_ns() // NS, _last_mtime.get(path, 0) + 1)
-    if s == st.st_mtime_ns // NS:
-        s += 1
-    _last_mtime[path] = s
-    return s * NS
+    return (max(prev_ns, time.time_ns()) // NS + 1) * NS
 
 
 def restore(applied):
     failed = []
-    for path, original, st, backup in applied:
+    for path, original, st, mutant_ns, backup in applied:
         try:
             with open(path, "wb") as f:
                 f.write(original)
             with open(path, "rb") as f:
-                if f.read() == original:
-                    continue
+                ok = f.read() == original
+            if ok:
+                os.utime(path, ns=(st.st_atime_ns, later_mtime(mutant_ns)))
+                continue
         except OSError:
             pass
         failed.append("%s (backup: %s)" % (path, backup))
@@ -412,10 +442,11 @@ def run_in_place(edits, cmd, cwd, workdir, log_path):
                 with open(backup, "wb") as f:
                     f.write(original)
                 st = os.stat(path)
-                applied.append((path, original, st, backup))
+                mutant_ns = later_mtime(st.st_mtime_ns)
+                applied.append((path, original, st, mutant_ns, backup))
                 with open(path, "wb") as f:
                     f.write(mutated)
-                os.utime(path, ns=(st.st_atime_ns, mutant_mtime(path, st)))
+                os.utime(path, ns=(st.st_atime_ns, mutant_ns))
         # A fresh dir per run: a reused --out must not hold bytecode whose recorded mtime and size match.
         env = dict(os.environ, PYTHONPYCACHEPREFIX=tempfile.mkdtemp(prefix="pycache-", dir=workdir))
         return run(cmd, cwd, env, log_path)
@@ -458,14 +489,14 @@ def slug(name):
 def run_mutant(index, m, cwd, scratch, args, baselines):
     result = {"name": m["name"], "verdict": "invalid", "mode": None, "files": [c["file"] for c in m["changes"]],
               "test": m["test"], "exit": None, "seconds": None, "log": None, "reason": None}
-    go_kinds = go_subcommands(m["test"])
     workdir = os.path.join(scratch, "%02d-%s" % (index, slug(m["name"])))
     try:
         mode = resolve_mode(m)
         result["mode"] = mode
+        go_kinds = go_subcommands(m["test"])
         if mode == "overlay":
-            if not go_kinds:
-                raise Invalid("overlay mode needs a go test, go vet, or go build command")
+            # An explicit overlay with an undetected command is a Go run behind a wrapper.
+            go_kinds = go_kinds or {"test"}
             for c in m["changes"]:
                 if not c["file"].endswith(".go"):
                     raise Invalid("%s: overlay mode replaces only .go files; set mode to in-place to edit it "
@@ -568,12 +599,15 @@ def main(argv=None):
     for s in CAUGHT:
         signal.signal(s, on_signal)
     results, code = [], None
-    in_place = [os.path.realpath(os.path.join(cwd, c["file"]))
-                for m in mutants if resolve_mode(m) == "in-place" for c in m["changes"]]
+    locked = {}
+    for m in mutants:
+        for c in m["changes"]:
+            p = os.path.realpath(os.path.join(cwd, c["file"]))
+            locked[p] = locked.get(p, False) or resolve_mode(m) == "in-place"
     try:
         # Held from before the baselines until the last restore, so no other in-place run's mutant is
         # read as an original, checked as clean, or restored over ours.
-        with in_place_locks(in_place):
+        with worktree_locks(locked):
             baselines = {} if args.no_baseline else run_baselines(mutants, cwd, scratch)
             for i, m in enumerate(mutants):
                 results.append(run_mutant(i, m, cwd, scratch, args, baselines))

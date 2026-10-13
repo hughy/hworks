@@ -160,12 +160,52 @@ class MutateTest(unittest.TestCase):
 
     def test_restored_file_is_newer_than_what_the_mutant_built(self):
         # make and similar tools rebuild only when a source is newer than its artifact.
-        artifact = os.path.join(self.tmp, "artifact")
-        cmd = [sys.executable, "-c", "import sys; open(sys.argv[1], 'w').write('x'); sys.exit(2)", artifact]
+        before, artifact = os.path.join(self.tmp, "before"), os.path.join(self.tmp, "artifact")
+        cmd = [sys.executable, "-c", "import os, sys; open(sys.argv[2], 'w').write(str(os.stat('calc.py').st_mtime_ns)); "
+               "sys.exit(2)", before, artifact]
+        write(before, "built from the original")
         self.one({"name": "m", "file": "calc.py", "old": "x * 2", "new": "x * 7", "test": cmd},
                  "--no-baseline", code=0)
+        self.assertGreater(int(read(artifact)), os.stat(before).st_mtime_ns, "the mutant is older than a build")
         self.assertEqual(read(self.calc), CALC.encode())
         self.assertGreater(os.stat(self.calc).st_mtime_ns, os.stat(artifact).st_mtime_ns)
+
+    def test_timestamps_only_move_forward_in_whole_seconds(self):
+        seen = os.path.join(self.tmp, "seen")
+        cmd = [sys.executable, "-c", "import os, sys; open(sys.argv[1], 'w').write(str(os.stat('calc.py').st_mtime_ns)); "
+               "sys.exit(1)", seen]
+        mutant = {"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b", "test": cmd}
+        future = (time.time_ns() // 10**9 + 30) * 10**9 + 900_000_000
+        for orig in (time.time_ns(), future):
+            os.utime(self.calc, ns=(orig, orig))
+            self.one(mutant, "--no-baseline", code=0)
+            mutant_ns, restored_ns = int(read(seen)), os.stat(self.calc).st_mtime_ns
+            self.assertGreater(mutant_ns // 10**9, orig // 10**9)
+            self.assertGreater(restored_ns // 10**9, mutant_ns // 10**9)
+            self.assertEqual(read(self.calc), CALC.encode())
+
+    def check_bytecode_both_ways(self, test, runs):
+        # Same-size swap with the original stamped this second, so the mutant, the original, and the
+        # restored file would share a .pyc key if any mtime repeated.
+        mutant = {"name": "minus", "file": "calc.py", "old": "a + b", "new": "a - b", "test": test}
+        os.utime(self.calc)
+        subprocess.run(test, cwd=self.repo, env=self.env, check=True)
+        for i in range(runs):
+            start = time.monotonic()
+            r = self.one(mutant, code=0)
+            self.assertEqual(r["verdict"], "killed", i)
+            p = subprocess.run(test, cwd=self.repo, env=self.env, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, "the restored file runs the mutant: %s" % p.stderr)
+            self.assertLess(time.monotonic() - start, 30)
+
+    def test_python_dash_e_ignores_the_bytecode_prefix_but_not_the_mtime(self):
+        self.check_bytecode_both_ways([sys.executable, "-E", "check.py"], 3)
+        self.assertTrue(os.listdir(os.path.join(self.repo, "__pycache__")), "-E wrote no bytecode")
+
+    def test_same_size_mutant_within_one_second_in_normal_python(self):
+        self.assertNotIn("PYTHONDONTWRITEBYTECODE", self.env)
+        self.check_bytecode_both_ways(TEST, 3)
+        self.assertTrue(os.listdir(os.path.join(self.repo, "__pycache__")), "python wrote no bytecode")
 
     def test_python_bytecode_cache_neither_hides_nor_keeps_the_mutant(self):
         # Same-size swap, so only the mtime and the cache location tell the versions apart.
@@ -181,9 +221,11 @@ class MutateTest(unittest.TestCase):
     def test_reused_out_dir_does_not_reuse_an_earlier_runs_bytecode(self):
         out = os.path.join(self.tmp, "out")
         spec = {"test": TEST, "mutants": [{"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
-        self.assertEqual(self.results(spec, "--out", out, code=0)[0]["verdict"], "killed")
-        spec["mutants"][0]["new"] = "b + a"
-        self.assertEqual(self.results(spec, "--out", out, code=1)[0]["verdict"], "survived")
+        for new, code, verdict in (("a - b", 0, "killed"), ("b + a", 1, "survived"), ("a - b", 0, "killed")):
+            spec["mutants"][0]["new"] = new
+            self.assertEqual(self.results(spec, "--out", out, code=code)[0]["verdict"], verdict, new)
+        prefixes = [d for d in os.listdir(os.path.join(out, "00-m")) if d.startswith("pycache-")]
+        self.assertEqual(len(prefixes), 3)
 
     def test_multiple_files_are_all_mutated_and_restored(self):
         check = os.path.join(self.repo, "check.py")
@@ -345,10 +387,103 @@ class MutateTest(unittest.TestCase):
         self.assertEqual(read(self.calc), dirty.encode())
         self.assertTrue(os.path.islink(os.path.join(self.repo, "link.py")))
 
-    def test_overlay_mode_needs_a_go_command(self):
-        r = self.one({"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b", "mode": "overlay"},
-                     "--no-baseline", code=2)
-        self.assertIn("needs a go test", r["reason"])
+    def go_module(self):
+        write(os.path.join(self.repo, "sum.go"), "package calc\n\nfunc Sum(a, b int) int { return a + b }\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-q", "-m", "go")
+        return os.path.join(self.repo, "sum.go")
+
+    def test_explicit_overlay_passes_goflags_through_a_wrapper(self):
+        path = self.go_module()
+        st, before = os.stat(path), read(path)
+        # Stands in for a wrapper such as make: it sees only GOFLAGS and reports a compile failure.
+        wrapper = [sys.executable, "-c", "import json, os, re, sys\n"
+                   "o = re.search(r'-overlay=(\\S+)', os.environ['GOFLAGS']).group(1)\n"
+                   "[copy] = set(json.load(open(o))['Replace'].values())\n"
+                   "print(open(copy).read())\n"
+                   "print('FAIL\\tex [build failed]' if 'a +)' in open(copy).read() else '--- FAIL: TestSum')\n"
+                   "sys.exit(1)"]
+        out = self.results({"test": wrapper, "mode": "overlay", "mutants": [
+            {"name": "minus", "file": "sum.go", "old": "a + b", "new": "a - b"},
+            {"name": "broken", "file": "sum.go", "old": "a + b", "new": "a +)"},
+        ]}, "--no-baseline", code=1)
+        self.assertEqual([(r["verdict"], r["mode"]) for r in out], [("killed", "overlay"), ("build-error", "overlay")])
+        self.assertIn("a - b", read(out[0]["log"]).decode())
+        self.assertEqual((read(path), os.stat(path).st_mtime_ns), (before, st.st_mtime_ns))
+
+    def test_overlay_run_waits_for_an_in_place_run(self):
+        path = self.go_module()
+        marker, release = os.path.join(self.tmp, "started"), os.path.join(self.tmp, "release")
+        hold = [sys.executable, "-c", "import os, sys, time\nopen(sys.argv[1], 'w').close()\n"
+                "while not os.path.exists(sys.argv[2]):\n    time.sleep(0.02)\nsys.exit(1)", marker, release]
+        show = [sys.executable, "-c", "import json, os, re, sys\n"
+                "o = re.search(r'-overlay=(\\S+)', os.environ['GOFLAGS']).group(1)\n"
+                "[copy] = set(json.load(open(o))['Replace'].values())\n"
+                "print(open(copy).read()); print('--- FAIL: TestSum'); sys.exit(1)"]
+        first = {"test": hold, "mutants": [{"name": "a", "file": "sum.go", "old": "a + b", "new": "a * b"}]}
+        second = {"test": show, "mode": "overlay",
+                  "mutants": [{"name": "b", "file": "sum.go", "old": "a + b", "new": "a - b"}]}
+        procs = []
+        for spec in (first, second):
+            p = subprocess.Popen([sys.executable, SCRIPT, "--no-baseline", "--json", "--keep", "-"], cwd=self.repo,
+                                 env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True)
+            p.stdin.write(json.dumps(spec))
+            p.stdin.close()
+            procs.append(p)
+            deadline = time.monotonic() + 30
+            while not os.path.exists(marker):
+                self.assertLess(time.monotonic(), deadline, "the first run never started")
+                time.sleep(0.05)
+        time.sleep(1)
+        self.assertIsNone(procs[1].poll(), "the overlay run did not wait for the in-place run")
+        write(release, "")
+        outs = []
+        for p in procs:
+            p.wait(60)
+            out, err = p.stdout.read(), p.stderr.read()
+            p.stdout.close()
+            p.stderr.close()
+            self.assertEqual(p.returncode, 0, out + err)
+            outs.append(json.loads(out)[0])
+        self.assertIn("waiting for another in-place run", err)
+        log = read(outs[1]["log"]).decode()
+        self.assertIn("a - b", log)
+        self.assertNotIn("a * b", log)
+        self.assertIn(b"a + b", read(path))
+
+    def test_signal_during_spawn_still_stops_the_command(self):
+        real = subprocess.Popen
+        started = []
+
+        def popen(*a, **kw):
+            proc = real(*a, **kw)
+            started.append(proc)
+            os.kill(os.getpid(), signal.SIGTERM)
+            return proc
+
+        old = signal.signal(signal.SIGTERM, mutate.on_signal)
+        self.addCleanup(signal.signal, signal.SIGTERM, old)
+        mutate._interrupted = None
+        self.addCleanup(setattr, mutate, "_interrupted", None)
+        subprocess.Popen = popen
+        try:
+            with self.assertRaises(mutate.Interrupted):
+                mutate.run([sys.executable, "-c", "import time; time.sleep(60)"], self.repo, None,
+                           os.path.join(self.tmp, "log"))
+        finally:
+            subprocess.Popen = real
+        [proc] = started
+        self.assertIsNotNone(proc.poll(), "the command outlived the interrupted run")
+
+    def test_command_that_cannot_start_names_the_command(self):
+        log = os.path.join(self.tmp, "log")
+        with self.assertRaises(mutate.Invalid) as e:
+            mutate.run("echo hello there", os.path.join(self.tmp, "missing"), None, log)
+        self.assertIn("echo hello there", str(e.exception))
+        r = self.one({"name": "m", "file": "calc.py", "old": "a + b", "new": "a - b",
+                      "test": ["no-such-binary-for-mutate-test"]}, "--no-baseline", code=2)
+        self.assertIn("cannot run no-such-binary-for-mutate-test", r["reason"])
         self.assertEqual(read(self.calc), CALC.encode())
 
     def test_untracked_file_is_refused_in_place(self):
@@ -374,6 +509,8 @@ class MutateTest(unittest.TestCase):
              "either rev or old"),
             ({"test": TEST, "mutants": [{"name": "x", "file": "calc.py", "old": "a"}]}, "both be strings"),
             ({"test": TEST, "mode": "sideways", "mutants": [kill]}, "mode must be"),
+            ({"test": TEST, "mode": [], "mutants": [kill]}, "mode must be"),
+            ({"test": TEST, "mutants": [dict(kill, mode={})]}, "mode must be"),
             ({"test": 5, "mutants": [kill]}, "argv list or shell string"),
             ({"test": TEST, "cwd": "nope", "mutants": [kill]}, "not a directory"),
         ]:
@@ -473,6 +610,12 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(mutate.go_subcommands(["go", "-C", "/tmp/x", "test", "."]), {"test"})
         self.assertEqual(mutate.go_subcommands("go --C=sub vet ./..."), {"vet"})
         self.assertEqual(mutate.go_subcommands(["go", "-C", "test", "mod", "tidy"]), set())
+        self.assertEqual(mutate.go_subcommands("go test; echo done"), {"test"})
+        self.assertEqual(mutate.go_subcommands("cd x&&go vet ./...|tee log"), {"vet"})
+        self.assertEqual(mutate.go_subcommands(["go", "-C", "sub", "-x", "build", "."]), {"build"})
+        self.assertEqual(mutate.go_subcommands(["bash", "-c", "go test ./..."]), {"test"})
+        self.assertEqual(mutate.go_subcommands(["sh", "-lc", "cd sub && go -C . test ./..."]), {"test"})
+        self.assertEqual(mutate.go_subcommands("bash -c 'go build ./...'"), {"build"})
         self.assertEqual(mutate.go_subcommands("make test"), set())
         self.assertEqual(mutate.go_subcommands(["python3", "-m", "pytest"]), set())
 
@@ -516,6 +659,13 @@ class GoOverlayTest(unittest.TestCase):
             {"name": "minus", "file": "calc/sum.go", "old": "a + b", "new": "a - b"},
             {"name": "broken", "file": "calc/sum.go", "old": "a + b", "new": "a +"},
         ], 1, test=["go", "-C", self.repo, "test", "./calc"])
+        self.assertEqual([(r["verdict"], r["mode"]) for r in out], [("killed", "overlay"), ("build-error", "overlay")])
+
+    def test_go_through_a_shell_still_uses_overlay(self):
+        out = self.run_spec([
+            {"name": "minus", "file": "calc/sum.go", "old": "a + b", "new": "a - b"},
+            {"name": "broken", "file": "calc/sum.go", "old": "a + b", "new": "a +"},
+        ], 1, test=["bash", "-c", "go test ./calc; exit $?"])
         self.assertEqual([(r["verdict"], r["mode"]) for r in out], [("killed", "overlay"), ("build-error", "overlay")])
 
     def test_go_command_refuses_a_non_go_file_instead_of_writing_it(self):
