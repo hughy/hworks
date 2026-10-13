@@ -194,6 +194,16 @@ class Synthetic(unittest.TestCase):
         same = self.analyze(3, [write, ("bash", {"command": "cd /repo-a && git add helper.py"}, False)])
         self.assertEqual(same["stats"]["scripts"], 0)
 
+    def test_heredoc_path_resolves_against_its_own_cd(self):
+        heredoc = ("bash", {"command": "cd /repo-a && cat > helper.py <<'EOF'\n" + HELPER + "EOF"}, False)
+        other = self.analyze(3, [heredoc, ("bash", {"command": "git -C /w add helper.py"}, False)])
+        self.assertEqual(other["stats"]["scripts"], 3)
+        same = self.analyze(3, [heredoc, ("bash", {"command": "git -C /repo-a add helper.py"}, False)])
+        self.assertEqual(same["stats"]["scripts"], 0)
+        call = {"name": "bash", "args": {"command": "cd /a\ncd b && tee c.py <<'X'\nx\nX\ncd /tmp; cat > d.py <<'Y'\ny\nY"}}
+        self.assertEqual([(s["path"], s["where"]) for s in rs.call_scripts(call, source(), "/w")],
+                         [("/a/b/c.py", "worktree"), ("/tmp/d.py", "scratch")])
+
     def test_helper_reported_however_many_sessions_repeat_it(self):
         code = "function unpack(data) { return JSON.parse(data); }\nconst r = unpack(x);\nconsole.log(r);\n"
         for n in (3, 30):

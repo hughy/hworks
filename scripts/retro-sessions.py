@@ -36,7 +36,7 @@ interpreter, mcpScript code), each at least MIN_SCRIPT_LINES non-blank lines. Ea
 a location class: scratch (under /tmp, $TMPDIR, or a task dir), worktree (anywhere else), or
 inline; a group lists how many of its scripts fall in each. A worktree file is dropped when a
 later, successful bash call in the same session runs git add or git commit naming that file
-(paths resolved against the session cwd, cd, and git -C): it is ordinary development, not a
+(both paths resolved against the session cwd and any cd before them, plus git -C): it is ordinary development, not a
 throwaway. A directory or a sweep (git add -A, git commit -a) does
 not count, since in real sessions those mostly followed throwaways that were deleted or ignored. A fingerprint is the helpers
 a script defines, the modules it imports, the methods it calls (receiver dropped, so renamed
@@ -323,8 +323,9 @@ def is_scratch(path, src):
     return any(p.startswith(r) for r in roots)
 
 
-def file_script(path, code, src):
+def file_script(path, code, src, cwd=None):
     path = path.strip("'\"")
+    path = resolve(path, cwd) or path
     lang = EXT_LANG.get(os.path.splitext(path)[1].lstrip(".")) or shebang_lang(code)
     if not lang:
         return None
@@ -332,13 +333,15 @@ def file_script(path, code, src):
             "where": "scratch" if is_scratch(path, src) else "worktree"}
 
 
-def heredoc_script(header, body, src):
-    """Classify a heredoc: a script file write or interpreter input; None for anything else."""
+def heredoc_script(header, body, src, cwd=None):
+    """Classify a heredoc: a script file write or interpreter input; None for anything else.
+    cwd is the shell's directory where the header line starts; a cd earlier on the line applies."""
     head = strip_shell(header)
     m = (re.search(r"\bcat\b[^|;&]*?>>?\s*([^\s<>|;&]+)", header)
          or re.search(r"\btee\s+(?:-\S+\s+)*([^\s<>|;&-][^\s<>|;&]*)", header))
     if m and not m.group(1).strip("'\"").startswith("/dev/"):
-        return file_script(m.group(1), body, src)
+        cwd = shell_dir(header[:m.start()], cwd)
+        return file_script(m.group(1), body, src, cwd)
     m = re.search(r"(?:^|[\s;&|(])((?:\S*/)?(python3?|node|bun|deno|ruby|perl|bash|sh|zsh|osascript))\b[^|;&]*<<", head)
     if m:
         return {"kind": "inline", "path": None, "lang": LANG[m.group(2)], "code": body, "where": "inline"}
@@ -356,20 +359,24 @@ def shebang_lang(code):
     return LANG.get(exe) or LANG.get(re.sub(r"[\d.]+$", "", exe))
 
 
-def call_scripts(call, src):
-    """Scripts written or run inline by one tool call."""
+def call_scripts(call, src, cwd=None):
+    """Scripts written or run inline by one tool call. cwd is the session's directory; a file
+    script's path is made absolute against the shell's directory where it was written."""
     name, a = call["name"], call["args"]
     out = []
     if name == "write" and isinstance(a.get("path"), str) and isinstance(a.get("content"), str):
-        s = file_script(a["path"], a["content"], src)
+        s = file_script(a["path"], a["content"], src, cwd)
         if s:
             out.append(s)
     elif name == "mcpScript" and isinstance(a.get("code"), str):
         out.append({"kind": "inline", "path": None, "lang": "js", "code": a["code"], "where": "inline"})
     elif name == "bash" and isinstance(a.get("command"), str):
         rest, docs = split_heredocs(a["command"])
+        lines, at = rest.split("\n"), 0
         for header, body in docs:
-            s = heredoc_script(header, body, src)
+            while at < len(lines) and lines[at] != header:
+                at += 1
+            s = heredoc_script(header, body, src, shell_dir("\n".join(lines[:at]), cwd))
             if s:
                 out.append(s)
         for m in INLINE.finditer(rest):
@@ -393,20 +400,38 @@ def resolve(path, cwd):
     return os.path.normpath(os.path.join(cwd, path)) if cwd else None
 
 
-def git_adds(cmd, cwd=None):
-    """Paths named by each git add or git commit in shell text, made absolute where the shell's
-    directory (cwd, cd, git -C) is known."""
-    rest, _ = split_heredocs(cmd)
-    out = []
-    for seg in re.split(r"\|\||&&|[|;&\n()]", drop_comments(rest)):
+def shell_words(text):
+    """Words of each simple command in shell text (heredoc bodies already removed)."""
+    for seg in re.split(r"\|\||&&|[|;&\n()]", drop_comments(text)):
         try:
             toks = shlex.split(seg)
         except ValueError:
             toks = seg.split()
         while toks and (ASSIGN.match(toks[0]) or toks[0] in PREFIX):
             toks.pop(0)
+        yield toks
+
+
+def cd(toks, cwd):
+    return resolve(toks[1], cwd) if len(toks) > 1 and toks[1] != "-" else None
+
+
+def shell_dir(text, cwd):
+    """The shell's directory after text runs from cwd; None once it depends on something unknown."""
+    for toks in shell_words(text):
         if toks and toks[0] == "cd":
-            cwd = resolve(toks[1], cwd) if len(toks) > 1 and toks[1] != "-" else None
+            cwd = cd(toks, cwd)
+    return cwd
+
+
+def git_adds(cmd, cwd=None):
+    """Paths named by each git add or git commit in shell text, made absolute where the shell's
+    directory (cwd, cd, git -C) is known."""
+    rest, _ = split_heredocs(cmd)
+    out = []
+    for toks in shell_words(rest):
+        if toks and toks[0] == "cd":
+            cwd = cd(toks, cwd)
             continue
         if len(toks) < 2 or os.path.basename(toks[0]) != "git":
             continue
@@ -712,8 +737,8 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
                 key = key_of(seg)
                 if not ordinary(*key[0], key[1]):
                     shapes.add(key, p, excerpt(c["args"]["command"], key[0][0], key[0][1]))
-            for s in call_scripts(c, src):
-                if s["where"] == "worktree" and any(committed(s["path"], a, cwd) for j, a in adds.items() if j > i):
+            for s in call_scripts(c, src, cwd):
+                if s["where"] == "worktree" and any(committed(s["path"], a) for j, a in adds.items() if j > i):
                     continue
                 if len([x for x in s["code"].splitlines() if x.strip()]) >= MIN_SCRIPT_LINES:
                     s["session"] = p
