@@ -366,3 +366,53 @@ test("validation fails before any child launches", async () => {
 test("source has no nested async functions", () => {
   assert.doesNotMatch(source, /async\s+(function|\(|[A-Za-z_$][\w$]*\s*=>)/);
 });
+
+test("taskDir gives each reviewer a unique absolute output file in it", async () => {
+  const { calls } = await run(allClean, { taskDir: "/tmp/task/", reviewers: [{ label: "a b" }, { label: "c" }] });
+  assert.deepEqual(calls.map((c) => c.output), [
+    "/tmp/task/review-fanout-t1-r1-pr-1-a-b.md",
+    "/tmp/task/review-fanout-t1-r2-pr-1-c.md",
+    "/tmp/task/review-fanout-t2-r1-plan-a-b.md",
+    "/tmp/task/review-fanout-t2-r2-plan-c.md",
+  ]);
+});
+
+test("taskDir outputs stay unique when sanitized or joined names collide", async () => {
+  const targets = [
+    { key: "x", cwd: "/abs/x", task: "Review x." },
+    { key: "x-y", cwd: "/abs/xy", task: "Review x-y." },
+  ];
+  const reviewers = [{ label: "a b" }, { label: "a-b" }, { label: "y-z" }, { label: "z" }];
+  const results = {};
+  for (const t of targets) reviewers.forEach((r, i) => (results[t.key + ".r" + (i + 1)] = clean));
+  const { calls } = await run(results, { targets, reviewers, taskDir: "/tmp/task", concurrency: 1 });
+  const outputs = calls.map((c) => c.output);
+  assert.equal(outputs.length, 8);
+  assert.equal(new Set(outputs).size, 8);
+  assert.ok(outputs.every((o) => /^\/tmp\/task\/[A-Za-z0-9._-]+\.md$/.test(o)));
+});
+
+test("taskDir output basenames stay under the filename limit and unique for long names", async () => {
+  const targets = [
+    { key: "k".repeat(120), cwd: "/abs/a", task: "Review a." },
+    { key: "k".repeat(119) + "j", cwd: "/abs/b", task: "Review b." },
+  ];
+  const reviewers = [{ label: "r".repeat(60) }, { label: "r".repeat(59) + "s" }];
+  const results = {};
+  for (const t of targets) reviewers.forEach((r, i) => (results[t.key + ".r" + (i + 1)] = clean));
+  const { calls } = await run(results, { targets, reviewers, label: "l".repeat(80), taskDir: "/tmp/task", concurrency: 1 });
+  const names = calls.map((c) => c.output.slice("/tmp/task/".length));
+  assert.equal(names.length, 4);
+  assert.equal(new Set(names).size, 4);
+  assert.ok(names.every((n) => !n.includes("/") && Buffer.byteLength(n) <= 255), names.join("\n"));
+});
+
+test("without taskDir no reviewer gets an output field", async () => {
+  const { calls } = await run(allClean);
+  assert.ok(calls.every((c) => !("output" in c)));
+});
+
+test("a relative or empty taskDir is rejected", async () => {
+  await assert.rejects(run(allClean, { taskDir: "task" }), /args.taskDir must be an absolute path/);
+  await assert.rejects(run(allClean, { taskDir: "" }), /args.taskDir must be an absolute path/);
+});

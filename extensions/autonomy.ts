@@ -9,7 +9,9 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const LOG = process.env.HWORKS_BLOCKERS_LOG || join(homedir(), ".local/state/agent-tasks/blockers.jsonl");
+const TASKS_ROOT =
+  process.env.HWORKS_TASKS_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "agent-tasks");
+const LOG = process.env.HWORKS_BLOCKERS_LOG || join(TASKS_ROOT, "blockers.jsonl");
 
 const TASK_DIR_SCRIPT = (() => {
   try {

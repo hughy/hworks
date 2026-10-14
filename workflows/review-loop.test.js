@@ -74,7 +74,7 @@ test("clean on first review", async () => {
     { key: "review-1-1", runId: "run-review-1-1", ok: true },
   ]);
   assert.equal(calls[0].agent, "coder");
-  assert.deepEqual(calls[0].acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test" }], report: "on" });
+  assert.deepEqual(calls[0].acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test", timeoutMs: 600000 }], report: "on" });
   assert.equal(calls[0].gate, undefined);
   assert.ok(calls[0].outputSchema);
   assert.equal(calls[0].worktree, false);
@@ -102,7 +102,7 @@ test("blocking then clean runs a fix round with the findings", async () => {
   assert.equal(out.rounds, 2);
   assert.equal(out.head, "a2");
   const fix = calls.find((c) => c.key === "fix-2");
-  assert.deepEqual(fix.acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test" }], report: "on" });
+  assert.deepEqual(fix.acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test", timeoutMs: 600000 }], report: "on" });
   assert.match(fix.task, /off by one/);
   assert.doesNotMatch(fix.task, /naming/);
   assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1", "fix-2", "review-2-1"]);
@@ -211,6 +211,59 @@ test("a runner exit on the retry also hands the gate to reviewers", async () => 
   assert.equal(out.state, "clean");
   assert.equal(out.head, "h9");
   assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry", "review-1-1"]);
+});
+
+const gateTimeout = { ok: false, error: "Acceptance verification 'gate' timed-out." };
+
+test("gateTimeoutMs sets the gate timeout and defaults to 600000", async () => {
+  const dflt = await run({ "code-1": coded("a"), "review-1-1": clean });
+  assert.equal(dflt.calls[0].acceptance.verify[0].timeoutMs, 600000);
+  assert.match(dflt.calls[0].task, /600 s timeout/);
+  const custom = await run({ "code-1": coded("a"), "review-1-1": clean }, { gateTimeoutMs: 900000 });
+  assert.equal(custom.calls[0].acceptance.verify[0].timeoutMs, 900000);
+  assert.match(custom.calls[0].task, /900 s timeout/);
+});
+
+test("an invalid gateTimeoutMs is rejected", async () => {
+  for (const gateTimeoutMs of [0, -1, 1.5, "600000", null]) {
+    await assert.rejects(run({}, { gateTimeoutMs }), /args\.gateTimeoutMs/, String(gateTimeoutMs));
+  }
+});
+
+test("a gate timeout skips the retry and reviewers run the gate", async () => {
+  const { out, calls } = await run({ "code-1": gateTimeout, "review-1-1": gated("passed", "t1") });
+  assert.equal(out.state, "clean");
+  assert.equal(out.gateBy, "reviewers");
+  assert.equal(out.head, "t1");
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1"]);
+  assert.match(calls[1].task, /timed out/);
+  assert.match(calls[1].task, /Run `npm test`/);
+});
+
+test("a gate timeout on the retry also hands the gate to reviewers", async () => {
+  const { out, calls } = await run({
+    "code-1": { ok: false, error: "Acceptance verification 'gate' failed." },
+    "code-1-retry": gateTimeout,
+    "review-1-1": gated("passed", "t2"),
+  });
+  assert.equal(out.state, "clean");
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry", "review-1-1"]);
+});
+
+test("a gate timeout with no reviewers is gate-unverified", async () => {
+  const { out, calls } = await run({ "code-1": gateTimeout }, { reviewers: 0 });
+  assert.equal(out.state, "gate-unverified");
+  assert.equal(out.gateBy, "reviewers");
+  assert.deepEqual(calls.map((c) => c.key), ["code-1"]);
+});
+
+test("a gate failure that is not a timeout still retries", async () => {
+  const { out, calls } = await run({
+    "code-1": { ok: false, error: "Acceptance verification 'gate' failed." },
+    "code-1-retry": { ok: false, error: "Acceptance verification 'lint' timed-out." },
+  });
+  assert.equal(out.state, "gate-failed");
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry"]);
 });
 
 test("reviewers 0 runs the gated coder only", async () => {
@@ -329,4 +382,49 @@ test("no state global is tolerated", async () => {
 
 test("source has no nested async functions", () => {
   assert.doesNotMatch(source, /async\s+(function|\(|[A-Za-z_$][\w$]*\s*=>)/);
+});
+
+test("taskDir gives each child a unique absolute output file in it", async () => {
+  const { calls } = await run(
+    {
+      "code-1": coded("a"),
+      "review-1-1": blocked,
+      "review-1-2": clean,
+      "fix-2": { ok: false, error: "gate failed" },
+      "fix-2-retry": coded("b"),
+      "review-2-1": clean,
+      "review-2-2": clean,
+    },
+    { label: "unit: 7", reviewers: 2, taskDir: "/tmp/task" },
+  );
+  assert.deepEqual(calls.map((c) => c.output), [
+    "/tmp/task/unit--7-r1-coder.md",
+    "/tmp/task/unit--7-r1-reviewer-1.md",
+    "/tmp/task/unit--7-r1-reviewer-2.md",
+    "/tmp/task/unit--7-r2-coder.md",
+    "/tmp/task/unit--7-r2-coder-retry.md",
+    "/tmp/task/unit--7-r2-reviewer-1.md",
+    "/tmp/task/unit--7-r2-reviewer-2.md",
+  ]);
+});
+
+test("taskDir output basenames stay under the filename limit for a long label", async () => {
+  const { calls } = await run(
+    { "code-1": coded("a"), "review-1-1": clean, "review-1-2": clean },
+    { label: "x".repeat(256), reviewers: 2, taskDir: "/tmp/task" },
+  );
+  const names = calls.map((c) => c.output.slice("/tmp/task/".length));
+  assert.equal(names.length, 3);
+  assert.equal(new Set(names).size, 3);
+  assert.ok(names.every((n) => !n.includes("/") && Buffer.byteLength(n) <= 255), names.join("\n"));
+});
+
+test("without taskDir no child gets an output field", async () => {
+  const { calls } = await run({ "code-1": coded("a"), "review-1-1": clean });
+  assert.ok(calls.every((c) => !("output" in c)));
+});
+
+test("a relative or empty taskDir is rejected", async () => {
+  await assert.rejects(run({}, { taskDir: "task" }), /args.taskDir must be an absolute path/);
+  await assert.rejects(run({}, { taskDir: "" }), /args.taskDir must be an absolute path/);
 });

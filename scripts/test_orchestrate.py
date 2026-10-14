@@ -1,4 +1,6 @@
+import contextlib
 import fcntl
+import io
 import json
 import os
 import re
@@ -12,6 +14,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "orchestrate.py")
 FIXTURES = os.path.join(HERE, "testdata", "orchestrate")
+FAKE_ARGS_SCRIPT = os.path.join(HERE, "testdata", "fake-review-loop-args.sh")
 sys.path.insert(0, HERE)
 import orchestrate  # noqa: E402
 
@@ -23,20 +26,28 @@ def sh(cwd, *args):
 
 
 class OrchestrateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.template = os.path.realpath(tempfile.mkdtemp(prefix="orchestrate-template-"))
+        cls.addClassCleanup(shutil.rmtree, cls.template)
+        repo = os.path.join(cls.template, "repo")
+        os.makedirs(repo)
+        sh(repo, "init", "-q", "-b", "main")
+        with open(os.path.join(repo, "README"), "w") as f:
+            f.write("seed\n")
+        sh(repo, "add", "README")
+        sh(repo, "commit", "-q", "-m", "seed")
+
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orchestrate-test-"))
         self.addCleanup(shutil.rmtree, self.tmp)
         self.repo = os.path.join(self.tmp, "repo")
-        os.makedirs(self.repo)
-        sh(self.repo, "init", "-q", "-b", "main")
-        with open(os.path.join(self.repo, "README"), "w") as f:
-            f.write("seed\n")
-        sh(self.repo, "add", "README")
-        sh(self.repo, "commit", "-q", "-m", "seed")
+        shutil.copytree(os.path.join(self.template, "repo"), self.repo, symlinks=True)
         self.store = os.path.join(self.tmp, "store")
         self.runs = os.path.join(self.tmp, "runs")
         os.makedirs(self.runs)
-        self.env = dict(os.environ, PI_SETTINGS=os.path.join(self.tmp, "no-settings.json"))
+        self.env = dict(os.environ, PI_SETTINGS=os.path.join(self.tmp, "no-settings.json"),
+                        ORCHESTRATE_ARGS_SCRIPT=FAKE_ARGS_SCRIPT)
         self.env.pop("PI_PROVIDER", None)
         self.env.pop("PI_MODEL", None)
         self.env.pop("PI_SESSION_ID", None)
@@ -44,11 +55,22 @@ class OrchestrateTest(unittest.TestCase):
 
     # ---------- helpers ----------
 
-    def g(self, *args, code=0, timeout=60):
-        p = subprocess.run([sys.executable, SCRIPT, "--store", self.store] + list(args), capture_output=True,
-                           text=True, env=self.env, timeout=timeout)
-        self.assertEqual(p.returncode, code, "orchestrate %s\nstdout: %s\nstderr: %s" % (args, p.stdout, p.stderr))
-        return p.stdout
+    def g(self, *args, code=0):
+        """Run orchestrate.main in this process, with self.env as the environment its children inherit."""
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, self.env, clear=True), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err):
+            try:
+                rc = orchestrate.main(["--store", self.store] + list(args))
+            except SystemExit as e:
+                rc = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+        self.assertEqual(rc, code, "orchestrate %s\nstdout: %s\nstderr: %s" % (args, out.getvalue(), err.getvalue()))
+        return out.getvalue()
+
+    def cli(self, *args, timeout=60):
+        """Run orchestrate.py as a separate process."""
+        return subprocess.run([sys.executable, SCRIPT, "--store", self.store] + list(args), capture_output=True,
+                              text=True, env=self.env, timeout=timeout)
 
     def init(self, *extra):
         self.g("init", "--repo", self.repo, "--base", "main", "--worktrees", os.path.join(self.tmp, "wt"),
@@ -135,10 +157,19 @@ class OrchestrateTest(unittest.TestCase):
     # ---------- tests ----------
 
     def test_launch_emits_args_and_brief_with_separate_process_section(self):
-        self.init()
-        self.load([{"id": "A", "title": "Add a thing", "url": "https://example.test/A", "body": "Thing exists.",
-                    "paths": ["src/*"]}])
-        spec = self.launch("A")
+        del self.env["ORCHESTRATE_ARGS_SCRIPT"]
+        p = self.cli("init", "--repo", self.repo, "--base", "main", "--worktrees", os.path.join(self.tmp, "wt"),
+                     "--gate", "true")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        units = os.path.join(self.tmp, "units.json")
+        with open(units, "w") as f:
+            json.dump([{"id": "A", "title": "Add a thing", "url": "https://example.test/A", "body": "Thing exists.",
+                        "paths": ["src/*"]}], f)
+        p = self.cli("import", units)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        p = self.cli("launch", "A")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        spec = json.loads(p.stdout)
         self.assertEqual(spec["attempt"], 1)
         self.assertEqual(spec["cwd"], self.repo)
         self.assertTrue(spec["workflow"].endswith("workflows/review-loop.js"))
@@ -149,6 +180,8 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(args["base"], sh(self.repo, "rev-parse", "main"))
         self.assertEqual(args["reviewers"], 1)
         self.assertEqual(args["gate"], "true")
+        self.assertEqual(args["taskDir"], os.path.realpath(os.path.join(self.store, "outputs", "A", "a1")))
+        self.assertTrue(os.path.isdir(args["taskDir"]))
         with open(args["brief"]) as f:
             brief = f.read()
         acceptance, process = brief.split("## Process")
@@ -365,8 +398,7 @@ class OrchestrateTest(unittest.TestCase):
         with open(os.path.join(self.store, "units.tsv"), "rb") as f:
             tsv = f.read()
         for uid in ("A", "B"):
-            p = subprocess.run([sys.executable, SCRIPT, "--store", self.store, "launch", uid, "--max", "2"],
-                               capture_output=True, text=True, env=self.env)
+            p = self.cli("launch", uid, "--max", "2")
             self.assertEqual((p.returncode, p.stdout), (3, ""), p.stderr)
             self.assertIn(self.wt(uid), p.stderr)
             self.assertIn("--adopt", p.stderr)
@@ -384,6 +416,21 @@ class OrchestrateTest(unittest.TestCase):
         spec = self.launch("A")
         self.assertEqual(spec["attempt"], 2)
         self.assertEqual(self.rows()["A"]["start_head"], head)
+
+    def test_each_attempt_gets_its_own_output_dir(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        first = self.started("A", "wf-1")
+        head = self.commit("A")
+        self.g("record", "A", "1", self.workflow("unresolved", "wf-1", head))
+        second = self.launch("A")
+        dirs = []
+        for spec in (first, second):
+            with open(spec["args_path"]) as f:
+                dirs.append(json.load(f)["taskDir"])
+        out = os.path.realpath(os.path.join(self.store, "outputs", "A"))
+        self.assertEqual(dirs, [os.path.join(out, "a1"), os.path.join(out, "a2")])
+        self.assertTrue(all(os.path.isdir(d) for d in dirs))
 
     def test_adopting_clean_existing_worktree_on_branch_launches(self):
         self.init()
@@ -973,8 +1020,7 @@ class OrchestrateTest(unittest.TestCase):
         path = os.path.join(self.tmp, "quick.json")
         with open(path, "w") as f:
             json.dump([{"id": "A", "title": "t", "effort": "quick"}], f)
-        p = subprocess.run([sys.executable, SCRIPT, "--store", self.store, "import", path], capture_output=True,
-                           text=True, env=self.env)
+        p = self.cli("import", path)
         self.assertEqual(p.returncode, 2, p.stderr)
         self.assertIn("standard or exhaustive", p.stderr)
         self.assertEqual(self.rows(), {})
@@ -995,8 +1041,7 @@ class OrchestrateTest(unittest.TestCase):
         with open(os.path.join(self.store, ".lock"), "a+") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             with self.assertRaises(subprocess.TimeoutExpired):
-                subprocess.run([sys.executable, SCRIPT, "--store", self.store, "status"], capture_output=True,
-                               env=self.env, timeout=1)
+                self.cli("status", timeout=1)
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         self.g("status")
 

@@ -1,0 +1,4 @@
+{"type": "session", "version": 3, "id": "2026-10-04_auto.jsonl", "timestamp": "2026-10-04T10:00:00.000Z", "cwd": "/w/d"}
+{"type": "message", "id": "u0", "timestamp": "2026-10-04T10:01:00.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "AUTOPING nightly digest"}]}}
+{"type": "message", "id": "a1", "timestamp": "2026-10-04T10:02:00.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Digest sent."}], "stopReason": "stop"}}
+{"type": "message", "id": "u2", "timestamp": "2026-10-04T10:03:00.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "<system-reminder kind=\"auto\">Nothing typed here.</system-reminder>"}]}}

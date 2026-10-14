@@ -57,6 +57,7 @@ const concurrency = args.concurrency === undefined ? 2 : args.concurrency;
 if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("args.concurrency must be a positive integer");
 if (args.label !== undefined && !nonEmpty(args.label)) throw new Error("args.label must be a non-empty string");
 const label = args.label || "review-fanout";
+if (args.taskDir !== undefined && (typeof args.taskDir !== "string" || !ABSOLUTE.test(args.taskDir))) throw new Error("args.taskDir must be an absolute path");
 
 const defaultSchema = {
   type: "object",
@@ -107,7 +108,7 @@ function childKey(target, index) {
   return target.key + ".r" + (index + 1);
 }
 
-function reviewItem(target, reviewer, index) {
+function reviewItem(target, targetIndex, reviewer, index) {
   const item = {
     key: childKey(target, index),
     label: label + ": " + target.key + " " + reviewer.label,
@@ -119,6 +120,13 @@ function reviewItem(target, reviewer, index) {
     outputSchema: schema,
   };
   if (reviewer.model) item.model = reviewer.model;
+  if (args.taskDir) {
+    // Sanitized or truncated names can collide ("a b" and "a-b"), so the target and reviewer ordinals keep
+    // each file unique. Each name part is capped so the basename stays under the 255-byte filename limit.
+    const clean = (s) => s.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 48);
+    const name = clean(label) + "-t" + (targetIndex + 1) + "-r" + (index + 1) + "-" + clean(target.key) + "-" + clean(reviewer.label);
+    item.output = args.taskDir.replace(/[\\/]+$/, "") + "/" + name + ".md";
+  }
   return item;
 }
 
@@ -199,7 +207,7 @@ let ok = true;
 for (let start = 0; start < args.targets.length; start += concurrency) {
   const batch = args.targets.slice(start, start + concurrency);
   const items = [];
-  for (const target of batch) reviewers.forEach((reviewer, i) => items.push(reviewItem(target, reviewer, i)));
+  batch.forEach((target, t) => reviewers.forEach((reviewer, i) => items.push(reviewItem(target, start + t, reviewer, i))));
   const settled = await runs.all(items);
   batch.forEach((target, t) => {
     const entries = reviewers.map((reviewer, i) => reviewerEntry(reviewer, settled[t * reviewers.length + i]));

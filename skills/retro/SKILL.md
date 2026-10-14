@@ -7,6 +7,8 @@ description: Periodic retrospective over recent agent sessions. Runs scripts/ret
 
 Agents keep writing the same throwaway tools, hitting the same harness bugs, and asking the same questions. retro turns that history into fixes. Run it every week or two over the default 14-day window; a longer gap only makes the reports noisier.
 
+Findings about how the operator prompts or works with agents belong to `hansei` (`../hansei/SKILL.md`), which hands its system findings to retro as prompts.
+
 It keeps no state beyond its task dir: `TASK_DIR=$(<hworks>/scripts/task-dir.sh retro)`, run from the hworks checkout. Each run writes `findings-<YYYY-MM-DD>.md` there. Read the previous one first and, before triage, reconcile each action not yet `effective` or dropped against git, orchestrate records, and upstream drafts, then update its state (see Output). A reviewed branch or open PR has not landed. An upstream draft waiting for the user to file it is `awaiting-user`, not a failed fix.
 
 A finding that comes back after its fix landed means the fix did not work, and goes to a higher level (see Triage). Count a recurrence only from examples dated after the fix landed: report windows overlap, so a window can still hold pre-fix events. A finding that merely drops below the triage thresholds is `unproven`, not `effective`; mark it `effective` only when sessions that exercised the fixed path show the problem is gone.
@@ -20,7 +22,10 @@ Transcripts hold private content: code, ticket text, tokens, names from every re
 ```sh
 python3 <hworks>/scripts/retro-sessions.py --since 14d --min-sessions 5 --top 1000 > "$TASK_DIR/sessions-<date>.txt"
 <hworks>/scripts/blockers.sh --since 14d > "$TASK_DIR/blockers-<date>.txt"
+<hworks>/scripts/task-prune.sh > "$TASK_DIR/prune-<date>.txt"
 ```
+
+`task-prune.sh` is a dry run: it lists bulk (clones, dependency installs, caches, large files) in task dirs idle for 14 days. Report its reclaimable total in the findings. Never pass `--apply`: deletion cannot be undone, so list `<hworks>/scripts/task-prune.sh --apply` for the user to run.
 
 `retro-sessions.py` keeps only its top 15 groups per section by default, which hides most groups above the triage threshold; `--min-sessions 5 --top 1000` prints exactly the groups Triage covers. If a section prints 1000 groups, rerun with a larger `--top`. `blockers.sh` prints every class. Both take `--since YYYY-MM-DD|Nd` and `--json`, and read `adapters/local/*.env` for their sources. A missing source is reported in the output, not fatal; say in the findings file which sources were missing.
 
