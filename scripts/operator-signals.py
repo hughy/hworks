@@ -122,6 +122,21 @@ CLAUDE_SUBAGENT = re.compile(r"/subagents/")
 INTERRUPT = "[Request interrupted by user"
 CLAUDE_STOPS = {"end_turn": "stop"}
 
+# A quoted value's units: an escape pair (2 raw chars), a plain char, or a backslash at end of line.
+_ESC, _PLAIN, _TAIL = r"\\[^\n]", r"(?!(?P=q))[^\\\n]", r"\\(?=\n|\Z)"
+_QUOTED_UNIT = f"{_ESC}|{_TAIL}|{_PLAIN}"
+
+
+def _quoted_min(n):
+    """Regex for leading quoted-value units totalling at least n raw characters."""
+    if n <= 1:
+        return f"(?:{_QUOTED_UNIT})"
+    tail = _quoted_min(n - 2) if n > 2 else ""
+    return f"(?:{_ESC}{tail}|{_PLAIN}{_quoted_min(n - 1)})"
+
+
+_QUOTED_MIN4 = _quoted_min(4)
+
 REDACTIONS = [
     ("private-key", re.compile(
         r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\Z)", re.S), 0),
@@ -133,7 +148,7 @@ REDACTIONS = [
     ("url-credentials", re.compile(r"(://)([^/\s:@\[\]]+:[^/\s@]+)(@)"), 2),
     ("secret", re.compile(
         r"(?i)(?<![\w.-])([\w.-]*(?:key|token|secret|password|passwd|pwd)[\w.-]*[\"']?\s*[:=]\s*(?P<q>[\"'])?)"
-        r"(?!\[redacted:)((?(q)(?:\\[^\n]|\\(?=\n|\Z)|(?!(?P=q))[^\\\n]){4,}|[^\s\"',;]{4,}))"), 3),
+        rf"(?!\[redacted:)((?(q)(?={_QUOTED_MIN4})(?:{_QUOTED_UNIT})+|[^\s\"',;]{{4,}}))"), 3),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b"), 0),
 ]
 
