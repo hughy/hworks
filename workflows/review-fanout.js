@@ -108,7 +108,7 @@ function childKey(target, index) {
   return target.key + ".r" + (index + 1);
 }
 
-function reviewItem(target, reviewer, index) {
+function reviewItem(target, targetIndex, reviewer, index) {
   const item = {
     key: childKey(target, index),
     label: label + ": " + target.key + " " + reviewer.label,
@@ -121,7 +121,9 @@ function reviewItem(target, reviewer, index) {
   };
   if (reviewer.model) item.model = reviewer.model;
   if (args.taskDir) {
-    const name = [label, target.key, reviewer.label].map((s) => s.replace(/[^A-Za-z0-9._-]/g, "-")).join("-");
+    // Sanitized names can collide ("a b" and "a-b"), so the target and reviewer ordinals keep each file unique.
+    const clean = (s) => s.replace(/[^A-Za-z0-9._-]/g, "-");
+    const name = clean(label) + "-t" + (targetIndex + 1) + "-r" + (index + 1) + "-" + clean(target.key) + "-" + clean(reviewer.label);
     item.output = args.taskDir.replace(/[\\/]+$/, "") + "/" + name + ".md";
   }
   return item;
@@ -204,7 +206,7 @@ let ok = true;
 for (let start = 0; start < args.targets.length; start += concurrency) {
   const batch = args.targets.slice(start, start + concurrency);
   const items = [];
-  for (const target of batch) reviewers.forEach((reviewer, i) => items.push(reviewItem(target, reviewer, i)));
+  batch.forEach((target, t) => reviewers.forEach((reviewer, i) => items.push(reviewItem(target, start + t, reviewer, i))));
   const settled = await runs.all(items);
   batch.forEach((target, t) => {
     const entries = reviewers.map((reviewer, i) => reviewerEntry(reviewer, settled[t * reviewers.length + i]));

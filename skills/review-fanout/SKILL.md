@@ -32,7 +32,7 @@ The workflow is `../../workflows/review-fanout.js`, relative to this file. Pass 
 - `schema`: replaces the default output schema. Without it, each reviewer returns `{summary, findings: [{severity, file, line?, claim, evidence, fix?}]}` with `severity` `blocking` or `non-blocking`.
 - `concurrency` (default 2): targets reviewed at once. A batch launches every reviewer for each of its targets, so concurrency 2 with two reviewers runs four children. The next batch starts when the whole batch settles. A workflow run launches at most 64 children by default, so keep targets times reviewers within that, or pass a larger `maxSubagentSpawnsPerRun` on the launch.
 - `label`: prefix for child labels in the fleet view.
-- `taskDir`: an absolute directory, usually `$TASK_DIR`. Each reviewer then saves its output to `<taskDir>/<label>-<target key>-<reviewer label>.md`. Without it, reviewers get no `output` path.
+- `taskDir`: an absolute directory, usually `$TASK_DIR`. Each reviewer then saves its output to `<taskDir>/<label>-t<target n>-r<reviewer n>-<target key>-<reviewer label>.md`. Without it, reviewers get no `output` path.
 
 Every reviewer child runs in its target's `cwd` with `worktree: false` and the schema as `outputSchema`. The task tells it to stay read-only; the `reviewer` agent has no edit tools.
 
