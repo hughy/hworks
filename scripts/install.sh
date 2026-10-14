@@ -5,7 +5,7 @@
 #   --check           report what is installed and what differs; change nothing
 #
 # Links global/AGENTS.md to the pi agent dir, ~/.claude/CLAUDE.md, and ~/.codex/AGENTS.md, links the agent
-# roles and the autonomy, hughy-mode, and runner-exit-guard extensions into the pi agent dir, adds skills/ to pi settings, and creates the
+# roles and the autonomy, auto-title, hughy-mode, and runner-exit-guard extensions into the pi agent dir, adds skills/ to pi settings, and creates the
 # scratch root. A destination that is a real file is replaced only when its content is identical;
 # otherwise install reports it and leaves it alone.
 set -euo pipefail
@@ -63,6 +63,7 @@ link "$root/global/AGENTS.md" "$HOME/.claude/CLAUDE.md"
 link "$root/global/AGENTS.md" "$HOME/.codex/AGENTS.md"
 link "$root/agents" "$pi/agents/hworks"
 link "$root/extensions/autonomy.ts" "$pi/extensions/autonomy.ts"
+link "$root/extensions/auto-title.ts" "$pi/extensions/auto-title.ts"
 link "$root/extensions/hughy-mode.ts" "$pi/extensions/hughy-mode.ts"
 link "$root/extensions/runner-exit-guard.ts" "$pi/extensions/runner-exit-guard.ts"
 
