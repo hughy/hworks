@@ -26,11 +26,12 @@ export PRUNE_ROOT=${HWORKS_TASKS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agen
 export PRUNE_OLDER=$older PRUNE_APPLY=$apply PRUNE_JSON=$json
 
 exec python3 - <<'PY'
-import json, os, re, shutil, stat, sys, time
+import json, os, re, stat, sys, time
 
 BULK_DIRS = {".git", "node_modules", ".terraform", ".venv", "venv", "__pycache__", ".cache"}
 KEEP_SUFFIXES = (".md", ".jsonl")
 BIG = 1 << 20
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
 def die(msg):
@@ -43,10 +44,20 @@ if not raw:
     die("task root is empty; refusing")
 if not os.path.isdir(raw) or os.path.islink(raw):
     die(f"task root {raw} does not exist or is not a directory; refusing")
+# Every scan and delete goes through this one fd, so swapping an ancestor of the root
+# for a symlink after this point cannot move the work outside the checked root.
+try:
+    root_fd = os.open(raw, DIR_FLAGS)
+except OSError as err:
+    die(f"cannot open task root {raw}: {err}; refusing")
 root = os.path.realpath(raw)
-home = os.path.realpath(os.path.expanduser("~")) if os.environ.get("HOME") else None
-if root == os.path.sep or root == home:
-    die(f"task root {root} is / or $HOME; refusing")
+root_st = os.fstat(root_fd)
+if not os.path.samestat(root_st, os.stat(root)):
+    die(f"task root {raw} changed while opening; refusing")
+unsafe = [os.path.sep] + ([os.path.expanduser("~")] if os.environ.get("HOME") else [])
+for bad in unsafe:
+    if os.path.exists(bad) and os.path.samestat(root_st, os.stat(bad)):
+        die(f"task root {root} is / or $HOME; refusing")
 
 m = re.fullmatch(r"(\d+)d", os.environ["PRUNE_OLDER"])
 if not m:
@@ -56,21 +67,41 @@ apply = os.environ["PRUNE_APPLY"] == "1"
 as_json = os.environ["PRUNE_JSON"] == "1"
 
 
-def real_dirs(path):
+def open_rel(rel):
+    # Open a root-relative dir one component at a time with O_NOFOLLOW.
+    fd = os.dup(root_fd)
     try:
-        entries = sorted(os.scandir(path), key=lambda e: e.name)
+        for name in rel.split(os.sep) if rel else []:
+            nxt = os.open(name, DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
+
+
+def real_dirs(rel):
+    try:
+        fd = open_rel(rel)
     except OSError:
         return []
-    return [e.path for e in entries if e.is_dir(follow_symlinks=False)]
+    try:
+        with os.scandir(fd) as it:
+            names = sorted(e.name for e in it if e.is_dir(follow_symlinks=False))
+    except OSError:
+        names = []
+    finally:
+        os.close(fd)
+    return [os.path.join(rel, n) if rel else n for n in names]
 
 
 def units():
-    for top in real_dirs(root):
-        name = os.path.basename(top)
-        if "--" in name or name.startswith("local--"):
+    for top in real_dirs(""):
+        if "--" in top or top.startswith("local--"):
             for branch in real_dirs(top):
                 yield from real_dirs(branch)
-        elif name == "_misc":
+        elif top == "_misc":
             yield from real_dirs(top)
         else:
             yield top
@@ -80,25 +111,29 @@ def raise_error(err):
     raise err
 
 
-def files(path, strict=False):
-    for d, dirs, fs in os.walk(path, followlinks=False, onerror=raise_error if strict else None):
+def lstat_at(name, dir_fd):
+    return os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+
+
+def files(top, dir_fd, strict=False):
+    # os.fwalk does not descend into symlinks when follow_symlinks is False.
+    for _, _, fs, dfd in os.fwalk(top, onerror=raise_error if strict else None, dir_fd=dir_fd):
         for f in fs:
-            p = os.path.join(d, f)
             try:
-                st = os.lstat(p)
+                st = lstat_at(f, dfd)
             except OSError:
                 if strict:
                     raise
                 continue
             if stat.S_ISREG(st.st_mode):
-                yield p, st
+                yield st
 
 
-def newest(unit):
+def newest(unit, unit_fd):
     # A scan that cannot read every dir may miss fresh files, so treat the unit as active.
     try:
-        times = [st.st_mtime for _, st in files(unit, strict=True)]
-        return max(times) if times else os.lstat(unit).st_mtime
+        times = [st.st_mtime for st in files(".", unit_fd, strict=True)]
+        return max(times) if times else os.fstat(unit_fd).st_mtime
     except OSError as err:
         print(f"task-prune: cannot scan {unit}: {err}; treating it as active", file=sys.stderr)
         return float("inf")
@@ -109,45 +144,61 @@ def is_bulk(name):
     return low in BULK_DIRS or low.endswith("cache")
 
 
-def candidates(unit):
+def candidates(unit, unit_fd):
     found = []
-    for d, dirs, fs in os.walk(unit, followlinks=False):
+    for d, dirs, fs, dfd in os.fwalk(".", dir_fd=unit_fd):
+        here = os.path.normpath(os.path.join(unit, d))
         keep = []
         for n in sorted(dirs):
-            p = os.path.join(d, n)
-            if os.path.islink(p):
+            try:
+                if not stat.S_ISDIR(lstat_at(n, dfd).st_mode):
+                    continue
+            except OSError:
                 continue
             if is_bulk(n):
-                found.append((p, sum(st.st_size for _, st in files(p)), "dir"))
+                found.append((os.path.join(here, n), sum(st.st_size for st in files(n, dfd)), "dir"))
             else:
                 keep.append(n)
         dirs[:] = keep
         for f in sorted(fs):
             if f.endswith(KEEP_SUFFIXES) or f == ".task":
                 continue
-            p = os.path.join(d, f)
-            st = os.lstat(p)
+            try:
+                st = lstat_at(f, dfd)
+            except OSError:
+                continue
             if stat.S_ISREG(st.st_mode) and st.st_size > BIG:
-                found.append((p, st.st_size, "file"))
+                found.append((os.path.join(here, f), st.st_size, "file"))
     return found
 
 
-DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+def rmtree_at(name, parent_fd):
+    fd = os.open(name, DIR_FLAGS, dir_fd=parent_fd)
+    try:
+        with os.scandir(fd) as it:
+            entries = [(e.name, e.is_dir(follow_symlinks=False)) for e in it]
+        for n, is_dir in entries:
+            if is_dir:
+                rmtree_at(n, fd)
+            else:
+                os.unlink(n, dir_fd=fd)
+    finally:
+        os.close(fd)
+    os.rmdir(name, dir_fd=parent_fd)
 
 
 def delete(path, kind, unit):
-    # Walk from the root through dir fds opened with O_NOFOLLOW and delete relative to
-    # them, so a dir swapped for a symlink after the scan cannot redirect the deletion.
-    rel = os.path.relpath(path, root).split(os.sep)
-    depth = len(os.path.relpath(unit, root).split(os.sep))
-    fds = []
+    # path and unit are root-relative. Every step goes through dir fds opened with
+    # O_NOFOLLOW from root_fd, so a dir swapped for a symlink cannot redirect deletion.
+    rel = path.split(os.sep)
+    depth = len(unit.split(os.sep))
+    fds = [os.dup(root_fd)]
     try:
-        fds.append(os.open(root, DIR_FLAGS))
         for name in rel[:-1]:
             fds.append(os.open(name, DIR_FLAGS, dir_fd=fds[-1]))
-        st = os.stat(rel[-1], dir_fd=fds[-1], follow_symlinks=False)
+        st = lstat_at(rel[-1], fds[-1])
         if kind == "dir" and stat.S_ISDIR(st.st_mode):
-            shutil.rmtree(rel[-1], dir_fd=fds[-1])
+            rmtree_at(rel[-1], fds[-1])
         elif kind == "file" and stat.S_ISREG(st.st_mode):
             os.unlink(rel[-1], dir_fd=fds[-1])
         else:
@@ -170,16 +221,24 @@ report = {"root": root, "older_than": os.environ["PRUNE_OLDER"], "apply": apply,
 if apply:
     report["freed_bytes"] = 0
 for unit in units():
-    if newest(unit) >= cutoff:
-        report["active_units"] += 1
+    try:
+        unit_fd = open_rel(unit)
+    except OSError as err:
+        print(f"task-prune: cannot open {unit}: {err}; skipping it", file=sys.stderr)
         continue
-    report["idle_units"] += 1
-    for path, size, kind in candidates(unit):
-        report["candidates"].append({"path": os.path.relpath(path, root), "bytes": size, "kind": kind})
+    try:
+        if newest(unit, unit_fd) >= cutoff:
+            report["active_units"] += 1
+            continue
+        report["idle_units"] += 1
+        found = candidates(unit, unit_fd)
+    finally:
+        os.close(unit_fd)
+    for path, size, kind in found:
+        report["candidates"].append({"path": path, "bytes": size, "kind": kind})
         report["reclaimable_bytes"] += size
         if apply and delete(path, kind, unit):
             report["freed_bytes"] += size
-
 
 def human(n):
     for unit in ("B", "KiB", "MiB", "GiB"):

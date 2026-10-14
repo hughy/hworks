@@ -12,7 +12,7 @@ BIG = (1 << 20) + 1
 
 
 RACE_PRELUDE = """
-import os, shutil  # shutil checks os.open for dir_fd support at import, before the patch
+import os
 _armed = [False]
 def _swap_after(fn):
     def wrapper(*a, **k):
@@ -31,7 +31,20 @@ os.open = _swap_after(os.open)
 RACE_WRAPPER = """
 _real_delete = delete
 def delete(path, kind, unit):
-    _armed[0] = path == os.path.join(os.environ["RACE_DIR"], "big.bin")
+    full = os.path.join(os.environ["PRUNE_ROOT"], path)
+    _armed[0] = full == os.path.join(os.environ["RACE_DIR"], "big.bin")
+    return _real_delete(path, kind, unit)
+"""
+
+ROOT_SWAP_WRAPPER = """
+_real_delete = delete
+_swapped = [False]
+def delete(path, kind, unit):
+    if not _swapped[0]:
+        _swapped[0] = True
+        parent = os.environ["SWAP_PARENT"]
+        os.rename(parent, parent + ".real")
+        os.symlink(os.environ["SWAP_TARGET"], parent)
     return _real_delete(path, kind, unit)
 """
 
@@ -193,6 +206,37 @@ class TaskPrune(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(frames + ".real", "big.bin")))
         rep = json.loads(out.stdout)
         self.assertEqual(rep["freed_bytes"], rep["reclaimable_bytes"] - BIG)
+
+    def test_root_ancestor_swapped_for_symlink_before_delete_is_not_followed(self):
+        parent = os.path.join(self.base, "p")
+        root = os.path.join(parent, "root")
+        evil = os.path.join(self.base, "evil")
+        write(os.path.join(root, "legacy", "big.bin"), BIG)
+        write(os.path.join(evil, "root", "legacy", "big.bin"), BIG)
+        src = embedded_python().replace("\nreport = {", ROOT_SWAP_WRAPPER + "\nreport = {", 1)
+        env = dict(os.environ, PRUNE_ROOT=root, PRUNE_OLDER="14d", PRUNE_APPLY="1",
+                   PRUNE_JSON="1", SWAP_PARENT=parent, SWAP_TARGET=evil)
+        out = subprocess.run(["python3", "-c", src], capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(os.path.islink(parent), "swap hook did not run")
+        self.assertTrue(os.path.exists(os.path.join(evil, "root", "legacy", "big.bin")))
+        self.assertFalse(os.path.exists(os.path.join(parent + ".real", "root", "legacy", "big.bin")))
+        self.assertEqual(json.loads(out.stdout)["freed_bytes"], BIG)
+
+    def test_apply_runs_on_python_3_9(self):
+        py = "/usr/bin/python3"
+        if not os.access(py, os.X_OK):
+            self.skipTest("no system python3")
+        ver = subprocess.run([py, "-c", "import sys; print(sys.version_info[:2] < (3, 11))"],
+                             capture_output=True, text=True)
+        if ver.stdout.strip() != "True":
+            self.skipTest("system python3 is 3.11 or newer")
+        out = self.run_prune("--json", "--apply", env_extra={"PATH": "/usr/bin:/bin"})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(self.exists("idle_nm"))
+        self.assertTrue(self.exists("idle_md"))
+        rep = json.loads(out.stdout)
+        self.assertEqual(rep["freed_bytes"], rep["reclaimable_bytes"])
 
     def test_unsafe_roots_refused(self):
         home = os.path.join(self.base, "home")
