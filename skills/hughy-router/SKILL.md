@@ -43,7 +43,7 @@ A reported defect. If failing tests already pin the behavior, brief `coder` with
 
 ### Build
 
-New or changed behavior: `feature.md`. Behavior-preserving reshape: `refactoring.md` (pin the contract with a characterization test before moving anything). A design decision that an observation could settle: `prototype.md` instead of asking. Name the data shape and its organizing structure before delegating.
+New or changed behavior: `feature.md`. Behavior-preserving reshape: `refactoring.md` (pin the contract with a characterization test before moving anything). A design decision that an observation could settle: `prototype.md` instead of asking. Name the data shape and its organizing structure before delegating. Before delegating a change that adds a flag, config knob, request or response field, timer, guard, or tool, look for precedent (the repo's own patterns, sibling and in-flight changes, library or harness tools) and give the brief a Mechanisms list: for each, whether the issue or acceptance criteria require it or the design chose it, and for a chosen one, what breaks without it and the precedent checked. Drop a chosen mechanism with no reason.
 
 ### Measure
 

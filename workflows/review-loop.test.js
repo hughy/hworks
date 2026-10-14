@@ -86,6 +86,7 @@ test("clean on first review", async () => {
   assert.equal(calls[1].acceptance, undefined);
   assert.match(calls[1].task, /git diff 0123abc\.\.\.HEAD/);
   assert.match(calls[1].task, /\/r\/rubric\.md/);
+  assert.match(calls[1].task, /added flag, knob, field, timer, guard, or tool that the brief did not require and nothing in the diff or brief justifies/);
   assert.ok(state.sets.length > 0);
   assert.equal(state.sets.at(-1).key, "review-loop.fix--issue-12");
   assert.equal(state.sets.at(-1).value.phase, "clean");

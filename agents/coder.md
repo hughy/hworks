@@ -36,4 +36,5 @@ Final response shape:
 Implemented X.
 Changed files: Y.
 Gate: the command and its result, verbatim tail.
+Added mechanisms: every flag, knob, field, timer, guard, or tool the change adds that the brief's Mechanisms list does not cover, each with a one-line reason, or "none".
 Open risks: R.

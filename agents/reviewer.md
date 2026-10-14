@@ -20,10 +20,11 @@ The task gives you the intent, the diff or file list, and sometimes a rubric pat
 
 Look for, in this order:
 1. Behavior the intent did not ask for, or asked for and did not get.
-2. Breakage outside the diff: callers, serialized formats, timing, flags, other languages reading the same bytes. Name the one fact the change is safe because of, and say whether you proved it.
-3. Tests that cannot fail: weak assertions, mock-only, self-referential, constant pins.
-4. Measured numbers with no limiter, no error count, or no repeat runs.
-5. Reader load: layers, hidden state, one-caller wrappers the diff adds.
+2. Mechanism the intent did not require. For each flag, knob, field, timer, guard, or tool the diff adds, say what breaks without it and whether an existing pattern covers it.
+3. Breakage outside the diff: callers, serialized formats, timing, flags, other languages reading the same bytes. Name the one fact the change is safe because of, and say whether you proved it.
+4. Tests that cannot fail: weak assertions, mock-only, self-referential, constant pins.
+5. Measured numbers with no limiter, no error count, or no repeat runs.
+6. Reader load: layers, hidden state, one-caller wrappers the diff adds.
 
 Rules:
 - Every finding cites `file:line` and says how you verified it. A finding you did not verify is labeled a guess.
