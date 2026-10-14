@@ -38,20 +38,27 @@ def read(path):
 
 
 class MutateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.template = os.path.realpath(tempfile.mkdtemp(prefix="mutate-template-"))
+        cls.addClassCleanup(shutil.rmtree, cls.template, True)
+        repo = os.path.join(cls.template, "repo")
+        os.makedirs(repo)
+        git(repo, "init", "-q", "-b", "main")
+        write(os.path.join(repo, "calc.py"), BUGGY)
+        write(os.path.join(repo, "check.py"), CHECK)
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "buggy")
+        write(os.path.join(repo, "calc.py"), CALC)
+        git(repo, "commit", "-q", "-am", "fix add")
+
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="mutate-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo = os.path.join(self.tmp, "repo")
         self.scratch_root = os.path.join(self.tmp, "scratch")
-        os.makedirs(self.repo)
+        shutil.copytree(os.path.join(self.template, "repo"), self.repo, symlinks=True)
         os.makedirs(self.scratch_root)
-        git(self.repo, "init", "-q", "-b", "main")
-        write(os.path.join(self.repo, "calc.py"), BUGGY)
-        write(os.path.join(self.repo, "check.py"), CHECK)
-        git(self.repo, "add", ".")
-        git(self.repo, "commit", "-q", "-m", "buggy")
-        write(os.path.join(self.repo, "calc.py"), CALC)
-        git(self.repo, "commit", "-q", "-am", "fix add")
         self.calc = os.path.join(self.repo, "calc.py")
         self.env = dict(os.environ, TMPDIR=self.scratch_root)
         self.env.pop("PYTHONDONTWRITEBYTECODE", None)
@@ -738,20 +745,28 @@ class GoOverlayTest(unittest.TestCase):
     SUM_TEST = ('package calc\n\nimport "testing"\n\nfunc TestSum(t *testing.T) {\n'
                 '\tif got := Sum(2, 3); got != 5 {\n\t\tt.Fatalf("Sum(2, 3) = %d", got)\n\t}\n}\n')
 
+    @classmethod
+    def setUpClass(cls):
+        cls.template = os.path.realpath(tempfile.mkdtemp(prefix="mutate-go-template-"))
+        cls.addClassCleanup(shutil.rmtree, cls.template, True)
+        repo = os.path.join(cls.template, "repo")
+        os.makedirs(os.path.join(repo, "calc"))
+        git(repo, "init", "-q", "-b", "main")
+        write(os.path.join(repo, "go.mod"), "module example.com/m\n\ngo 1.21\n")
+        sum_go = os.path.join(repo, "calc", "sum.go")
+        write(sum_go, cls.SUM.replace("a + b", "a - b"))
+        write(os.path.join(repo, "calc", "sum_test.go"), cls.SUM_TEST)
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "buggy")
+        write(sum_go, cls.SUM)
+        git(repo, "commit", "-q", "-am", "fix")
+
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="mutate-go-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo = os.path.join(self.tmp, "repo")
-        os.makedirs(os.path.join(self.repo, "calc"))
-        git(self.repo, "init", "-q", "-b", "main")
-        write(os.path.join(self.repo, "go.mod"), "module example.com/m\n\ngo 1.21\n")
+        shutil.copytree(os.path.join(self.template, "repo"), self.repo, symlinks=True)
         self.sum = os.path.join(self.repo, "calc", "sum.go")
-        write(self.sum, self.SUM.replace("a + b", "a - b"))
-        write(os.path.join(self.repo, "calc", "sum_test.go"), self.SUM_TEST)
-        git(self.repo, "add", ".")
-        git(self.repo, "commit", "-q", "-m", "buggy")
-        write(self.sum, self.SUM)
-        git(self.repo, "commit", "-q", "-am", "fix")
         self.env = dict(os.environ, GOFLAGS="", GOTOOLCHAIN="local", GOWORK="off")
 
     def run_spec(self, mutants, code, cwd=None, env=None, test=None, watch=None):

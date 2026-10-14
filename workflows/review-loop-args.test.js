@@ -134,3 +134,18 @@ test("a task dir is created and emitted as an absolute taskDir", () => {
   assert.equal(r.json.taskDir, path.join(fs.realpathSync(fx.repo), "out", "u1"));
   assert.ok(fs.statSync(r.json.taskDir).isDirectory());
 });
+
+test("GATE_TIMEOUT_MS sets gateTimeoutMs; unset emits none; invalid fails", () => {
+  const fx = fixture();
+  const set = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo], { models: pinned, env: { GATE_TIMEOUT_MS: "900000" } });
+  assert.equal(set.status, 0, set.stderr);
+  assert.equal(set.json.gateTimeoutMs, 900000);
+  const unset = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo], { models: pinned, env: { GATE_TIMEOUT_MS: "" } });
+  assert.equal(unset.status, 0, unset.stderr);
+  assert.equal("gateTimeoutMs" in unset.json, false);
+  for (const bad of ["0", "-5", "1.5", "10s"]) {
+    const r = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo], { models: pinned, env: { GATE_TIMEOUT_MS: bad } });
+    assert.notEqual(r.status, 0, bad);
+    assert.match(r.stderr, /GATE_TIMEOUT_MS/, bad);
+  }
+});

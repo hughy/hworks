@@ -9,6 +9,8 @@ if (typeof args.base !== "string" || !/^[0-9a-f]{7,40}$/i.test(args.base)) throw
 if (args.cwd !== undefined && (typeof args.cwd !== "string" || !args.cwd)) throw new Error("args.cwd must be a non-empty path");
 if (args.taskDir !== undefined && (typeof args.taskDir !== "string" || !/^(?:\/|[A-Za-z]:[\\/])/.test(args.taskDir))) throw new Error("args.taskDir must be an absolute path");
 if (args.coderModel !== undefined && (typeof args.coderModel !== "string" || !args.coderModel)) throw new Error("args.coderModel must be a non-empty model id");
+const gateTimeoutMs = args.gateTimeoutMs === undefined ? 600000 : args.gateTimeoutMs;
+if (!Number.isInteger(gateTimeoutMs) || gateTimeoutMs < 1) throw new Error("args.gateTimeoutMs must be a positive integer (milliseconds)");
 const reviewerCount = args.reviewers === undefined ? 1 : args.reviewers;
 if (![0, 1, 2].includes(reviewerCount)) throw new Error("args.reviewers must be 0, 1 or 2");
 const maxRounds = args.maxRounds === undefined ? 3 : args.maxRounds;
@@ -55,11 +57,15 @@ const reviewSchema = {
 // A known runtime defect: a host gate that runs past about five seconds can outlive the async runner,
 // which exits 0 without a result after the child finished. The gate never reports, so reviewers run it.
 const RUNNER_EXIT = /exited with code 0 before writing a result/;
+// A gate that outlives gateTimeoutMs says nothing about the code the coder committed, so reviewers run it too.
+const GATE_TIMEOUT = /Acceptance verification 'gate' timed-out\./;
+const gateUnreported = (r) => !r.ok && (RUNNER_EXIT.test(failureText(r)) || GATE_TIMEOUT.test(failureText(r)));
 const failureText = (r) => String((r && (r.error || r.output)) || "unknown failure");
 
 const commitRules =
   "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. " +
-  "The gate `" + args.gate + "` runs on the host after you finish; a failing gate fails this run, so run it yourself first. " +
+  "The gate `" + args.gate + "` runs on the host after you finish with a " + Math.ceil(gateTimeoutMs / 1000) + " s timeout; " +
+  "a failing gate fails this run, so run it yourself first. " +
   "Return status `blocked` only when the brief cannot be met without a decision you cannot make; put the reason in summary. " +
   "Set head to the output of `git rev-parse HEAD`.";
 
@@ -101,7 +107,7 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
   }
   if (gateCheck) {
     task +=
-      "\n\nThe host gate did not report this round. Run `" + args.gate + "` in your cwd. Set `gate` to `passed` or `failed` " +
+      "\n\nThe host gate did not report this round: its runner exited without a result or it timed out. Run `" + args.gate + "` in your cwd. Set `gate` to `passed` or `failed` " +
       "and `head` to the output of `git rev-parse HEAD`. A failing gate is a blocking finding.";
   }
   return task;
@@ -130,7 +136,7 @@ function launchCoder(key, round, findings, gateFailure) {
     task: coderTask(round, findings, gateFailure),
     // Explicit form of `gate`: report "on" puts the acceptance report in the schema-enforced
     // structured_output call, which coders do not skip the way they skip a fenced report block.
-    acceptance: { level: "verified", verify: [{ id: "gate", command: args.gate }], report: "on" },
+    acceptance: { level: "verified", verify: [{ id: "gate", command: args.gate, timeoutMs: gateTimeoutMs }], report: "on" },
     outputSchema: coderSchema,
   });
   if (args.coderModel) item.model = args.coderModel;
@@ -183,13 +189,13 @@ while (outcome === null) {
   let [coded] = await launchCoder(coderKey, rounds, blocking, null);
   record(coderKey, coded);
   let gateCheck = false;
-  if (!coded.ok && RUNNER_EXIT.test(failureText(coded))) {
+  if (gateUnreported(coded)) {
     gateCheck = true;
   } else if (!coded.ok) {
     const retryKey = coderKey + "-retry";
     [coded] = await launchCoder(retryKey, rounds, blocking, failureText(coded));
     record(retryKey, coded);
-    if (!coded.ok && RUNNER_EXIT.test(failureText(coded))) {
+    if (gateUnreported(coded)) {
       gateCheck = true;
     } else if (!coded.ok) {
       outcome = "gate-failed";
