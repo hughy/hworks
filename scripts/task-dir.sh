@@ -8,10 +8,11 @@
 # to ~/.local/state). [path] defaults to the current directory. Worktrees of one repo share the
 # repo level and differ by branch.
 #
-# <branch> is the branch lowercased with / as --. When that loses information (a character
-# outside [a-z0-9._/-], a -- substring, or a leading . or -), it gets - plus the first 8 hex
-# chars of the SHA-1 (sha1sum or shasum) of the raw branch name. Branches that pass the check keep
-# their old dir, so a-/b and a/-b still share a---b.
+# <branch> is the branch lowercased with / as --. When that can lose information (an uppercase
+# letter or other character outside [a-z0-9._/-], a -- substring, a leading . or -, or a -/ or
+# /- substring), it gets + plus the first 8 hex chars of the SHA-1 (sha1sum or shasum) of the raw
+# branch name. clean() never emits +, so two different branches never share a dir (up to hash
+# collisions).
 # A newly created task dir gets a .task file of key=value lines: created, repo, branch, slug, cwd.
 set -euo pipefail
 
@@ -19,7 +20,7 @@ clean() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's#/#--#g' -e '
 
 lossless() {
   case "$1" in
-    *[!a-z0-9._/-]* | *--* | [.-]*) return 1 ;;
+    *[!a-z0-9._/-]* | *--* | [.-]* | *-/* | */-*) return 1 ;;
   esac
 }
 
@@ -43,7 +44,7 @@ if top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null); then
   branch=$(git -C "$dir" branch --show-current 2>/dev/null || true)
   [ -n "$branch" ] || branch=detached-$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo unborn)
   bdir=$(clean "$branch")
-  lossless "$branch" || bdir=$bdir-$(printf '%s' "$branch" | sha1 | cut -c1-8)
+  lossless "$branch" || bdir=$bdir+$(printf '%s' "$branch" | sha1 | cut -c1-8)
   out="$root/$repo/$bdir/$slug"
   cwd=$top
 else

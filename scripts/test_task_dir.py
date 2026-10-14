@@ -73,24 +73,33 @@ class TaskDirTest(unittest.TestCase):
         a = os.path.basename(os.path.dirname(self.on_branch("feat/a")))
         b = os.path.basename(os.path.dirname(self.on_branch("feat--a")))
         self.assertEqual(a, "feat--a")
-        self.assertRegex(b, r"^feat--a-[0-9a-f]{8}$")
+        self.assertRegex(b, r"^feat--a\+[0-9a-f]{8}$")
         self.assertNotEqual(a, b)
 
-    def test_dash_slash_unchanged(self):
+    def test_dash_slash_distinct(self):
         a = os.path.basename(os.path.dirname(self.on_branch("a/-b")))
         b = os.path.basename(os.path.dirname(self.on_branch("a-/b")))
-        self.assertEqual((a, b), ("a---b", "a---b"))
+        self.assertEqual(a, "a---b+" + hashlib.sha1(b"a/-b").hexdigest()[:8])
+        self.assertEqual(b, "a---b+" + hashlib.sha1(b"a-/b").hexdigest()[:8])
+        self.assertNotEqual(a, b)
 
     def test_case_distinct(self):
         lower = os.path.basename(os.path.dirname(self.on_branch("feat")))
         upper = os.path.basename(os.path.dirname(self.on_branch("Feat")))
         self.assertEqual(lower, "feat")
-        self.assertRegex(upper, r"^feat-[0-9a-f]{8}$")
+        self.assertRegex(upper, r"^feat\+[0-9a-f]{8}$")
+
+    def test_case_suffix_not_a_branch_name(self):
+        upper = os.path.basename(os.path.dirname(self.on_branch("Feat")))
+        lookalike = "feat-" + hashlib.sha1(b"Feat").hexdigest()[:8]
+        other = os.path.basename(os.path.dirname(self.on_branch(lookalike)))
+        self.assertEqual(other, lookalike)
+        self.assertNotEqual(upper, other)
 
     def test_suffix_deterministic(self):
         first = self.on_branch("Feat")
         expected = hashlib.sha1(b"Feat").hexdigest()[:8]
-        self.assertEqual(os.path.basename(os.path.dirname(first)), "feat-" + expected)
+        self.assertEqual(os.path.basename(os.path.dirname(first)), "feat+" + expected)
         self.assertEqual(self.run_script("t", self.repo), first)
 
     def test_suffix_independent_of_caller_repo(self):
