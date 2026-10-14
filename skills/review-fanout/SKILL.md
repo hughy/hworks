@@ -9,7 +9,7 @@ Use it for a review pass with no writer: reviewing open PRs, a plan, or a branch
 
 A coder change plus its review is `review-loop` (`../review-loop/SKILL.md`), not this.
 
-For the review before a PR, a push, or a merge, build the args with `scripts/review-range.py args "$TASK_DIR" <trunk> <effort> "<intent>" --label <pre-push|pre-merge>` instead of writing them. It reviews only the commits no earlier review covered, applies interrogate's rubric, and picks the effort's reviewers; exit 3 means there is nothing to review. After acting on the findings, run the `record` command it prints on stderr. `skills/hughy-router/SKILL.md` owns when this runs.
+For the review before a PR, a push, or a merge, build the args with `scripts/review-range.py args "$TASK_DIR" <trunk> <effort> "<intent>" --label <pre-push|pre-merge>` instead of writing them. It reviews only the commits no earlier review covered (matched by patch-id, so a clean rebase keeps them covered; for a stacked PR pass its base branch as `<trunk>`), applies interrogate's rubric, and picks the effort's reviewers; exit 3 means there is nothing to review. After acting on the findings, run the `record` command it prints on stderr. `skills/hughy-router/SKILL.md` owns when this runs.
 
 The workflow is `../../workflows/review-fanout.js`, relative to this file. Pass it as an absolute path.
 
