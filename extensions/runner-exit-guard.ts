@@ -9,22 +9,38 @@
 // Inside a runner process only, this ignores process.exit() calls that pass no
 // exit code. The runner's own exits always pass one (0 or 1), and neither
 // pi-subagents nor pi calls process.exit() without one.
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 
 const GUARD = Symbol.for("hworks.runnerExitGuard");
 
 const isEntry = (arg: string | undefined, name: string) =>
   typeof arg === "string" && new RegExp(`^${name}\\.[cm]?[jt]s$`).test(basename(arg));
 
-// The runner starts as `node .../subagent-runner-bootstrap.js` or, with a
-// binary host, as `pi ... --extension .../binary-bootstrap.js`. Only those
-// launch positions count, so prompt text that mentions the files does not.
-export function isRunnerArgv(argv: readonly string[]): boolean {
+const hasRunnerSibling = (bootstrap: string) =>
+  [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"].some((ext) =>
+    existsSync(join(dirname(bootstrap), `subagent-runner-bootstrap${ext}`)),
+  );
+
+// pi-subagents starts the runner in one of three shapes:
+//   node [--import x] [--experimental-strip-types] .../subagent-runner-bootstrap.js cfg.json
+//   node [--import x] .../jiti/cli.mjs .../subagent-runner-bootstrap.ts cfg.json
+//   pi --no-extensions ... --mode rpc --extension .../binary-bootstrap.js
+// Node consumes its own flags, so the script is argv[1] (argv[2] under jiti).
+// For the binary host, only a real --extension option counts: options before
+// "--", pointing at an absolute binary-bootstrap that sits next to the runner
+// bootstrap. Prompt text that names a file of the same name does not match.
+export function isRunnerArgv(argv: readonly string[], exists = hasRunnerSibling): boolean {
   if (isEntry(argv[1], "subagent-runner-bootstrap")) return true;
-  const i = argv.indexOf("--extension");
-  return i >= 0 && isEntry(argv[i + 1], "binary-bootstrap");
+  if (/jiti/.test(argv[1] ?? "") && isEntry(argv[2], "subagent-runner-bootstrap")) return true;
+  for (let i = 2; i < argv.length - 1; i++) {
+    if (argv[i] === "--") break;
+    if (argv[i] !== "--extension" && argv[i] !== "-e") continue;
+    const ext = argv[i + 1];
+    if (isAbsolute(ext) && isEntry(ext, "binary-bootstrap") && exists(ext)) return true;
+  }
+  return false;
 }
 
 export function logPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -32,8 +48,9 @@ export function logPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 type Exit = (code?: number | string | null) => never;
+type Proc = { exit: Exit; pid: number };
 
-export function guardExit(proc: { exit: Exit; pid: number }, log: string): void {
+export function guardExit(proc: Proc, log: string): void {
   const realExit = proc.exit.bind(proc) as Exit;
   proc.exit = ((code?: number | string | null) => {
     if (code !== undefined) return realExit(code);
@@ -46,11 +63,20 @@ export function guardExit(proc: { exit: Exit; pid: number }, log: string): void 
   }) as Exit;
 }
 
-export default function runnerExitGuard() {
-  if (process.env.PI_RUNNER_EXIT_GUARD === "0") return;
-  const state = globalThis as Record<symbol, unknown>;
+export function install({
+  argv = process.argv,
+  env = process.env,
+  proc = process as unknown as Proc,
+  state = globalThis as Record<symbol, unknown>,
+}: { argv?: readonly string[]; env?: NodeJS.ProcessEnv; proc?: Proc; state?: Record<symbol, unknown> } = {}): boolean {
+  if (env.PI_RUNNER_EXIT_GUARD === "0") return false;
   // Child sessions reload extensions, so guard against wrapping twice.
-  if (state[GUARD] || !isRunnerArgv(process.argv)) return;
+  if (state[GUARD] || !isRunnerArgv(argv)) return false;
   state[GUARD] = true;
-  guardExit(process as unknown as { exit: Exit; pid: number }, logPath());
+  guardExit(proc, logPath(env));
+  return true;
+}
+
+export default function runnerExitGuard() {
+  install();
 }
