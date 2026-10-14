@@ -355,6 +355,17 @@ test("taskDir gives each child a unique absolute output file in it", async () =>
   ]);
 });
 
+test("taskDir output basenames stay under the filename limit for a long label", async () => {
+  const { calls } = await run(
+    { "code-1": coded("a"), "review-1-1": clean, "review-1-2": clean },
+    { label: "x".repeat(256), reviewers: 2, taskDir: "/tmp/task" },
+  );
+  const names = calls.map((c) => c.output.slice("/tmp/task/".length));
+  assert.equal(names.length, 3);
+  assert.equal(new Set(names).size, 3);
+  assert.ok(names.every((n) => !n.includes("/") && Buffer.byteLength(n) <= 255), names.join("\n"));
+});
+
 test("without taskDir no child gets an output field", async () => {
   const { calls } = await run({ "code-1": coded("a"), "review-1-1": clean });
   assert.ok(calls.every((c) => !("output" in c)));

@@ -109,8 +109,9 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
 
 const safeName = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, "-");
 
+// The label is capped so the basename stays under the 255-byte filename limit; the round suffix keeps it unique.
 function withOutput(item, name) {
-  if (args.taskDir) item.output = args.taskDir.replace(/[\\/]+$/, "") + "/" + safeName(label) + "-" + name + ".md";
+  if (args.taskDir) item.output = args.taskDir.replace(/[\\/]+$/, "") + "/" + safeName(label).slice(0, 160) + "-" + name + ".md";
   return item;
 }
 

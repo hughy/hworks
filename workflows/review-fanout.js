@@ -121,8 +121,9 @@ function reviewItem(target, targetIndex, reviewer, index) {
   };
   if (reviewer.model) item.model = reviewer.model;
   if (args.taskDir) {
-    // Sanitized names can collide ("a b" and "a-b"), so the target and reviewer ordinals keep each file unique.
-    const clean = (s) => s.replace(/[^A-Za-z0-9._-]/g, "-");
+    // Sanitized or truncated names can collide ("a b" and "a-b"), so the target and reviewer ordinals keep
+    // each file unique. Each name part is capped so the basename stays under the 255-byte filename limit.
+    const clean = (s) => s.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 48);
     const name = clean(label) + "-t" + (targetIndex + 1) + "-r" + (index + 1) + "-" + clean(target.key) + "-" + clean(reviewer.label);
     item.output = args.taskDir.replace(/[\\/]+$/, "") + "/" + name + ".md";
   }
