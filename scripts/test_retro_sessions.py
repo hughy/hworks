@@ -157,17 +157,17 @@ class Report(unittest.TestCase):
         self.assertEqual(group(self.report, "command shapes", "frobctl sync --target")["existing"], [])
 
 
-def write_sessions(d, n, calls):
+def write_sessions(d, n, calls, cwd="/w", prefix="s"):
     """n transcripts in d, each holding calls: (tool name, arguments, errored)."""
     for k in range(n):
-        lines = [{"type": "session", "id": str(k), "timestamp": "2026-10-01T10:00:00.000Z", "cwd": "/w"}]
+        lines = [{"type": "session", "id": str(k), "timestamp": "2026-10-01T10:00:00.000Z", "cwd": cwd}]
         for i, (name, args, err) in enumerate(calls):
             ts = "2026-10-01T10:%02d:00.000Z" % i
             lines.append({"type": "message", "timestamp": ts, "message": {"role": "assistant", "content": [
                 {"type": "toolCall", "id": f"c{i}", "name": name, "arguments": args}]}})
             lines.append({"type": "message", "timestamp": ts, "message": {
                 "role": "toolResult", "toolCallId": f"c{i}", "isError": err, "content": []}})
-        with open(os.path.join(d, f"s{k:02d}.jsonl"), "w") as f:
+        with open(os.path.join(d, f"{prefix}{k:02d}.jsonl"), "w") as f:
             f.write("\n".join(json.dumps(x) for x in lines) + "\n")
 
 
@@ -186,6 +186,20 @@ class Synthetic(unittest.TestCase):
         reads = [("read", {"path": f"/w/f{i}"}, False) for i in range(4)]
         rep = self.analyze(3, [(sync[0], sync[1], True)] + reads + [sync])
         self.assertEqual(group(rep, "failed then retried", "bash: frobctl sync --target")["sessions"], 3)
+
+    def test_cwd_match_keeps_only_matching_sessions(self):
+        sync = [("bash", {"command": "frobctl sync --target a"}, False)]
+        with tempfile.TemporaryDirectory() as d:
+            write_sessions(d, 3, sync, cwd="/home/u/worktrees/Policy-Demo-review/x", prefix="a")
+            write_sessions(d, 2, sync, cwd="/home/u/dev/other", prefix="b")
+            src, since = source(sessions=d), rs.parse_since("2026-09-01")
+            everything, _ = rs.analyze(src, since, min_sessions=1)
+            scoped, _ = rs.analyze(src, since, min_sessions=1, cwd_match=["policy-demo"])
+            either, _ = rs.analyze(src, since, min_sessions=1, cwd_match=["policy-demo", "/other"])
+            none, _ = rs.analyze(src, since, min_sessions=1, cwd_match=["absent"])
+        self.assertEqual([r["stats"]["sessions"] for r in (everything, scoped, either, none)], [5, 3, 5, 0])
+        self.assertEqual(group(scoped, "command shapes", "frobctl sync --target")["examples"],
+                         ["a00.jsonl", "a01.jsonl", "a02.jsonl"])
 
     def test_extensionless_shebang_file_counts(self):
         rep = self.analyze(3, [("write", {"path": "/w/a/bin/helper", "content": HELPER}, False)])
@@ -226,6 +240,12 @@ class Cli(unittest.TestCase):
         self.assertEqual(out, "")
         rows = self.cli("--since", "2026-09-01", "--json", "--top", "1").stdout.splitlines()
         self.assertEqual(len([r for r in rows if '"command shapes"' in r]), 1)
+
+    def test_cwd_match_flag(self):
+        rows = self.cli("--since", "2026-09-01", "--json", "--min-sessions", "1", "--cwd-match", "/nowhere").stdout
+        self.assertEqual(rows, "")
+        rows = self.cli("--since", "2026-09-01", "--json", "--cwd-match", "/W").stdout
+        self.assertIn('"go test -overlay"', rows)
 
     def test_missing_source_is_reported_not_fatal(self):
         p = self.cli("--since", "7d", HWORKS_PI_SESSIONS="/nonexistent/sessions")
