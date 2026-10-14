@@ -198,6 +198,12 @@ class Signals(unittest.TestCase):
         self.assertEqual(ex[0]["timestamp"], "2026-10-01T10:03:00Z")
         self.assertNotIn("after", ex[0])
 
+    def test_excerpts_respect_small_limits(self):
+        text = "The refactor is ready. Should I commit?"
+        for n, want in ((0, "..."), (1, "..."), (2, "..."), (3, "..."), (4, "...?")):
+            self.assertEqual(os_.tail(text, n), want, n)
+            self.assertLessEqual(len(os_.short(text, n)), max(n, 3), n)
+
     def test_context_adds_the_agent_reply_after(self):
         ex = run(context=True)["approval"]["groups"][0]["examples"][0]
         self.assertEqual(ex["text"], "yes")

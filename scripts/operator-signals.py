@@ -145,7 +145,9 @@ def short(text, n):
 def tail(text, n):
     """The last n characters: an agent turn ends with its question or offer."""
     t = re.sub(r"\s+", " ", text or "").strip()
-    return t if len(t) <= n else "..." + t[-max(n - 3, 0):]
+    if len(t) <= n:
+        return t
+    return "..." + t[len(t) - max(n - 3, 0):]
 
 
 def content_text(content):
