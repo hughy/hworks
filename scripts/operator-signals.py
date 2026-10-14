@@ -132,8 +132,8 @@ REDACTIONS = [
     ("bearer", re.compile(r"(?i)\b(bearer\s+)(?!\[redacted:)([A-Za-z0-9._~+/=-]{12,})"), 2),
     ("url-credentials", re.compile(r"(://)([^/\s:@\[\]]+:[^/\s@]+)(@)"), 2),
     ("secret", re.compile(
-        r"(?i)(?<![\w.-])([\w.-]*(?:key|token|secret|password|passwd|pwd)[\w.-]*[\"']?\s*[:=]\s*[\"']?)"
-        r"(?!\[redacted:)([^\s\"',;]{4,})"), 2),
+        r"(?i)(?<![\w.-])([\w.-]*(?:key|token|secret|password|passwd|pwd)[\w.-]*[\"']?\s*[:=]\s*(?P<q>[\"'])?)"
+        r"(?!\[redacted:)((?(q)(?:(?!(?P=q))[^\n]){4,}|[^\s\"',;]{4,}))"), 3),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b"), 0),
 ]
 
@@ -338,9 +338,12 @@ class Turns:
     def stop(self, reason):
         self.last_stop = reason
 
-    def user(self, raw, ts):
+    def user(self, raw, ts, replay=False):
+        """One operator message. A replayed message updates turn state but is not counted."""
         prev_stop, self.last_stop = self.last_stop, None
         self.cur_id = None
+        if replay:
+            return
         dt = to_dt(ts)
         if dt is None or dt < self.since:
             return
@@ -378,8 +381,9 @@ def read_jsonl(path, notes):
 
 def read_claude(path, since, src, notes, seen):
     """read_session for a Claude Code transcript. seen holds message uuids already read, so a
-    resumed session that repeats earlier lines does not count them twice."""
-    cwd, t = None, Turns(since, src)
+    resumed session that repeats earlier lines does not count them twice; repeated lines still
+    replay assistant text and turn ends so the new messages after them get their context."""
+    cwd, t, mine = None, Turns(since, src), set()
     for e in read_jsonl(path, notes):
         if cwd is None and isinstance(e.get("cwd"), str):
             cwd = e["cwd"]
@@ -389,8 +393,11 @@ def read_claude(path, since, src, notes, seen):
             continue
         uid = e.get("uuid")
         if uid is not None:
-            if uid in seen:
+            if uid in mine:
                 continue
+            mine.add(uid)
+        replay = uid is not None and uid in seen
+        if uid is not None:
             seen.add(uid)
         content = m.get("content")
         if e["type"] == "assistant":
@@ -415,7 +422,7 @@ def read_claude(path, since, src, notes, seen):
         if raw.lstrip().startswith(INTERRUPT):
             t.stop("aborted")
             continue
-        t.user(raw, e.get("timestamp"))
+        t.user(raw, e.get("timestamp"), replay)
     return cwd, t.users, redact_ops(t.ops, src)
 
 

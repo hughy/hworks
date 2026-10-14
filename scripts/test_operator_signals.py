@@ -248,6 +248,27 @@ class ClaudeCode(unittest.TestCase):
         self.assertEqual(r["approval"]["groups"][0]["examples"][0]["session"], "claude:-w-claude/c1.jsonl")
 
 
+    def test_resumed_transcript_keeps_context_for_new_messages(self):
+        history = [
+            {"type": "user", "uuid": "u1", "cwd": "/w/r", "timestamp": "2026-10-01T10:00:00Z",
+             "message": {"role": "user", "content": "Add a retry to the fetch helper."}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-10-01T10:01:00Z",
+             "message": {"id": "m1", "role": "assistant", "stop_reason": "end_turn",
+                         "content": [{"type": "text", "text": "Done. Commit?"}]}},
+        ]
+        resumed = history + [{"type": "user", "uuid": "u2", "timestamp": "2026-10-02T10:00:00Z",
+                              "message": {"role": "user", "content": "yes"}}]
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "-w-r"))
+            for name, rows in (("a.jsonl", history), ("b.jsonl", resumed)):
+                with open(os.path.join(d, "-w-r", name), "w") as f:
+                    f.write("\n".join(json.dumps(r) for r in rows) + "\n")
+            r = run(sessions=None, claude=d)
+        self.assertEqual(r["totals"]["harnesses"], {"claude": {"sessions": 2, "operator_messages": 2}})
+        self.assertEqual(keys(r, "approval"), {"yes": (1, 1)})
+        self.assertEqual(r["approval"]["groups"][0]["examples"][0]["session"], "claude:-w-r/b.jsonl")
+
+
 class Codex(unittest.TestCase):
     def read(self, name):
         return os_.read_codex(os.path.join(CODEX, "2026", "10", "05", name), os_.parse_since("2026-09-01"),
@@ -326,6 +347,10 @@ class Redaction(unittest.TestCase):
         self.assertEqual(os_.redact("gh" + "o_" + "x" * 30), "[redacted:github-token]")
         self.assertEqual(os_.redact("github_" + "pat_" + "11ABC" * 6), "[redacted:github-token]")
         self.assertEqual(os_.redact("password: " + "\"hunter22\""), "password: \"[redacted:secret]\"")
+        self.assertEqual(os_.redact("password = " + "\"correct horse battery staple\" ok"),
+                         "password = \"[redacted:secret]\" ok")
+        self.assertEqual(os_.redact("{\"token\": " + "'two words', \"n\": 1}"),
+                         "{\"token\": '[redacted:secret]', \"n\": 1}")
 
     def test_plain_text_is_kept(self):
         for t in ("the primary key is id", "add a token bucket limiter", "see https://example.com/a@b",
