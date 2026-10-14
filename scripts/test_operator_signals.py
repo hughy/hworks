@@ -112,6 +112,12 @@ class Signals(unittest.TestCase):
         self.assertEqual(keys(run(), "status-check"), {"status": (1, 1), "checking progress": (1, 1)})
         self.assertIsNone(os_.status_check(op(
             "What is the status of the deploy pipeline and the rollback plan for tomorrow morning?")))
+        for text in ("status?", "update?", "Any update?", "checking progress", "how's it going?",
+                     "what's the status", "where are we at", "progress check please"):
+            self.assertTrue(os_.status_check(op(text)), text)
+        for text in ("Add a progress bar", "Show git status", "The status is green", "update the README",
+                     "fix the eta display"):
+            self.assertIsNone(os_.status_check(op(text)), text)
 
     def test_correction(self):
         self.assertEqual(keys(run(), "correction"), {"actually": (2, 2), "no": (1, 1)})
@@ -132,6 +138,13 @@ class Signals(unittest.TestCase):
         self.assertEqual([(g["sessions"], g["count"]) for g in groups], [(2, 2)])
         self.assertEqual({e["session"] for e in groups[0]["examples"]},
                          {"proj-a/2026-10-01_s1.jsonl", "proj-b/2026-10-02_s2.jsonl"})
+
+    def test_repeat_survives_heavy_repetition(self):
+        same = os_.shingles("please rebase this branch on main, rerun the full gate, and report each failure")
+        other = os_.shingles("something unrelated entirely about writing the release notes for the week")
+        groups = os_.cluster([same] * 201 + [other], os_.REPEAT_THRESHOLD, max_df=200)
+        self.assertIn(list(range(201)), groups)
+        self.assertIn([201], groups)
 
     def test_repeat_threshold(self):
         a = os_.shingles("one two three four five six seven eight nine ten")

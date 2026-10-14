@@ -18,9 +18,13 @@ Transcripts hold private content: code, ticket text, tokens, names from every re
 ```sh
 python3 <hworks>/scripts/operator-signals.py --since 14d > "$TASK_DIR/signals-<date>.txt"
 <hworks>/scripts/blockers.sh --since 14d > "$TASK_DIR/blockers-<date>.txt"
+grep -rH --include=friction.md -E '^- [0-9]{4}-[0-9]{2}-[0-9]{2} \[[^]]*\] [^|]*\| *operator *\|' \
+  "${HWORKS_TASKS_DIR:-$HOME/.local/state/agent-tasks}" > "$TASK_DIR/friction-<date>.txt"
 ```
 
-`operator-signals.py` reads only sessions the operator started and strips harness injections from each message (its docstring lists the rules; `HWORKS_OPERATOR_SKIP` and `HWORKS_INJECTED_PREFIX`, set in `adapters/local/*.env`, cover harness-specific text). It prints a header with totals, then `approval`, `status-check`, `correction`, `abort`, and `repeat` groups ranked by distinct sessions, each with examples quoting the operator's message and the agent's last text before it, then `skills` and `prompt-shape`. From `blockers.sh`, read the `friction` lines whose caught-by is `operator`: they are the operator's corrections as the agents logged them. If it prints no friction lines, say so in the findings. Say in the findings which sources were missing.
+`operator-signals.py` reads only sessions the operator started and strips harness injections from each message (its docstring lists the rules; `HWORKS_OPERATOR_SKIP` and `HWORKS_INJECTED_PREFIX`, set in `adapters/local/*.env`, cover harness-specific text). It prints a header with totals, then `approval`, `status-check`, `correction`, `abort`, and `repeat` groups ranked by distinct sessions, each with examples quoting the operator's message and the agent's last text before it, then `skills` and `prompt-shape`.
+
+The grep collects the friction lines agents logged with caught-by `operator`: the operator's corrections in the agents' own words. Keep only lines dated inside the window. From `blockers.sh`, read the `open-questions` classes `ambiguous-brief` and `missing-info`: decisions a brief left to the agent. They point at briefs that could carry one more line, or at questions the agent settled correctly on its own, which are not findings. If a source printed nothing or was missing, say so in the findings.
 
 ## Accuracy contract
 

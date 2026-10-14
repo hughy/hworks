@@ -30,8 +30,9 @@ Signals (groups below --min-sessions are hidden, except skills and prompt-shape)
   approval      a bare consent of at most APPROVAL_MAX_WORDS words (yes, ok, go ahead, lgtm,
                 ...) right after an assistant turn that ended (stopReason "stop"): the agent
                 stopped to ask permission. Grouped by the normalized phrase.
-  status-check  a message of at most STATUS_MAX_WORDS words asking for progress. Grouped by
-                the normalized phrase.
+  status-check  a message of at most STATUS_MAX_WORDS words that, normalized, is wholly a
+                progress query (status?, any update, checking progress, how's it going, ...),
+                so "show git status" or "add a progress bar" is not one. Grouped by phrase.
   correction    a message whose opening matches a correction cue (no, actually, wrong, I
                 meant, revert, ...), grouped by cue. A bare "no" counts only alone, before
                 punctuation, or before a word in NO_FOLLOWERS, so "no tests fail" is not one.
@@ -40,7 +41,8 @@ Signals (groups below --min-sessions are hidden, except skills and prompt-shape)
                 "aborted": the operator interrupted a turn to redirect.
   repeat        operator messages of at least REPEAT_MIN_CHARS characters whose word
                 3-shingle sets have Jaccard similarity at least REPEAT_THRESHOLD, grouped
-                transitively; a group must span at least two sessions.
+                transitively; a group must span at least two sessions. Identical shingle sets
+                merge before clustering, so a prompt repeated hundreds of times still groups.
   skills        invocations per skill (sessions and count), and sessions with none.
   prompt-shape  sessions bucketed by the word count of their first operator message
                 (terse 0-10, short 11-40, medium 41-150, long 151+), with median operator
@@ -75,8 +77,12 @@ APPROVAL = re.compile(
     r"lgtm|do it|ship it|sounds good|looks good|commit|commit it|approved|confirm|confirmed|please do|"
     r"yes please|ok go|ok proceed|yes proceed|yes go ahead|yes do it|ok do it|go on)(?: please| thanks)?")
 STATUS = re.compile(
-    r"\b(status|progress|any updates?|update\?|how(?:'s| is) it going|where are we|where are you|how far|"
-    r"are you done|done yet|eta|still (?:working|running)|what's happening|whats happening)\b")
+    r"(?:(?:hey|so|ok|okay|and|quick)\s+)?"
+    r"(?:(?:(?:what's|whats|what is) the |any |a )?(?:status|progress|update|updates|eta)"
+    r"(?: (?:update|check|report|so far|now|please))*"
+    r"|how(?:'s| is) it going|how(?:'s| is) it looking|where are (?:we|you|things)(?: at)?(?: now)?"
+    r"|how far along(?: are you)?|are you done(?: yet)?|done yet|still (?:working|running)"
+    r"|what's happening|whats happening|checking (?:in|progress|status)|check(?:ing)? on progress)")
 CORRECTION = re.compile(
     r"(nope|not that|actually|wrong|that's not|thats not|that is not|stop|don't|dont|do not|instead|"
     r"i said|i meant|why did you|revert|undo)\b")
@@ -221,8 +227,8 @@ def approval(op):
 
 
 def status_check(op):
-    t = op["text"].lower().replace("\u2019", "'")
-    return norm(t) if len(t.split()) <= STATUS_MAX_WORDS and STATUS.search(t) else None
+    t = norm(op["text"])
+    return t if t and len(t.split()) <= STATUS_MAX_WORDS and STATUS.fullmatch(t) else None
 
 
 def correction(op):
@@ -258,7 +264,17 @@ def jaccard(a, b):
 
 
 def cluster(sets, threshold, max_df=200):
-    parent = list(range(len(sets)))
+    """Group indexes of sets whose Jaccard similarity is at least threshold, transitively.
+
+    Identical sets merge first. Among the distinct sets, a shingle shared by more than max_df
+    of them proposes no candidates: it bounds the pairwise work, and a near-duplicate pair is
+    still found through its rarer shingles.
+    """
+    same = defaultdict(list)
+    for i, s in enumerate(sets):
+        same[s].append(i)
+    uniq = list(same)
+    parent = list(range(len(uniq)))
 
     def find(x):
         while parent[x] != x:
@@ -267,21 +283,21 @@ def cluster(sets, threshold, max_df=200):
         return x
 
     index = defaultdict(list)
-    for i, s in enumerate(sets):
+    for i, s in enumerate(uniq):
         for x in s:
             index[x].append(i)
-    for i, s in enumerate(sets):
+    for i, s in enumerate(uniq):
         cand = set()
         for x in s:
             if len(index[x]) <= max_df:
                 cand.update(j for j in index[x] if j > i)
         for j in cand:
-            if find(i) != find(j) and jaccard(s, sets[j]) >= threshold:
+            if find(i) != find(j) and jaccard(s, uniq[j]) >= threshold:
                 parent[find(i)] = find(j)
     groups = defaultdict(list)
-    for i in range(len(sets)):
-        groups[find(i)].append(i)
-    return list(groups.values())
+    for i, s in enumerate(uniq):
+        groups[find(i)].extend(same[s])
+    return [sorted(g) for g in groups.values()]
 
 
 def example(rel, op, max_chars):
