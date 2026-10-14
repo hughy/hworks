@@ -238,6 +238,60 @@ class TaskPrune(unittest.TestCase):
         rep = json.loads(out.stdout)
         self.assertEqual(rep["freed_bytes"], rep["reclaimable_bytes"])
 
+    def test_bulk_named_dir_in_orchestrate_store_kept(self):
+        store = os.path.join(self.idle, "orchestrate", "prog", "outputs", "cache")
+        note = os.path.join(store, "cache-r1-coder.md")
+        write(note, BIG)
+        write(os.path.join(store, "node_modules", "x.js"))
+        rep = self.report("--apply")
+        self.assertTrue(os.path.exists(note))
+        self.assertTrue(os.path.exists(os.path.join(store, "node_modules", "x.js")))
+        self.assertFalse(any("orchestrate" in c["path"] for c in rep["candidates"]))
+
+    def test_bulk_named_dir_holding_task_file_kept(self):
+        task = os.path.join(self.idle, "build-cache", "inner", ".task")
+        dep = os.path.join(self.idle, "build-cache", "inner", "node_modules", "x.js")
+        big = os.path.join(self.idle, "build-cache", "big.bin")
+        write(task)
+        write(dep)
+        write(big, BIG)
+        self.report("--apply")
+        self.assertTrue(os.path.exists(task))
+        self.assertFalse(os.path.exists(dep))
+        self.assertFalse(os.path.exists(big))
+
+    def test_stray_double_dash_dir_is_one_unit(self):
+        stray = os.path.join(self.root, "old--clone")
+        write(os.path.join(stray, "a", "fresh.md"), old=False)
+        write(os.path.join(stray, "b", "big.bin"), BIG)
+        rep = self.report("--apply")
+        self.assertTrue(os.path.exists(os.path.join(stray, "b", "big.bin")))
+        self.assertFalse(any(c["path"].startswith("old--clone/") for c in rep["candidates"]))
+        self.assertEqual(rep["active_units"], 2)
+
+    def test_stray_double_dash_dir_with_only_files_classified(self):
+        write(os.path.join(self.root, "empty--stray", "big.bin"), BIG)
+        rep = self.report()
+        self.assertIn("empty--stray/big.bin", {c["path"] for c in rep["candidates"]})
+        self.assertEqual(rep["idle_units"], 4)
+
+    def test_files_directly_in_repo_and_branch_dirs_classified(self):
+        repo = os.path.join(self.root, "github.com--o--r")
+        write(os.path.join(repo, "big.bin"), BIG)
+        write(os.path.join(repo, "main", "big.bin"), BIG)
+        write(os.path.join(repo, "main", "keep.md"), BIG)
+        rep = self.report("--apply")
+        paths = {c["path"] for c in rep["candidates"]}
+        self.assertIn("github.com--o--r/big.bin", paths)
+        self.assertIn("github.com--o--r/main/big.bin", paths)
+        self.assertTrue(os.path.exists(os.path.join(repo, "main", "keep.md")))
+        self.assertTrue(os.path.isdir(self.idle))
+        self.assertEqual(rep["idle_units"], 5)
+
+    def test_summary_line_names_idle_threshold(self):
+        out = self.run_prune()
+        self.assertIn("units: 3 idle (no file newer than 14d), 1 active", out.stdout)
+
     def test_unsafe_roots_refused(self):
         home = os.path.join(self.base, "home")
         os.makedirs(home)

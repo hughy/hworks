@@ -3,12 +3,16 @@
 # usage: task-prune.sh [--older-than <N>d] [--apply] [--json]
 #
 # Root: $HWORKS_TASKS_DIR, default ${XDG_STATE_HOME:-~/.local/state}/agent-tasks.
-# A unit is <root>/<repo>/<branch>/<slug>, <root>/_misc/<slug>, or any other top-level
-# dir. A unit is idle when its newest file is older than --older-than (default 14d).
+# A unit is <root>/<repo>/<branch>/<slug> (repo is local--<name> or has two or more
+# "--"), <root>/_misc/<slug>, or any other top-level dir. Files directly in a repo,
+# branch, or _misc dir form one more unit per dir. A unit is idle when its newest file
+# is older than --older-than (default 14d).
 # In idle units, candidates are dependency, VCS, and cache dirs (.git, node_modules,
 # .terraform, .venv, venv, __pycache__, .cache, *cache) and files over 1 MiB other than
-# *.md, *.jsonl, and .task. Symlinks are never followed. Default is a dry run;
-# --apply deletes the candidates and then the dirs they leave empty.
+# *.md, *.jsonl, and .task. A bulk dir goes whole, including any .md files in it (those
+# are dependency content), unless it holds a .task file or lies under orchestrate/.
+# Symlinks are never followed. Default is a dry run; --apply deletes the candidates
+# and then the dirs they leave empty.
 set -euo pipefail
 
 older=14d; apply=0; json=0
@@ -17,7 +21,7 @@ while [ $# -gt 0 ]; do
     --older-than) older=${2:?--older-than needs a value}; shift 2 ;;
     --apply) apply=1; shift ;;
     --json) json=1; shift ;;
-    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -96,15 +100,25 @@ def real_dirs(rel):
     return [os.path.join(rel, n) if rel else n for n in names]
 
 
+def is_repo(name):
+    return name.startswith("local--") or name.count("--") >= 2
+
+
 def units():
+    # Yields (path, shallow). A shallow unit is only the regular files directly in path.
     for top in real_dirs(""):
-        if "--" in top or top.startswith("local--"):
+        if is_repo(top):
+            yield top, True
             for branch in real_dirs(top):
-                yield from real_dirs(branch)
+                yield branch, True
+                for slug in real_dirs(branch):
+                    yield slug, False
         elif top == "_misc":
-            yield from real_dirs(top)
+            yield top, True
+            for slug in real_dirs(top):
+                yield slug, False
         else:
-            yield top
+            yield top, False
 
 
 def raise_error(err):
@@ -139,6 +153,41 @@ def newest(unit, unit_fd):
         return float("inf")
 
 
+def direct_files(dir_fd):
+    out = []
+    with os.scandir(dir_fd) as it:
+        names = sorted(e.name for e in it)
+    for n in names:
+        try:
+            st = lstat_at(n, dir_fd)
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode):
+            out.append((n, st))
+    return out
+
+
+def prunable(name, st):
+    return not name.endswith(KEEP_SUFFIXES) and name != ".task" and st.st_size > BIG
+
+
+def bulk_scan(top, dir_fd):
+    # Returns (bytes, holds_task). A dir that cannot be read fully counts as holding a
+    # .task file, so it is never deleted whole.
+    size = 0
+    try:
+        for _, _, fs, dfd in os.fwalk(top, onerror=raise_error, dir_fd=dir_fd):
+            for f in fs:
+                st = lstat_at(f, dfd)
+                if stat.S_ISREG(st.st_mode):
+                    size += st.st_size
+                    if f == ".task":
+                        return size, True
+    except OSError:
+        return size, True
+    return size, False
+
+
 def is_bulk(name):
     low = name.lower()
     return low in BULK_DIRS or low.endswith("cache")
@@ -148,6 +197,7 @@ def candidates(unit, unit_fd):
     found = []
     for d, dirs, fs, dfd in os.fwalk(".", dir_fd=unit_fd):
         here = os.path.normpath(os.path.join(unit, d))
+        in_store = "orchestrate" in os.path.normpath(d).split(os.sep)
         keep = []
         for n in sorted(dirs):
             try:
@@ -155,19 +205,19 @@ def candidates(unit, unit_fd):
                     continue
             except OSError:
                 continue
-            if is_bulk(n):
-                found.append((os.path.join(here, n), sum(st.st_size for st in files(n, dfd)), "dir"))
-            else:
-                keep.append(n)
+            if is_bulk(n) and not in_store:
+                size, holds_task = bulk_scan(n, dfd)
+                if not holds_task:
+                    found.append((os.path.join(here, n), size, "dir"))
+                    continue
+            keep.append(n)
         dirs[:] = keep
         for f in sorted(fs):
-            if f.endswith(KEEP_SUFFIXES) or f == ".task":
-                continue
             try:
                 st = lstat_at(f, dfd)
             except OSError:
                 continue
-            if stat.S_ISREG(st.st_mode) and st.st_size > BIG:
+            if stat.S_ISREG(st.st_mode) and prunable(f, st):
                 found.append((os.path.join(here, f), st.st_size, "file"))
     return found
 
@@ -220,18 +270,33 @@ report = {"root": root, "older_than": os.environ["PRUNE_OLDER"], "apply": apply,
           "candidates": [], "reclaimable_bytes": 0, "idle_units": 0, "active_units": 0}
 if apply:
     report["freed_bytes"] = 0
-for unit in units():
+for unit, shallow in units():
     try:
         unit_fd = open_rel(unit)
     except OSError as err:
         print(f"task-prune: cannot open {unit}: {err}; skipping it", file=sys.stderr)
         continue
     try:
-        if newest(unit, unit_fd) >= cutoff:
+        if shallow:
+            try:
+                direct = direct_files(unit_fd)
+            except OSError as err:
+                print(f"task-prune: cannot scan {unit}: {err}; skipping it", file=sys.stderr)
+                continue
+            if not direct:
+                continue
+            if max(st.st_mtime for _, st in direct) >= cutoff:
+                report["active_units"] += 1
+                continue
+            report["idle_units"] += 1
+            found = [(os.path.join(unit, n), st.st_size, "file")
+                     for n, st in direct if prunable(n, st)]
+        elif newest(unit, unit_fd) >= cutoff:
             report["active_units"] += 1
             continue
-        report["idle_units"] += 1
-        found = candidates(unit, unit_fd)
+        else:
+            report["idle_units"] += 1
+            found = candidates(unit, unit_fd)
     finally:
         os.close(unit_fd)
     for path, size, kind in found:
@@ -258,5 +323,6 @@ else:
         print(f"freed: {report['freed_bytes']} bytes ({human(report['freed_bytes'])})")
     else:
         print("dry run: nothing deleted; rerun with --apply to delete")
-    print(f"units: {report['idle_units']} idle, {report['active_units']} active (older than {report['older_than']})")
+    print(f"units: {report['idle_units']} idle (no file newer than {report['older_than']}), "
+          f"{report['active_units']} active")
 PY
