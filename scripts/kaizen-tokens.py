@@ -19,6 +19,13 @@ Sections:
                 cached prefix was written again, by cause: session start,
                 compaction, model or thinking change, context edit, system prompt change, idle
                 past the cache lifetime, or unexplained.
+  loops         review-loop runs rebuilt from the parent's workflow notifications (key -> child run)
+                and the child sessions: spend by shape (reviewers, rounds) and how each run ended.
+  loop rounds   per round: runs that reached it, its cost, and the blocking findings it found, by
+                origin, counted as review-loop does (a `new` finding after round 1 does not block).
+  second reviewer  rounds where both reviewers left a result: how often only the second blocked.
+  roles         each subagent role by model and thinking level: cost, output, reviews that blocked,
+                and coders whose first review was clean.
   upstream      rows whose owner is upstream, plus unexplained cache rewrites: candidates to
                 raise with that dependency. Flags only; nothing is filed or drafted.
 
@@ -67,7 +74,10 @@ REWRITE_SHARE = 0.5
 REWRITE_MIN_TOKENS = 2000
 DEFAULT_CHARS_PER_TOKEN = 4.0
 CHILD = re.compile(r"/([0-9a-f-]{36})/run-\d+/session\.jsonl$")
-CHILD_NAME = re.compile(r"^subagent-(.+)-[0-9a-f-]{36}-\d+$")
+CHILD_NAME = re.compile(r"^subagent-(.+)-([0-9a-f-]{36})-\d+$")
+WF_CHILD = re.compile(r"\*\*([\w.-]+)\*\*\s*\nWorkflow run: ([0-9a-f-]{36})\s*\nChild run: ([0-9a-f-]{36})")
+CODE_KEY = re.compile(r"^(?:code-1|fix-(\d+))(-retry)?$")
+REVIEW_KEY = re.compile(r"^review-(\d+)-(\d+)$")
 ACTIVE_AGENT = re.compile(r'<active_agent name="([^"]+)"')
 INSTR = re.compile(r'<project_instructions path="([^"]+)">(.*?)</project_instructions>', re.S)
 SKILL = re.compile(r"<skill>(.*?)</skill>", re.S)
@@ -176,7 +186,8 @@ class Owners:
 def read_session(path, since, notes):
     """One transcript: its turns (assistant messages with usage), first system prompt, tool
     results, and the prompt characters sent before the first turn."""
-    s = {"turns": [], "system": None, "tools": None, "results": [], "pre_chars": 0, "cwd": None, "agent": None}
+    s = {"turns": [], "system": None, "tools": None, "results": [], "pre_chars": 0, "cwd": None, "agent": None,
+         "child_id": None, "thinking": None, "structured": None, "wf_children": []}
     calls, pending, bad = {}, [], 0
     try:
         f = open(path, errors="replace")
@@ -199,8 +210,10 @@ def read_session(path, since, notes):
             if t == "session_info" and isinstance(e.get("name"), str):
                 m = CHILD_NAME.match(e["name"])
                 if m and not s["agent"]:
-                    s["agent"] = m.group(1)
+                    s["agent"], s["child_id"] = m.group(1), m.group(2)
                 continue
+            if t == "thinking_level_change" and s["thinking"] is None and not s["turns"]:
+                s["thinking"] = e.get("thinkingLevel")
             if t in EVENTS:
                 pending.append(EVENTS[t])
                 if t == "compaction":
@@ -208,8 +221,11 @@ def read_session(path, since, notes):
                 continue
             m = e.get("message")
             if t != "message" or not isinstance(m, dict):
-                if t == "custom_message" and not s["turns"]:
-                    s["pre_chars"] += text_len(e.get("content"))
+                if t == "custom_message":
+                    if not s["turns"]:
+                        s["pre_chars"] += text_len(e.get("content"))
+                    if isinstance(e.get("content"), str) and "Child run:" in e["content"]:
+                        s["wf_children"] += WF_CHILD.findall(e["content"])
                 continue
             role = m.get("role")
             if role == "system":
@@ -244,6 +260,8 @@ def read_session(path, since, notes):
                 name, args = calls.get(m.get("toolCallId"), (m.get("toolName") or "?", {}))
                 s["results"].append({"turn": len(s["turns"]), "name": name, "args": args,
                                      "chars": text_len(m.get("content"))})
+                if name == "structured_output" and not m.get("isError"):
+                    s["structured"] = args.get("value", args) if isinstance(args.get("value", args), dict) else None
     if bad:
         notes.append(f"{path}: skipped {bad} malformed line(s)")
     return s
@@ -326,6 +344,147 @@ def rewrite_cause(prev, t):
     if prev["dt"] and t["dt"] and (t["dt"] - prev["dt"]).total_seconds() > ttl:
         return "idle past cache lifetime"
     return "unexplained"
+
+
+def session_cost(s):
+    return sum(t["cost"].get("total") or 0 for t in s["turns"] if t["after"])
+
+
+def session_model(s):
+    c = Counter(t["model"] for t in s["turns"])
+    return c.most_common(1)[0][0] if c else "?"
+
+
+def effective_blocking(review, rnd):
+    """Blocking findings as review-loop counts them: after round 1 a blocking finding tagged
+    `new` is downgraded to non-blocking. None when the reviewer left no structured result."""
+    if not isinstance(review, dict):
+        return None
+    out = [f for f in review.get("findings") or [] if isinstance(f, dict) and f.get("severity") == "blocking"
+           and not (rnd > 1 and f.get("origin") == "new")]
+    if review.get("verdict") == "blocked" and not out and rnd == 1:
+        out = [{"origin": "untagged"}]
+    return out
+
+
+def loop_report(sessions, rel, min_sessions):
+    """review-loop runs rebuilt from parent notifications (workflow key -> child run) and child
+    sessions; spend per shape, per round, per second reviewer, and per role."""
+    children = {s["child_id"]: s for s in sessions.values() if s["child_id"]}
+    wfs = defaultdict(dict)
+    for s in sessions.values():
+        for key, wf, cid in s["wf_children"]:
+            if cid in children:
+                wfs[wf][key] = children[cid]
+    loops = {}
+    for wf, kids in wfs.items():
+        if any(CODE_KEY.match(k) for k in kids) and all(CODE_KEY.match(k) or REVIEW_KEY.match(k) for k in kids):
+            loops[wf] = kids
+
+    shape = defaultdict(lambda: {"runs": 0, "costs": [], "coder": 0.0, "review": 0.0, "end": Counter()})
+    per_round = defaultdict(lambda: {"runs": 0, "cost": 0.0, "reviews": 0, "blocked": 0, "origins": Counter(),
+                                     "unread": 0})
+    second = defaultdict(lambda: {"rounds": 0, "only_second": 0, "only_first": 0, "both": 0, "neither": 0,
+                                  "cost": 0.0})
+    first_clean = {}
+    for wf, kids in loops.items():
+        coders, reviews = defaultdict(list), {}
+        for k, s in kids.items():
+            m = CODE_KEY.match(k)
+            if m:
+                coders[int(m.group(1) or 1)].append(s)
+            else:
+                m = REVIEW_KEY.match(k)
+                reviews[(int(m.group(1)), int(m.group(2)))] = s
+        last = max(list(coders) + [r for r, _ in reviews])
+        n_rev = max([i for _, i in reviews] or [0])
+        c_cost = sum(session_cost(s) for ss in coders.values() for s in ss)
+        r_cost = sum(session_cost(s) for s in reviews.values())
+        sh = shape[(n_rev, last)]
+        sh["runs"] += 1
+        sh["costs"].append(c_cost + r_cost)
+        sh["coder"] += c_cost
+        sh["review"] += r_cost
+        finals = [effective_blocking(s["structured"], last) for (r, _), s in reviews.items() if r == last]
+        if not n_rev:
+            sh["end"]["gate only"] += 1
+        elif not finals or any(f is None for f in finals):
+            sh["end"]["unknown"] += 1
+        else:
+            sh["end"]["blocked" if any(finals) else "clean"] += 1
+        for r in range(1, last + 1):
+            pr = per_round[r]
+            pr["runs"] += 1
+            pr["cost"] += sum(session_cost(s) for s in coders.get(r, [])) + sum(
+                session_cost(s) for (rr, _), s in reviews.items() if rr == r)
+            found = False
+            for (rr, _), s in reviews.items():
+                if rr != r:
+                    continue
+                pr["reviews"] += 1
+                eff = effective_blocking(s["structured"], r)
+                if eff is None:
+                    pr["unread"] += 1
+                    continue
+                found = found or bool(eff)
+                pr["origins"].update(f.get("origin") or "untagged" for f in eff)
+            pr["blocked"] += found
+        for r in range(1, last + 1):
+            a, b = reviews.get((r, 1)), reviews.get((r, 2))
+            if not a or not b:
+                continue
+            ea, eb = effective_blocking(a["structured"], r), effective_blocking(b["structured"], r)
+            if ea is None or eb is None:
+                continue
+            row = second[session_model(b)]
+            row["rounds"] += 1
+            row["cost"] += session_cost(b)
+            row["both" if ea and eb else "only_first" if ea else "only_second" if eb else "neither"] += 1
+        firsts = [effective_blocking(s["structured"], 1) for (r, _), s in reviews.items() if r == 1]
+        if coders.get(1) and firsts and all(f is not None for f in firsts):
+            for s in coders[1]:
+                first_clean[id(s)] = not any(firsts)
+
+    roles = defaultdict(lambda: {"sessions": [], "cost": [], "turns": 0, "out": [], "reviews": 0, "blocked": 0,
+                                 "first": 0, "first_clean": 0})
+    for p, s in sessions.items():
+        if s["kind"] == "main" or not s["turns"]:
+            continue
+        row = roles[(s["kind"][len("child:"):], session_model(s), s["thinking"] or "?")]
+        row["sessions"].append(p)
+        row["cost"].append(session_cost(s))
+        row["turns"] += sum(1 for t in s["turns"] if t["after"])
+        row["out"].append(sum(t["output"] for t in s["turns"] if t["after"]))
+        if s["structured"] and "verdict" in s["structured"]:
+            row["reviews"] += 1
+            row["blocked"] += s["structured"].get("verdict") == "blocked"
+        if id(s) in first_clean:
+            row["first"] += 1
+            row["first_clean"] += first_clean[id(s)]
+
+    r2 = lambda x: round(x, 2)
+    out = {
+        "loops": [{"section": "loops", "reviewers": n, "rounds": r, "runs": v["runs"], "cost": r2(sum(v["costs"])),
+                   "median_cost": r2(statistics.median(v["costs"])), "coder_cost": r2(v["coder"]),
+                   "review_cost": r2(v["review"]), "end": dict(sorted(v["end"].items()))}
+                  for (n, r), v in sorted(shape.items(), key=lambda x: -sum(x[1]["costs"]))],
+        "loop rounds": [{"section": "loop rounds", "round": r, "runs": v["runs"], "cost": r2(v["cost"]),
+                         "reviews": v["reviews"], "unread": v["unread"], "rounds_with_blocker": v["blocked"],
+                         "blocking_by_origin": dict(sorted(v["origins"].items()))}
+                        for r, v in sorted(per_round.items())],
+        "second reviewer": [{"section": "second reviewer", "model": m, **{k: (r2(x) if k == "cost" else x)
+                                                                          for k, x in v.items()}}
+                            for m, v in sorted(second.items(), key=lambda x: -x[1]["cost"])],
+        "roles": [{"section": "roles", "agent": a, "model": m, "thinking": th, "sessions": len(v["sessions"]),
+                   "turns": v["turns"], "cost": r2(sum(v["cost"])), "median_cost": r2(statistics.median(v["cost"])),
+                   "median_output": int(statistics.median(v["out"])), "reviews": v["reviews"],
+                   "reviews_blocked": v["blocked"], "first_rounds": v["first"], "first_round_clean": v["first_clean"],
+                   "examples": [rel(x) for x in sorted(v["sessions"])[:3]]}
+                  for (a, m, th), v in sorted(roles.items(), key=lambda x: -sum(x[1]["cost"]))
+                  if len(v["sessions"]) >= min_sessions],
+    }
+    stats = {"children": len(children), "mapped_children": sum(len(k) for k in wfs.values()), "loops": len(loops)}
+    return out, stats
 
 
 def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=None):
@@ -488,11 +647,13 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=
                              "evidence": f"{r['turns']} turns in {r['sessions']} sessions, {r['tokens']} tokens written, "
                                          f"${r['cost']}"})
 
-    stats = {"sessions": len(sessions), "main": sum(1 for s in sessions.values() if s["kind"] == "main"),
+    loop_sections, loop_stats = loop_report(sessions, rel, min_sessions)
+    stats = {"sessions": len(sessions), "main": sum(1 for s in sessions.values() if s["kind"] == "main"), **loop_stats,
              "chars_per_token": round(cpt, 2), "calibrated_on": len(ratios),
              "first_turn_p50": int(statistics.median(firsts)) if firsts else 0, "first_turn_p90": p90(firsts)}
     return {"stats": stats, "totals": totals, "baseline by owner": baseline_owners, "baseline": baseline[:top],
-            "tool results": results[:top], "cache writes": cache, "upstream": upstream[:top]}, notes
+            "tool results": results[:top], "cache writes": cache, **{k: v[:top] if k == "roles" else v for k, v in loop_sections.items()},
+            "upstream": upstream[:top]}, notes
 
 
 def _round(c):
@@ -538,6 +699,31 @@ def print_text(report, since):
     for r in report["cache writes"]:
         print(f"  {r['cause']:26} {r['turns']:>6} turns {r['sessions']:>5} sess {fmt(r['tokens']):>7} tokens "
               f"${r['cost']:.2f}")
+    print(f"\n== loops ==  ({st['loops']} review-loop runs from {st['mapped_children']} of {st['children']} "
+          f"subagent sessions linked to a workflow key)")
+    print(f"{'rev':>3} {'rounds':>6} {'runs':>5} {'cost':>9} {'median':>7} {'coder':>8} {'review':>8}  end")
+    for r in report["loops"]:
+        end = ", ".join(f"{k} {n}" for k, n in r["end"].items())
+        print(f"{r['reviewers']:>3} {r['rounds']:>6} {r['runs']:>5} {r['cost']:>9.2f} {r['median_cost']:>7.2f} "
+              f"{r['coder_cost']:>8.2f} {r['review_cost']:>8.2f}  {end}")
+    print("\n== loop rounds ==  (blocking as review-loop counts it: a `new` finding after round 1 does not block)")
+    print(f"{'round':>5} {'runs':>5} {'cost':>9} {'reviews':>7} {'unread':>6} {'found':>5}  blocking by origin")
+    for r in report["loop rounds"]:
+        org = ", ".join(f"{k} {n}" for k, n in r["blocking_by_origin"].items()) or "-"
+        print(f"{r['round']:>5} {r['runs']:>5} {r['cost']:>9.2f} {r['reviews']:>7} {r['unread']:>6} "
+              f"{r['rounds_with_blocker']:>5}  {org}")
+    print("\n== second reviewer ==  (rounds where both reviewers left a result)")
+    print(f"{'rounds':>6} {'only 2nd':>8} {'only 1st':>8} {'both':>5} {'neither':>7} {'cost':>8}  reviewer-2 model")
+    for r in report["second reviewer"]:
+        print(f"{r['rounds']:>6} {r['only_second']:>8} {r['only_first']:>8} {r['both']:>5} {r['neither']:>7} "
+              f"{r['cost']:>8.2f}  {r['model']}")
+    print("\n== roles ==")
+    print(f"{'sess':>5} {'cost':>9} {'median':>7} {'med.out':>7} {'blocked':>9} {'1st clean':>9}  agent model thinking")
+    for r in report["roles"]:
+        bl = f"{r['reviews_blocked']}/{r['reviews']}" if r["reviews"] else "-"
+        fc = f"{r['first_round_clean']}/{r['first_rounds']}" if r["first_rounds"] else "-"
+        print(f"{r['sessions']:>5} {r['cost']:>9.2f} {r['median_cost']:>7.2f} {fmt(r['median_output']):>7} {bl:>9} "
+              f"{fc:>9}  {r['agent']} {r['model']} {r['thinking']}")
     print("\n== upstream ==  (flags only: nothing filed or drafted)")
     if not report["upstream"]:
         print("  (none)")

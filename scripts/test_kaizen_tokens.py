@@ -56,6 +56,17 @@ class Builder:
         self.lines.append({"type": kind, "timestamp": self.ts(0), **extra})
         return self
 
+    def custom(self, content):
+        self.lines.append({"type": "custom_message", "customType": "notify", "timestamp": self.ts(0), "content": content})
+        return self
+
+    def structured(self, cid, value, error=False):
+        self.turn(usage(inp=5, cr=2000, cw=50), calls=[(cid, "structured_output", {"value": value})])
+        self.lines.append({"type": "message", "timestamp": self.ts(0), "message": {
+            "role": "toolResult", "toolCallId": cid, "toolName": "structured_output", "isError": error,
+            "content": [{"type": "text", "text": "ok"}]}})
+        return self
+
     def write(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
@@ -269,6 +280,101 @@ class Report(unittest.TestCase):
         miss, _ = kt.analyze({"sessions": self.sroot}, kt.ks.parse_since("2026-09-01"), root=self.root,
                              owners=self.owners, cwd_match=["/nowhere"])
         self.assertEqual(miss["stats"]["sessions"], 0)
+
+
+WF = "99999999-0000-0000-0000-000000000000"
+
+
+def child_id(n):
+    return "00000000-0000-0000-0000-%012d" % n
+
+
+def child(agent, n, model="m1", thinking="high", verdict=None, findings=()):
+    b = Builder().system({"preamble": f'<active_agent name="{agent}"/>'}, TOOLS[:1]).user("task")
+    b.event("thinking_level_change", thinkingLevel=thinking)
+    b.event("session_info", name=f"subagent-{agent}-{child_id(n)}-1")
+    b.turn(usage(inp=5, cw=2500, cost_cw=1.0), model=model)
+    if verdict:
+        b.structured("so", {"verdict": verdict, "findings": list(findings)})
+    return b
+
+
+def blocking(origin=None):
+    f = {"severity": "blocking", "file": "a.go", "claim": "c", "evidence": "e"}
+    if origin:
+        f["origin"] = origin
+    return f
+
+
+class Loops(unittest.TestCase):
+    """One review-loop run: round 1 has two reviewers, only the first blocks; round 2's second
+    reviewer raises only a `new` finding, which does not block. Two other workflows, one with a
+    `code-1` key among keys review-loop never uses, are not loops."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        d = cls.tmp.name
+        cls.root = fake_root(d)
+        sroot = os.path.join(d, "sessions")
+        kids = {
+            "code-1": child("coder", 1),
+            "review-1-1": child("reviewer", 2, model="m1", verdict="blocked", findings=[blocking()]),
+            "review-1-2": child("reviewer", 3, model="m2", verdict="ok"),
+            "fix-2": child("coder", 4),
+            "review-2-1": child("reviewer", 5, model="m1", verdict="ok"),
+            "review-2-2": child("reviewer", 6, model="m2", verdict="blocked", findings=[blocking("new")]),
+            "scan": child("explorer", 7),
+            "other:code-1": child("coder", 8),
+            "other:audit": child("worker", 9),
+        }
+        parent = main_session(cls.root)
+        for n, (key, b) in enumerate(kids.items(), 1):
+            wf = WF if key != "scan" else "88888888-0000-0000-0000-000000000000"
+            if key.startswith("other:"):
+                wf, key = "77777777-0000-0000-0000-000000000000", key[len("other:"):]
+            b.write(os.path.join(sroot, "proj", "s0", child_id(n), "run-0", "session.jsonl"))
+            parent.custom(f"Workflow child completed: **{key}**\nWorkflow run: {wf}\nChild run: {child_id(n)}\nOutput: x")
+        parent.custom(f"Workflow child completed: **code-1**\nWorkflow run: {WF}\nChild run: {child_id(1)}\nOutput: x")
+        parent.write(os.path.join(sroot, "proj", "s0.jsonl"))
+        cls.report, _ = kt.analyze({"sessions": sroot}, kt.ks.parse_since("2026-09-01"), min_sessions=1, top=50,
+                                   root=cls.root, owners=kt.Owners(cls.root, rules=[]))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_stats_and_shape(self):
+        st = self.report["stats"]
+        self.assertEqual((st["children"], st["mapped_children"], st["loops"]), (9, 9, 1))
+        [loop] = self.report["loops"]
+        self.assertEqual((loop["reviewers"], loop["rounds"], loop["runs"], loop["end"]), (2, 2, 1, {"clean": 1}))
+        self.assertEqual(loop["coder_cost"], round(2 * (0.01 + 1.0), 2))
+        self.assertEqual(loop["review_cost"], round(4 * (0.01 + 1.0) + 4 * (0.01 + 0.002), 2))
+
+    def test_rounds_apply_the_downgrade(self):
+        r1, r2 = self.report["loop rounds"]
+        self.assertEqual((r1["round"], r1["reviews"], r1["rounds_with_blocker"], r1["blocking_by_origin"]),
+                         (1, 2, 1, {"untagged": 1}))
+        self.assertEqual((r2["round"], r2["rounds_with_blocker"], r2["blocking_by_origin"]), (2, 0, {}))
+
+    def test_second_reviewer(self):
+        [row] = self.report["second reviewer"]
+        self.assertEqual((row["model"], row["rounds"], row["only_first"], row["only_second"], row["neither"]),
+                         ("p/m2", 2, 1, 0, 1))
+
+    def test_roles_carry_model_thinking_and_outcomes(self):
+        rows = {(r["agent"], r["model"], r["thinking"]): r for r in self.report["roles"]}
+        coder = rows[("coder", "p/m1", "high")]
+        self.assertEqual((coder["sessions"], coder["first_rounds"], coder["first_round_clean"]), (3, 1, 0))
+        r2 = rows[("reviewer", "p/m2", "high")]
+        self.assertEqual((r2["reviews"], r2["reviews_blocked"]), (2, 1))
+        self.assertIn(("explorer", "p/m1", "high"), rows)
+
+    def test_missing_structured_result_is_unknown(self):
+        self.assertIsNone(kt.effective_blocking(None, 1))
+        self.assertEqual(kt.effective_blocking({"verdict": "blocked", "findings": [blocking("new")]}, 2), [])
+        self.assertEqual(len(kt.effective_blocking({"verdict": "blocked", "findings": [blocking("prior")]}, 2)), 1)
 
 
 class Cli(unittest.TestCase):
