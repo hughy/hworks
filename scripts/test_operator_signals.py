@@ -159,6 +159,12 @@ class Signals(unittest.TestCase):
         groups = os_.cluster([a] + distractors + [b], os_.REPEAT_THRESHOLD)
         self.assertIn([0, 202], groups)
 
+    def test_size_bound_keeps_exact_threshold_match(self):
+        small = frozenset(f"s{n}" for n in range(14))
+        big = small | frozenset(f"t{n}" for n in range(11))
+        self.assertEqual(os_.jaccard(small, big), 0.56)
+        self.assertEqual(os_.cluster([small, big], 0.56), [[0, 1]])
+
     def test_repeat_threshold(self):
         a = os_.shingles("one two three four five six seven eight nine ten")
         b = os_.shingles("one two three four five six seven eight nine eleven")

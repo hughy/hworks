@@ -295,7 +295,7 @@ def cluster(sets, threshold):
         n = len(s)
         for j in cand:
             m = len(uniq[j])
-            if min(n, m) < threshold * max(n, m) or find(i) == find(j):
+            if min(n, m) / max(n, m) < threshold or find(i) == find(j):
                 continue
             if jaccard(s, uniq[j]) >= threshold:
                 parent[find(i)] = find(j)
