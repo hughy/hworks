@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Render one-on-one findings JSON as one self-contained HTML page.
+"""Render hansei findings JSON as one self-contained HTML page.
 
-usage: one-on-one-page.py <findings.json> [-o page.html]
+usage: hansei-page.py <findings.json> [-o page.html]
 
 Writes to stdout unless -o is given. The page has all CSS and JS inline and makes no external
 requests. Every string from the JSON is HTML-escaped. Each prompt renders in a <pre> with a
@@ -9,7 +9,7 @@ Copy button. The page quotes the operator's prompts: keep it out of repos.
 
 Input schema (keys marked * are required; a missing one exits 2 naming it):
   {
-    "title"*: "One-on-one, 2026-10-13",
+    "title"*: "Hansei, 2026-10-13",
     "window"*: "2026-09-29 to 2026-10-13",
     "summary"*: "two or three sentences",
     "strengths": ["evidence-backed things that work; may be empty"],
@@ -157,12 +157,12 @@ def main(argv=None):
         with open(args.findings) as f:
             data = json.load(f)
     except (OSError, ValueError) as err:
-        print(f"one-on-one-page: {args.findings}: {err}", file=sys.stderr)
+        print(f"hansei-page: {args.findings}: {err}", file=sys.stderr)
         sys.exit(2)
     try:
         html = render(data)
     except MissingKey as err:
-        print(f"one-on-one-page: missing required key: {err}", file=sys.stderr)
+        print(f"hansei-page: missing required key: {err}", file=sys.stderr)
         sys.exit(2)
     if args.output:
         with open(args.output, "w") as f:

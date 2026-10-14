@@ -1,13 +1,13 @@
 ---
-name: one-on-one
-description: Periodic feedback for the operator on how they work with agents. Runs scripts/operator-signals.py over the operator's own prompts (approvals after the agent asked permission, status checks, corrections, interrupts, repeated prompts, skill use, prompt shape), verifies each finding in a few example sessions, and renders a local HTML page with candid findings and copy-paste prompts that queue each fix. Use for "/one-on-one" or a request for feedback on how the operator prompts, uses skills, or works with agents; run every week or two, alongside retro.
+name: hansei
+description: Periodic feedback for the operator on how they work with agents. Runs scripts/operator-signals.py over the operator's own prompts (approvals after the agent asked permission, status checks, corrections, interrupts, repeated prompts, skill use, prompt shape), verifies each finding in a few example sessions, and renders a local HTML page with candid findings and copy-paste prompts that queue each fix. Use for "/hansei" or a request for feedback on how the operator prompts, uses skills, or works with agents; run every week or two, alongside retro.
 ---
 
-# one-on-one
+# hansei
 
-`retro` looks at what agents do. one-on-one looks at what the operator types: where prompts cost turns, where the agent stopped to ask for a yes it did not need, where the same instruction gets retyped. It is upward feedback from the agent team to the person managing it. Run it every week or two over the default 14-day window, alongside `retro`.
+Hansei is the Toyota practice of reflecting on your own shortfalls and committing to change them. `retro` looks at what agents do; hansei looks at what the operator types: where prompts cost turns, where the agent stopped to ask for a yes it did not need, where the same instruction gets retyped. The agents' transcripts supply the evidence. Run it every week or two over the default 14-day window, alongside `retro`.
 
-It keeps no state beyond its task dir: `TASK_DIR=$(<hworks>/scripts/task-dir.sh one-on-one)`, run from the hworks checkout. Each run writes `findings-<YYYY-MM-DD>.json` and `one-on-one-<YYYY-MM-DD>.html` there. Read the previous `findings-*.json` first and fill the `previous` field: which findings went away, which came back, and whether a queued fix landed.
+It keeps no state beyond its task dir: `TASK_DIR=$(<hworks>/scripts/task-dir.sh hansei)`, run from the hworks checkout. Each run writes `findings-<YYYY-MM-DD>.json` and `hansei-<YYYY-MM-DD>.html` there. Read the previous `findings-*.json` first and fill the `previous` field: which findings went away, which came back, and whether a queued fix landed.
 
 ## Privacy
 
@@ -42,8 +42,8 @@ Write each finding as upward feedback: candid, specific, quoting the operator's 
 
 ## Output
 
-1. `$TASK_DIR/findings-<date>.json` in the schema in `scripts/one-on-one-page.py`'s docstring, findings ordered by cost.
-2. `python3 <hworks>/scripts/one-on-one-page.py "$TASK_DIR/findings-<date>.json" -o "$TASK_DIR/one-on-one-<date>.html"`
+1. `$TASK_DIR/findings-<date>.json` in the schema in `scripts/hansei-page.py`'s docstring, findings ordered by cost.
+2. `python3 <hworks>/scripts/hansei-page.py "$TASK_DIR/findings-<date>.json" -o "$TASK_DIR/hansei-<date>.html"`
 3. Open the page locally: `open` on macOS, `xdg-open` elsewhere.
 
-The reply gives the page path and the top three findings. one-on-one changes no code itself; queued fixes run when the operator pastes the prompts.
+The reply gives the page path and the top three findings. hansei changes no code itself; queued fixes run when the operator pastes the prompts.

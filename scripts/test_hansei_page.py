@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(HERE, "one-on-one-page.py")
+SCRIPT = os.path.join(HERE, "hansei-page.py")
 
 BAD = '<b>&"x\'</b>'
 
