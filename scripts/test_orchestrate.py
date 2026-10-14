@@ -158,10 +158,18 @@ class OrchestrateTest(unittest.TestCase):
 
     def test_launch_emits_args_and_brief_with_separate_process_section(self):
         del self.env["ORCHESTRATE_ARGS_SCRIPT"]
-        self.init()
-        self.load([{"id": "A", "title": "Add a thing", "url": "https://example.test/A", "body": "Thing exists.",
-                    "paths": ["src/*"]}])
-        spec = self.launch("A")
+        p = self.cli("init", "--repo", self.repo, "--base", "main", "--worktrees", os.path.join(self.tmp, "wt"),
+                     "--gate", "true")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        units = os.path.join(self.tmp, "units.json")
+        with open(units, "w") as f:
+            json.dump([{"id": "A", "title": "Add a thing", "url": "https://example.test/A", "body": "Thing exists.",
+                        "paths": ["src/*"]}], f)
+        p = self.cli("import", units)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        p = self.cli("launch", "A")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        spec = json.loads(p.stdout)
         self.assertEqual(spec["attempt"], 1)
         self.assertEqual(spec["cwd"], self.repo)
         self.assertTrue(spec["workflow"].endswith("workflows/review-loop.js"))
