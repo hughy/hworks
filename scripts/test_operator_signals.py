@@ -194,8 +194,14 @@ class Signals(unittest.TestCase):
         r = run(examples=1, max_chars=20)
         ex = r["approval"]["groups"][0]["examples"]
         self.assertEqual(len(ex), 1)
-        self.assertEqual(ex[0]["agent"], "The refactor is r...")
+        self.assertEqual(ex[0]["agent"], "... Should I commit?")
         self.assertEqual(ex[0]["timestamp"], "2026-10-01T10:03:00Z")
+        self.assertNotIn("after", ex[0])
+
+    def test_context_adds_the_agent_reply_after(self):
+        ex = run(context=True)["approval"]["groups"][0]["examples"][0]
+        self.assertEqual(ex["text"], "yes")
+        self.assertEqual(ex["after"], "Committed. Anything else?")
 
 
 class Cli(unittest.TestCase):

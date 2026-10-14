@@ -4,10 +4,11 @@
 Read-only. Reads only sessions the operator started (subagent transcripts are skipped) and,
 in them, the messages the operator typed, with harness injections removed. Reports signals
 ranked by distinct sessions, each with counts and examples that quote the operator's message
-and the agent's last text before it. Output goes to stdout and quotes private prompts and
+and the end of the agent's last text before it (with --context, also the start of the agent's
+next text after it). Output goes to stdout and quotes private prompts and
 transcript content: do not redirect it into a repo.
 usage: operator-signals.py [--since YYYY-MM-DD|Nd] [--cwd-match TEXT]... [--min-sessions N]
-                           [--examples N] [--max-chars N] [--json]
+                           [--examples N] [--max-chars N] [--context] [--json]
 
 Sources (each optional; a missing one is reported, not fatal):
   HWORKS_PI_SESSIONS      pi session transcripts, **/*.jsonl (default ~/.pi/agent/sessions)
@@ -141,6 +142,12 @@ def short(text, n):
     return t if len(t) <= n else t[:max(n - 3, 0)] + "..."
 
 
+def tail(text, n):
+    """The last n characters: an agent turn ends with its question or offer."""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    return t if len(t) <= n else "..." + t[-max(n - 3, 0):]
+
+
 def content_text(content):
     if isinstance(content, str):
         return content
@@ -170,8 +177,10 @@ def strip_injections(text, prefix=None):
 
 def read_session(path, since, src, notes):
     """(cwd, user messages after since, operator messages after since). Each operator message
-    carries its text, skills, timestamp, and the preceding assistant's text and stopReason."""
+    carries its text, skills, timestamp, the preceding assistant's text and stopReason, and the
+    next assistant text after it."""
     cwd, users, ops, bad = None, 0, [], 0
+    waiting = []
     last_text, last_stop = "", None
     try:
         f = open(path, errors="replace")
@@ -198,6 +207,9 @@ def read_session(path, since, src, notes):
                 t = content_text(m.get("content")).strip()
                 if t:
                     last_text = t
+                    for op in waiting:
+                        op["after"] = t
+                    waiting = []
                 last_stop = m.get("stopReason")
             elif role == "user":
                 prev_stop, last_stop = last_stop, None
@@ -212,7 +224,8 @@ def read_session(path, since, src, notes):
                 if not text and not skills:
                     continue
                 ops.append({"text": text, "skills": skills, "ts": dt.isoformat().replace("+00:00", "Z"),
-                            "agent": last_text, "prev_stop": prev_stop})
+                            "agent": last_text, "prev_stop": prev_stop, "after": ""})
+                waiting.append(ops[-1])
     if bad:
         notes.append(f"{path}: skipped {bad} malformed line(s)")
     return cwd, users, ops
@@ -305,9 +318,12 @@ def cluster(sets, threshold):
     return [sorted(g) for g in groups.values()]
 
 
-def example(rel, op, max_chars):
-    return {"session": rel, "timestamp": op["ts"], "text": short(op["text"], max_chars),
-            "agent": short(op["agent"], max_chars)}
+def example(rel, op, max_chars, context=False):
+    ex = {"session": rel, "timestamp": op["ts"], "text": short(op["text"], max_chars),
+          "agent": tail(op["agent"], max_chars)}
+    if context:
+        ex["after"] = short(op.get("after", ""), max_chars)
+    return ex
 
 
 def bucket(words):
@@ -317,7 +333,7 @@ def bucket(words):
     return BUCKETS[-1][0]
 
 
-def analyze(src, since, cwd_match=(), min_sessions=2, examples=3, max_chars=240):
+def analyze(src, since, cwd_match=(), min_sessions=2, examples=6, max_chars=240, context=False):
     notes, missing = [], []
     totals = {"sessions": 0, "skipped_subagent": 0, "skipped_out_of_window": 0, "skipped_cwd": 0,
               "skipped_no_operator_text": 0, "operator_messages": 0}
@@ -375,7 +391,7 @@ def analyze(src, since, cwd_match=(), min_sessions=2, examples=3, max_chars=240)
             if len(sess) < min_sessions:
                 continue
             groups.append({"key": key, "sessions": len(sess), "count": len(items),
-                           "examples": [example(r, op, max_chars) for r, op in items[:examples]]})
+                           "examples": [example(r, op, max_chars, context) for r, op in items[:examples]]})
         groups.sort(key=lambda g: (-g["sessions"], -g["count"], g["key"]))
         all_items = [x for items in hits[name].values() for x in items]
         report[name] = {"sessions": len({r for r, _ in all_items}), "count": len(all_items), "groups": groups}
@@ -389,7 +405,7 @@ def analyze(src, since, cwd_match=(), min_sessions=2, examples=3, max_chars=240)
             continue
         repeat_sessions |= sess
         groups.append({"key": short(items[0][1]["text"], 80), "sessions": len(sess), "count": len(items),
-                       "examples": [example(r, op, max_chars) for r, op in items[:examples]]})
+                       "examples": [example(r, op, max_chars, context) for r, op in items[:examples]]})
     groups.sort(key=lambda g: (-g["sessions"], -g["count"], g["key"]))
     report["repeat"] = {"sessions": len(repeat_sessions),
                         "count": sum(g["count"] for g in groups), "groups": groups}
@@ -433,6 +449,8 @@ def print_text(report):
                 print(f"               you: {e['text']}")
                 if e["agent"]:
                     print(f"               agent before: {e['agent']}")
+                if e.get("after"):
+                    print(f"               agent after: {e['after']}")
     sk = report["skills"]
     print(f"\n== skills == ({sk['sessions_without_skill']} sessions with no skill invocation)")
     if not sk["skills"]:
@@ -453,12 +471,14 @@ def main(argv=None):
     ap.add_argument("--since", default="14d", help="YYYY-MM-DD or Nd (default 14d)")
     ap.add_argument("--cwd-match", action="append", default=[], help="keep sessions whose cwd contains TEXT")
     ap.add_argument("--min-sessions", type=int, default=2, help="hide groups seen in fewer sessions (default 2)")
-    ap.add_argument("--examples", type=int, default=3, help="examples per group (default 3)")
+    ap.add_argument("--examples", type=int, default=6, help="examples per group (default 6)")
     ap.add_argument("--max-chars", type=int, default=240, help="excerpt length (default 240)")
+    ap.add_argument("--context", action="store_true",
+                    help="add the start of the agent's next text after each example message")
     ap.add_argument("--json", action="store_true", help="print the report as one JSON object")
     args = ap.parse_args(argv)
     report, notes = analyze(sources(), parse_since(args.since), args.cwd_match, args.min_sessions, args.examples,
-                            args.max_chars)
+                            args.max_chars, args.context)
     if args.json:
         print(json.dumps(report, indent=1))
     else:
