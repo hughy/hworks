@@ -8,11 +8,11 @@ import unittest
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(HERE, "retro-sessions.py")
-FIXTURES = os.path.join(HERE, "testdata", "retro-sessions")
+SCRIPT = os.path.join(HERE, "kaizen-sessions.py")
+FIXTURES = os.path.join(HERE, "testdata", "kaizen-sessions")
 FIXTURE_SESSIONS = ["proj-a/2026-10-01_s1.jsonl", "proj-a/2026-10-02_s2.jsonl", "proj-b/2026-10-03_s3.jsonl"]
 
-spec = importlib.util.spec_from_file_location("retro_sessions", SCRIPT)
+spec = importlib.util.spec_from_file_location("kaizen_sessions", SCRIPT)
 rs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rs)
 
@@ -252,7 +252,7 @@ class Cli(unittest.TestCase):
         self.assertIn("pi sessions: not found (/nonexistent/sessions)", p.stderr)
 
     def test_help_comes_from_the_header(self):
-        self.assertIn("usage: retro-sessions.py [--since YYYY-MM-DD|7d]", self.cli("--help").stdout)
+        self.assertIn("usage: kaizen-sessions.py [--since YYYY-MM-DD|7d]", self.cli("--help").stdout)
 
 
 if __name__ == "__main__":

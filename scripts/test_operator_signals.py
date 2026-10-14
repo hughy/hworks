@@ -70,8 +70,8 @@ class Scope(unittest.TestCase):
 
 class Injections(unittest.TestCase):
     def test_skill_block_is_stripped_and_counted(self):
-        text, skills = os_.strip_injections('<skill name="retro" location="/x">\nbody\n</skill>\n\nrun it now')
-        self.assertEqual((text, skills), ("run it now", ["retro"]))
+        text, skills = os_.strip_injections('<skill name="kaizen" location="/x">\nbody\n</skill>\n\nrun it now')
+        self.assertEqual((text, skills), ("run it now", ["kaizen"]))
         r = run()
         self.assertEqual(r["skills"]["skills"], [{"name": "review-loop", "sessions": 1, "count": 1}])
         self.assertEqual(r["skills"]["sessions_without_skill"], 2)

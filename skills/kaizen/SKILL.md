@@ -1,15 +1,15 @@
 ---
-name: retro
-description: Periodic retrospective over recent agent sessions. Runs scripts/retro-sessions.py (tooling agents keep rewriting) and scripts/blockers.sh (where runs blocked) over a window, verifies each finding in a few example sessions, and sends it to exactly one fix - a new tool built through orchestrate, a routing fix for an ignored tool, a correct pass for a repeated mistake, an upstream issue draft for a harness bug, or a guidance edit - and tracks each action until later sessions show it worked. Use for "/retro" or a request to turn recent session history into fixes; run every week or two.
+name: kaizen
+description: Continuous improvement of the agent system from recent sessions. Runs scripts/kaizen-sessions.py (tooling agents keep rewriting) and scripts/blockers.sh (where runs blocked) over a window, verifies each finding in a few example sessions, and sends it to exactly one fix - a new tool built through orchestrate, a routing fix for an ignored tool, a correct pass for a repeated mistake, an upstream issue draft for a harness bug, or a guidance edit - and tracks each action until later sessions show it worked. Use for "/kaizen" or a request to turn recent session history into fixes; run every week or two.
 ---
 
-# retro
+# kaizen
 
-Agents keep writing the same throwaway tools, hitting the same harness bugs, and asking the same questions. retro turns that history into fixes. Run it every week or two over the default 14-day window; a longer gap only makes the reports noisier.
+Kaizen is the Toyota practice of continuous, incremental improvement of the process; here the process is the agent system: its tools, routing, checks, and guidance. Agents keep writing the same throwaway tools, hitting the same harness bugs, and asking the same questions. kaizen turns that history into fixes. Run it every week or two over the default 14-day window; a longer gap only makes the reports noisier.
 
-Findings about how the operator prompts or works with agents belong to `hansei` (`../hansei/SKILL.md`), which hands its system findings to retro as prompts.
+Findings about how the operator prompts or works with agents belong to `hansei` (`../hansei/SKILL.md`), which hands its system findings to kaizen as prompts.
 
-It keeps no state beyond its task dir: `TASK_DIR=$(<hworks>/scripts/task-dir.sh retro)`, run from the hworks checkout. Each run writes `findings-<YYYY-MM-DD>.md` there. Read the previous one first and, before triage, reconcile each action not yet `effective` or dropped against git, orchestrate records, and upstream drafts, then update its state (see Output). A reviewed branch or open PR has not landed. An upstream draft waiting for the user to file it is `awaiting-user`, not a failed fix.
+It keeps no state beyond its task dir: `TASK_DIR=$(<hworks>/scripts/task-dir.sh kaizen)`, run from the hworks checkout. Each run writes `findings-<YYYY-MM-DD>.md` there. Read the previous one first and, before triage, reconcile each action not yet `effective` or dropped against git, orchestrate records, and upstream drafts, then update its state (see Output). A reviewed branch or open PR has not landed. An upstream draft waiting for the user to file it is `awaiting-user`, not a failed fix.
 
 A finding that comes back after its fix landed means the fix did not work, and goes to a higher level (see Triage). Count a recurrence only from examples dated after the fix landed: report windows overlap, so a window can still hold pre-fix events. A finding that merely drops below the triage thresholds is `unproven`, not `effective`; mark it `effective` only when sessions that exercised the fixed path show the problem is gone.
 
@@ -20,16 +20,16 @@ Transcripts hold private content: code, ticket text, tokens, names from every re
 ## Run the reporters
 
 ```sh
-python3 <hworks>/scripts/retro-sessions.py --since 14d --min-sessions 5 --top 1000 > "$TASK_DIR/sessions-<date>.txt"
+python3 <hworks>/scripts/kaizen-sessions.py --since 14d --min-sessions 5 --top 1000 > "$TASK_DIR/sessions-<date>.txt"
 <hworks>/scripts/blockers.sh --since 14d > "$TASK_DIR/blockers-<date>.txt"
 <hworks>/scripts/task-prune.sh > "$TASK_DIR/prune-<date>.txt"
 ```
 
 `task-prune.sh` is a dry run: it lists bulk (clones, dependency installs, caches, large files) in task dirs idle for 14 days. Report its reclaimable total in the findings. Never pass `--apply`: deletion cannot be undone, so list `<hworks>/scripts/task-prune.sh --apply` for the user to run.
 
-`retro-sessions.py` keeps only its top 15 groups per section by default, which hides most groups above the triage threshold; `--min-sessions 5 --top 1000` prints exactly the groups Triage covers. If a section prints 1000 groups, rerun with a larger `--top`. `blockers.sh` prints every class. Both take `--since YYYY-MM-DD|Nd` and `--json`, and read `adapters/local/*.env` for their sources. A missing source is reported in the output, not fatal; say in the findings file which sources were missing.
+`kaizen-sessions.py` keeps only its top 15 groups per section by default, which hides most groups above the triage threshold; `--min-sessions 5 --top 1000` prints exactly the groups Triage covers. If a section prints 1000 groups, rerun with a larger `--top`. `blockers.sh` prints every class. Both take `--since YYYY-MM-DD|Nd` and `--json`, and read `adapters/local/*.env` for their sources. A missing source is reported in the output, not fatal; say in the findings file which sources were missing.
 
-- `retro-sessions.py` prints four sections ranked by distinct sessions: command shapes, agent-written scripts (with a `where:` split of inline, scratch, and worktree), repeated helpers, and failed-then-retried calls. Each group has `sess`, `calls`, a sample, and example session paths relative to the pi sessions dir. `[exists: <name>]` means the shape names a script or skill in hworks or in `HWORKS_TOOL_DIRS`. Set `HWORKS_TOOL_DIRS` to the companion repo's tool dirs, or it will not flag tools that live there.
+- `kaizen-sessions.py` prints four sections ranked by distinct sessions: command shapes, agent-written scripts (with a `where:` split of inline, scratch, and worktree), repeated helpers, and failed-then-retried calls. Each group has `sess`, `calls`, a sample, and example session paths relative to the pi sessions dir. `[exists: <name>]` means the shape names a script or skill in hworks or in `HWORKS_TOOL_DIRS`. Set `HWORKS_TOOL_DIRS` to the companion repo's tool dirs, or it will not flag tools that live there.
 - `blockers.sh` prints classes as `source / kind / rule` with a count, distinct sessions, and the three latest events, then deferred decisions per repo and branch. Sources are guard blocks (`autonomy`), open questions (`open-questions`, by category), friction (`friction`, by who caught it, then category), subagent runs (`subagents`, `run-history`), and the harness audit log when configured.
 
 ## Accuracy contract

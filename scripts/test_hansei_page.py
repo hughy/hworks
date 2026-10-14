@@ -20,7 +20,7 @@ def findings(mark=BAD):
             "evidence": {"sessions" + mark: 7, "count": "19" + mark},
             "examples": [{"quote": "Q" + mark, "context": "C" + mark}],
             "cost": "K" + mark, "suggestion": "U" + mark,
-            "prompts": [{"label": "L" + mark, "text": "X" + mark}, {"label": "second", "text": "/skill:retro go"}],
+            "prompts": [{"label": "L" + mark, "text": "X" + mark}, {"label": "second", "text": "/skill:kaizen go"}],
         }, {
             "title": "Second finding", "owner": "system", "pattern": "p", "cost": "c", "suggestion": "s",
             "prompts": [{"label": "q", "text": "t"}],
