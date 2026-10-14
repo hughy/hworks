@@ -7,11 +7,13 @@ description: Continuous improvement of the agent system from recent sessions. Ru
 
 Kaizen is the Toyota practice of continuous, incremental improvement of the process; here the process is the agent system: its tools, routing, checks, and guidance. Agents keep writing the same throwaway tools, hitting the same harness bugs, and asking the same questions. kaizen turns that history into fixes. Run it every week or two over the default 14-day window; a longer gap only makes the reports noisier.
 
+The window is 14 days unless the user names another ("/kaizen 3d", "since 2026-10-01"). Pass it to every reporter as `--since`. The session thresholds in Triage (5 for a group, 3 for a blocker class or mistake or guidance gap, 10 for a new tool) are set for 14 days: scale each by the window's days over 14, round up, and never go below 3. A 3-day window uses 3 throughout; a 28-day window uses 10, 6, and 20. Pass the scaled group threshold as `--min-sessions`, and write the window and the thresholds used at the top of the findings file. A short window sees less, so a group below its threshold there is untriaged, not resolved. Friction and open-questions rows without a date are dated by file modification time, so on a short window check each blocker event's own date before counting it.
+
 Findings about how the operator prompts or works with agents belong to `hansei` (`../hansei/SKILL.md`), which hands its system findings to kaizen as prompts.
 
 It keeps no state beyond its task dir: `TASK_DIR=$(<hworks>/scripts/task-dir.sh kaizen)`, run from the hworks checkout. Each run writes `findings-<YYYY-MM-DD>.md` there. Read the previous one first and, before triage, reconcile each action not yet `effective` or dropped against git, orchestrate records, and upstream flags, then update its state (see Output). A reviewed branch or open PR has not landed. An upstream flag waiting for the user to raise it is `awaiting-user`, not a failed fix.
 
-A finding that comes back after its fix landed means the fix did not work, and goes to a higher level (see Triage). Count a recurrence only from examples dated after the fix landed: report windows overlap, so a window can still hold pre-fix events. A finding that merely drops below the triage thresholds is `unproven`, not `effective`; mark it `effective` only when sessions that exercised the fixed path show the problem is gone.
+A finding that comes back after its fix landed means the fix did not work, and goes to a higher level (see Triage). Count a recurrence only from examples dated after the fix landed: report windows overlap, so a window can still hold pre-fix events. A finding that merely drops below the triage thresholds is `unproven`, not `effective`; mark it `effective` only when sessions that exercised the fixed path show the problem is gone. On a window shorter than 14 days, an action whose fixed path no session in the window exercised is `pending` instead: too little evidence to judge, so its state carries to the next run unchanged in meaning. A recurrence after the fix still counts on any window, and so do sessions that show the fix working.
 
 ## Privacy
 
@@ -20,15 +22,15 @@ Transcripts hold private content: code, ticket text, tokens, names from every re
 ## Run the reporters
 
 ```sh
-python3 <hworks>/scripts/kaizen-sessions.py --since 14d --min-sessions 5 --top 1000 > "$TASK_DIR/sessions-<date>.txt"
-python3 <hworks>/scripts/kaizen-tokens.py --since 14d --min-sessions 5 --top 40 > "$TASK_DIR/tokens-<date>.txt"
-<hworks>/scripts/blockers.sh --since 14d > "$TASK_DIR/blockers-<date>.txt"
+python3 <hworks>/scripts/kaizen-sessions.py --since <window> --min-sessions <group threshold> --top 1000 > "$TASK_DIR/sessions-<date>.txt"
+python3 <hworks>/scripts/kaizen-tokens.py --since <window> --min-sessions <group threshold> --top 40 > "$TASK_DIR/tokens-<date>.txt"
+<hworks>/scripts/blockers.sh --since <window> > "$TASK_DIR/blockers-<date>.txt"
 <hworks>/scripts/task-prune.sh > "$TASK_DIR/prune-<date>.txt"
 ```
 
 `task-prune.sh` is a dry run: it lists bulk (clones, dependency installs, caches, large files) in task dirs idle for 14 days. Report its reclaimable total in the findings. Never pass `--apply`: deletion cannot be undone, so list `<hworks>/scripts/task-prune.sh --apply` for the user to run.
 
-`kaizen-sessions.py` keeps only its top 15 groups per section by default, which hides most groups above the triage threshold; `--min-sessions 5 --top 1000` prints exactly the groups Triage covers. If a section prints 1000 groups, rerun with a larger `--top`. `blockers.sh` prints every class. All three take `--since YYYY-MM-DD|Nd` and `--json`, and read `adapters/local/*.env` for their sources. A missing source is reported in the output, not fatal; say in the findings file which sources were missing.
+`kaizen-sessions.py` keeps only its top 15 groups per section by default, which hides most groups above the triage threshold; `--min-sessions <group threshold> --top 1000` prints exactly the groups Triage covers. If a section prints 1000 groups, rerun with a larger `--top`. `blockers.sh` prints every class. All three take `--since YYYY-MM-DD|Nd` and `--json`, and read `adapters/local/*.env` for their sources. A missing source is reported in the output, not fatal; say in the findings file which sources were missing.
 
 - `kaizen-sessions.py` prints four sections ranked by distinct sessions: command shapes, agent-written scripts (with a `where:` split of inline, scratch, and worktree), repeated helpers, and failed-then-retried calls. Each group has `sess`, `calls`, a sample, and example session paths relative to the pi sessions dir. `[exists: <name>]` means the shape names a script or skill in hworks or in `HWORKS_TOOL_DIRS`. Set `HWORKS_TOOL_DIRS` to the companion repo's tool dirs, or it will not flag tools that live there.
 - `kaizen-tokens.py` prints totals (tokens and cost by kind, model, and main session against each subagent), the baseline prompt split into parts (system-prompt sections, instruction files, listed skills, advertised agents, agent prompts, tool schemas) ranked by token-turns, tool results by shape ranked by carried token-turns, cache rewrites by cause, and an `upstream` list. Every baseline row and tool-result row names an owner: `hworks`, `local` (the operator's files outside hworks, such as the companion repo or a project's `AGENTS.md`), or `upstream:<name>`. Token-turns are a part's size times the turns that carried it, which is what it costs in cache reads. Set `HWORKS_OWNER_MAP` to name the harness's own sections and tools, or they show as `upstream:unattributed`.
@@ -44,7 +46,7 @@ Both reporters are heuristics. A group is a lead, not a fact. Before acting on o
 
 ## Triage
 
-Triage every group in at least 5 sessions, every blocker class in at least 3, and every token row above the cut (`--top 40`); expect over a hundred groups in a 14-day window, most of them quick drops. Each lands in exactly one outcome. When a finding seems to fit two: an ignored tool (2) beats a new tool (1); a cause in a dependency (4) beats a check in this repo (3), which would only work around it; and a mistake a check can catch (3) beats a guidance edit (5).
+Triage every group in at least 5 sessions, every blocker class in at least 3 (thresholds here are for 14 days; see the window rule above), and every token row above the cut (`--top 40`); expect over a hundred groups in a 14-day window, most of them quick drops. Each lands in exactly one outcome. When a finding seems to fit two: an ignored tool (2) beats a new tool (1); a cause in a dependency (4) beats a check in this repo (3), which would only work around it; and a mistake a check can catch (3) beats a guidance edit (5).
 
 Order verified findings by observed impact as well as distinct-session recurrence. Read the raw `cost` field of the related `friction.md` entries (review rounds, reverted commits, reruns) and cite it; do not combine unlike units into a score, and record a missing cost as unknown, not zero. A verified finding with high impact may be triaged below the frequency thresholds, with its impact evidence cited in its line.
 
@@ -71,7 +73,7 @@ After picking the outcome, add a companion Detect or Mitigate action only when t
 
 `- [<outcome 1-5, investigate, or drop>] <id> <group or class> | <evidence: sessions, samples checked, existing tool, cost> | <next actor> | <deliverable and its completion check> | <artifact> | <state>`
 
-The id is stable: reuse it in every run while the finding stays open, and give a companion the primary's id as its link. The next actor is an agent role, a skill such as `/skill:correct`, or "user". The artifact points at the branch, commit, or `units.json` entry, or is `upstream:<owner>` for a flag. The state is one of `open`, `awaiting-user`, `implemented` (landed, effect not yet seen), `effective`, or `unproven`. A drop keeps only its group and one-line reason, with no id. For `investigate`, the deliverable is the question and evidence step.
+The id is stable: reuse it in every run while the finding stays open, and give a companion the primary's id as its link. The next actor is an agent role, a skill such as `/skill:correct`, or "user". The artifact points at the branch, commit, or `units.json` entry, or is `upstream:<owner>` for a flag. The state is one of `open`, `awaiting-user`, `implemented` (landed, effect not yet seen), `effective`, `unproven`, or `pending` (window too short to judge). A drop keeps only its group and one-line reason, with no id. For `investigate`, the deliverable is the question and evidence step.
 
 Then act on each outcome:
 
