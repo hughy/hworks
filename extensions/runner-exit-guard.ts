@@ -23,24 +23,26 @@ const hasRunnerSibling = (bootstrap: string) =>
     existsSync(join(dirname(bootstrap), `subagent-runner-bootstrap${ext}`)),
   );
 
-// pi-subagents starts the runner in one of three shapes:
-//   node [--import x] [--experimental-strip-types] .../subagent-runner-bootstrap.js cfg.json
-//   node [--import x] .../jiti/cli.mjs .../subagent-runner-bootstrap.ts cfg.json
-//   pi --no-extensions ... --mode rpc --extension .../binary-bootstrap.js
-// Node consumes its own flags, so the script is argv[1] (argv[2] under jiti).
-// For the binary host, only a real --extension option counts: options before
-// "--", pointing at an absolute binary-bootstrap that sits next to the runner
-// bootstrap. Prompt text that names a file of the same name does not match.
+// The exact argv tail pi-subagents passes when the runner is a pi binary.
+const BINARY_HOST_TAIL = ["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-session", "--mode", "rpc", "--extension"];
+
+// pi-subagents starts the runner in one of two shapes:
+//   node [node flags] .../subagent-runner-bootstrap.js cfg.json
+//   pi --no-extensions --no-skills --no-prompt-templates --no-session --mode rpc --extension .../binary-bootstrap.js
+// Node consumes its own flags, and jiti rewrites argv before it imports the
+// runner, so the script is argv[1]. For the binary host, the whole fixed tail
+// must match and end in an absolute binary-bootstrap that sits next to the
+// runner bootstrap, so prompt text or option values cannot fake it. If
+// pi-subagents changes this shape, the guard stops matching and runs fail with
+// the original error instead of hiding other exits.
 export function isRunnerArgv(argv: readonly string[], exists = hasRunnerSibling): boolean {
   if (isEntry(argv[1], "subagent-runner-bootstrap")) return true;
-  if (/jiti/.test(argv[1] ?? "") && isEntry(argv[2], "subagent-runner-bootstrap")) return true;
-  for (let i = 2; i < argv.length - 1; i++) {
-    if (argv[i] === "--") break;
-    if (argv[i] !== "--extension" && argv[i] !== "-e") continue;
-    const ext = argv[i + 1];
-    if (isAbsolute(ext) && isEntry(ext, "binary-bootstrap") && exists(ext)) return true;
-  }
-  return false;
+  const n = BINARY_HOST_TAIL.length;
+  if (argv.length < n + 3) return false;
+  const tail = argv.slice(-n - 1, -1);
+  if (!tail.every((arg, i) => arg === BINARY_HOST_TAIL[i])) return false;
+  const bootstrap = argv[argv.length - 1];
+  return isAbsolute(bootstrap) && isEntry(bootstrap, "binary-bootstrap") && exists(bootstrap);
 }
 
 export function logPath(env: NodeJS.ProcessEnv = process.env): string {
