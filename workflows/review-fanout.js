@@ -57,6 +57,7 @@ const concurrency = args.concurrency === undefined ? 2 : args.concurrency;
 if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("args.concurrency must be a positive integer");
 if (args.label !== undefined && !nonEmpty(args.label)) throw new Error("args.label must be a non-empty string");
 const label = args.label || "review-fanout";
+if (args.taskDir !== undefined && (typeof args.taskDir !== "string" || !ABSOLUTE.test(args.taskDir))) throw new Error("args.taskDir must be an absolute path");
 
 const defaultSchema = {
   type: "object",
@@ -119,6 +120,10 @@ function reviewItem(target, reviewer, index) {
     outputSchema: schema,
   };
   if (reviewer.model) item.model = reviewer.model;
+  if (args.taskDir) {
+    const name = [label, target.key, reviewer.label].map((s) => s.replace(/[^A-Za-z0-9._-]/g, "-")).join("-");
+    item.output = args.taskDir.replace(/[\\/]+$/, "") + "/" + name + ".md";
+  }
   return item;
 }
 

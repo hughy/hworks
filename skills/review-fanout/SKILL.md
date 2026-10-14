@@ -21,7 +21,8 @@ The workflow is `../../workflows/review-fanout.js`, relative to this file. Pass 
   "task": "text prepended to every target task",
   "schema": { "type": "object" },
   "concurrency": 2,
-  "label": "review-fanout"
+  "label": "review-fanout",
+  "taskDir": "/abs/task-dir"
 }
 ```
 
@@ -31,13 +32,14 @@ The workflow is `../../workflows/review-fanout.js`, relative to this file. Pass 
 - `schema`: replaces the default output schema. Without it, each reviewer returns `{summary, findings: [{severity, file, line?, claim, evidence, fix?}]}` with `severity` `blocking` or `non-blocking`.
 - `concurrency` (default 2): targets reviewed at once. A batch launches every reviewer for each of its targets, so concurrency 2 with two reviewers runs four children. The next batch starts when the whole batch settles. A workflow run launches at most 64 children by default, so keep targets times reviewers within that, or pass a larger `maxSubagentSpawnsPerRun` on the launch.
 - `label`: prefix for child labels in the fleet view.
+- `taskDir`: an absolute directory, usually `$TASK_DIR`. Each reviewer then saves its output to `<taskDir>/<label>-<target key>-<reviewer label>.md`. Without it, reviewers get no `output` path.
 
 Every reviewer child runs in its target's `cwd` with `worktree: false` and the schema as `outputSchema`. The task tells it to stay read-only; the `reviewer` agent has no edit tools.
 
 ## Steps
 
 1. Prepare each target: a PR goes in its own worktree at its head commit; a plan file needs only a `cwd` that contains it. Resolve each `base` to a SHA.
-2. Write the args JSON, then launch: `subagent({ workflow: "<abs>/workflows/review-fanout.js", args: <json>, async: true })`.
+2. Write the args JSON with `taskDir` set to `$TASK_DIR`, then launch: `subagent({ workflow: "<abs>/workflows/review-fanout.js", args: <json>, async: true })`. Append the workflow run id and the mission id (when the launch reports one, as `details.missionId` or a `Mission: <id>` line) to `$TASK_DIR/progress.md`. The mission record owns run state, receipts, and resume; `$TASK_DIR` owns briefs, decisions, friction, and progress notes. Do not copy run status into `progress.md` beyond those ids.
 3. Wait for the completion notice and read the returned value (in the completion message, or `workflow.value` in the run's `status.json`).
 
 ## Result

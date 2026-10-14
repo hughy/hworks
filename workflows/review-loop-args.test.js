@@ -124,3 +124,13 @@ test("the equality warning compares the models both reviewers run", () => {
   });
   assert.doesNotMatch(differ.stderr, /both reviews run on one model/);
 });
+
+test("a task dir is created and emitted as an absolute taskDir", () => {
+  const fx = fixture();
+  const none = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo], { models: pinned });
+  assert.equal("taskDir" in none.json, false);
+  const r = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo, "out/u1"], { models: pinned });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.json.taskDir, path.join(fs.realpathSync(fx.repo), "out", "u1"));
+  assert.ok(fs.statSync(r.json.taskDir).isDirectory());
+});

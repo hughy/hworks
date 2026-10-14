@@ -330,3 +330,37 @@ test("no state global is tolerated", async () => {
 test("source has no nested async functions", () => {
   assert.doesNotMatch(source, /async\s+(function|\(|[A-Za-z_$][\w$]*\s*=>)/);
 });
+
+test("taskDir gives each child a unique absolute output file in it", async () => {
+  const { calls } = await run(
+    {
+      "code-1": coded("a"),
+      "review-1-1": blocked,
+      "review-1-2": clean,
+      "fix-2": { ok: false, error: "gate failed" },
+      "fix-2-retry": coded("b"),
+      "review-2-1": clean,
+      "review-2-2": clean,
+    },
+    { label: "unit: 7", reviewers: 2, taskDir: "/tmp/task" },
+  );
+  assert.deepEqual(calls.map((c) => c.output), [
+    "/tmp/task/unit--7-r1-coder.md",
+    "/tmp/task/unit--7-r1-reviewer-1.md",
+    "/tmp/task/unit--7-r1-reviewer-2.md",
+    "/tmp/task/unit--7-r2-coder.md",
+    "/tmp/task/unit--7-r2-coder-retry.md",
+    "/tmp/task/unit--7-r2-reviewer-1.md",
+    "/tmp/task/unit--7-r2-reviewer-2.md",
+  ]);
+});
+
+test("without taskDir no child gets an output field", async () => {
+  const { calls } = await run({ "code-1": coded("a"), "review-1-1": clean });
+  assert.ok(calls.every((c) => !("output" in c)));
+});
+
+test("a relative or empty taskDir is rejected", async () => {
+  await assert.rejects(run({}, { taskDir: "task" }), /args.taskDir must be an absolute path/);
+  await assert.rejects(run({}, { taskDir: "" }), /args.taskDir must be an absolute path/);
+});

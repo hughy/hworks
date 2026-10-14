@@ -149,6 +149,8 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(args["base"], sh(self.repo, "rev-parse", "main"))
         self.assertEqual(args["reviewers"], 1)
         self.assertEqual(args["gate"], "true")
+        self.assertEqual(args["taskDir"], os.path.realpath(os.path.join(self.store, "outputs", "A")))
+        self.assertTrue(os.path.isdir(args["taskDir"]))
         with open(args["brief"]) as f:
             brief = f.read()
         acceptance, process = brief.split("## Process")

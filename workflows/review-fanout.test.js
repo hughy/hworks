@@ -366,3 +366,23 @@ test("validation fails before any child launches", async () => {
 test("source has no nested async functions", () => {
   assert.doesNotMatch(source, /async\s+(function|\(|[A-Za-z_$][\w$]*\s*=>)/);
 });
+
+test("taskDir gives each reviewer a unique absolute output file in it", async () => {
+  const { calls } = await run(allClean, { taskDir: "/tmp/task/", reviewers: [{ label: "a b" }, { label: "c" }] });
+  assert.deepEqual(calls.map((c) => c.output), [
+    "/tmp/task/review-fanout-pr-1-a-b.md",
+    "/tmp/task/review-fanout-pr-1-c.md",
+    "/tmp/task/review-fanout-plan-a-b.md",
+    "/tmp/task/review-fanout-plan-c.md",
+  ]);
+});
+
+test("without taskDir no reviewer gets an output field", async () => {
+  const { calls } = await run(allClean);
+  assert.ok(calls.every((c) => !("output" in c)));
+});
+
+test("a relative or empty taskDir is rejected", async () => {
+  await assert.rejects(run(allClean, { taskDir: "task" }), /args.taskDir must be an absolute path/);
+  await assert.rejects(run(allClean, { taskDir: "" }), /args.taskDir must be an absolute path/);
+});
