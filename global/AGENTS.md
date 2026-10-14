@@ -5,6 +5,8 @@
 - Do not block a plan on questions you can answer yourself. Settle implementation details, constraints, and tradeoffs from the code, docs, or a quick experiment, then decide and record each decision and its reason in the plan as an assumption the user can overturn.
 - Interview only for what you cannot observe: product direction, preferences, unstated requirements, and one-way-door or irreversible choices. Defer those questions until the work is done (see Autonomy), then batch them in one round at the end of the final reply. Offer options with a recommendation first. Add a round only when an answer opens a new question of the same kind.
 - Never write plans, progress, or review notes into a repo. Scratch files go in `$TASK_DIR`, the directory `~/dev/hworks/scripts/task-dir.sh <task-slug>` prints from inside the repo you are working on. Reuse the same slug when you resume a task.
+- Resolve `$TASK_DIR` once at the start of a task and reuse that path for the whole task, even after switching branches or worktrees: `task-dir.sh` keys the path by branch.
+- Keep only notes in `$TASK_DIR`. Put clones, checkouts, dependency installs, build output, caches, and media in a `mktemp -d` dir under `$TMPDIR`, which the OS clears. Never create dirs directly under the task root.
 
 ## Autonomy
 

@@ -18,7 +18,10 @@ Transcripts hold private content: code, ticket text, tokens, names from every re
 ```sh
 python3 <hworks>/scripts/retro-sessions.py --since 14d --min-sessions 5 --top 1000 > "$TASK_DIR/sessions-<date>.txt"
 <hworks>/scripts/blockers.sh --since 14d > "$TASK_DIR/blockers-<date>.txt"
+<hworks>/scripts/task-prune.sh > "$TASK_DIR/prune-<date>.txt"
 ```
+
+`task-prune.sh` is a dry run: it lists bulk (clones, dependency installs, caches, large files) in task dirs idle for 14 days. Report its reclaimable total in the findings. Never pass `--apply`: deletion cannot be undone, so list `<hworks>/scripts/task-prune.sh --apply` for the user to run.
 
 `retro-sessions.py` keeps only its top 15 groups per section by default, which hides most groups above the triage threshold; `--min-sessions 5 --top 1000` prints exactly the groups Triage covers. If a section prints 1000 groups, rerun with a larger `--top`. `blockers.sh` prints every class. Both take `--since YYYY-MM-DD|Nd` and `--json`, and read `adapters/local/*.env` for their sources. A missing source is reported in the output, not fatal; say in the findings file which sources were missing.
 
