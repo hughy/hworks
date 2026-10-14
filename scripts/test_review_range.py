@@ -79,14 +79,21 @@ class Fixture(unittest.TestCase):
         return subprocess.run([sys.executable, os.path.join(self.root, "scripts", "review-range.py"), *args,
                                "--cwd", self.repo], capture_output=True, text=True, env=e)
 
-    def record(self, base, head, source="review-loop"):
-        r = self.run_script("record", self.task, base, head, source)
+    def record(self, base, head, source="review-loop", trunk="main"):
+        r = self.run_script("record", self.task, trunk, base, head, source)
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def base(self, trunk="main"):
         r = self.run_script("base", self.task, trunk)
         self.assertIn(r.returncode, (0, 3), r.stderr)
         return r.stdout.strip(), r.returncode
+
+    def write(self, path, text, mode="w"):
+        with open(os.path.join(self.repo, path), mode) as f:
+            f.write(text)
+
+    def head_covered(self):
+        return (self.rev("HEAD"), 3)
 
 
 class Base(Fixture):
@@ -99,63 +106,58 @@ class Base(Fixture):
         self.record(self.c[2], self.c[4], "pre-push")
         self.assertEqual(self.base(), (self.c[4], 3))
 
-    def test_first_unreviewed_commit_stops_the_walk(self):
+    def test_a_gap_stops_coverage(self):
         self.record(self.c[1], self.c[3])
         self.assertEqual(self.base(), (self.main, 0))
 
-    def test_rebase_onto_moved_trunk_keeps_coverage(self):
-        self.record(self.main, self.c[4])
+    def test_rebase_past_unrelated_trunk_changes_keeps_coverage(self):
+        self.record(self.main, self.c[2])
+        self.record(self.c[2], self.c[4])
         self.on("main", ("m1", "other.txt", "x\n"))
         self.git("rebase", "-q", "main")
-        self.assertEqual(self.base(), (self.rev("HEAD"), 3))
+        self.assertEqual(self.base(), self.head_covered())
 
-    def test_conflict_that_changes_a_commit_reviews_from_it(self):
-        self.git("checkout", "-q", "-b", "edit", self.c[2])
-        self.commit("c3 edits shared", "shared.txt", "a\nB\nc\n")
-        c4 = self.commit("c4", "g.txt", "g\n")
-        self.git("branch", "-f", "work", c4)
-        self.git("checkout", "-q", "work")
-        self.record(self.main, c4)
-        self.on("main", ("m1 edits shared", "shared.txt", "a\nb2\nc\n"))
-        self.git("rebase", "-q", "main", check=False)
-        with open(os.path.join(self.repo, "shared.txt"), "w") as f:
-            f.write("a\nB2\nc\n")
-        self.git("add", "shared.txt")
-        self.git("rebase", "--continue")
-        new_c2 = self.rev("HEAD~2")
-        self.assertEqual(self.git("log", "-1", "--format=%s", "HEAD~1"), "c3 edits shared")
-        self.assertNotEqual(new_c2, self.c[2])
-        self.assertEqual(self.base(), (new_c2, 0))
+    def test_trunk_change_to_a_touched_file_sends_it_back_to_review(self):
+        self.git("checkout", "-q", "-B", "work", self.c[2])
+        self.commit("c3 edits shared", "shared.txt", "a\nb\nC\n")
+        self.record(self.main, "HEAD")
+        self.on("main", ("m1 edits shared", "shared.txt", "A\nb\nc\n"))
+        self.git("rebase", "-q", "main")
+        self.assertEqual(self.base(), (self.rev("main"), 0))
 
     def test_squash_merged_lower_pr_then_stack_rebase(self):
-        lower_tip = self.c[2]
-        self.git("branch", "lower", lower_tip)
-        self.record(lower_tip, self.c[4], "pre-push")
+        self.git("branch", "lower", self.c[2])
+        self.record(self.c[2], self.c[3], "pre-push", trunk="lower")
+        self.record(self.c[3], self.c[4], "pre-push", trunk="lower")
         self.assertEqual(self.base("lower"), (self.c[4], 3))
         self.git("checkout", "-q", "main")
         self.git("merge", "-q", "--squash", "lower")
         self.git("commit", "-q", "-m", "lower (squash)")
         self.git("checkout", "-q", "work")
         self.git("rebase", "-q", "--onto", "main", "lower", "work")
-        self.assertEqual(self.base(), (self.rev("HEAD"), 3))
+        self.assertEqual(self.base(), self.head_covered())
 
     def test_clean_trunk_merge_is_covered(self):
         self.record(self.main, self.c[4])
         self.on("main", ("m1", "other.txt", "x\n"))
         self.git("merge", "-q", "--no-ff", "--no-edit", "main")
-        self.assertEqual(self.base(), (self.rev("HEAD"), 3))
+        self.assertEqual(self.base(), self.head_covered())
 
-    def test_merge_with_conflict_resolution_is_reviewed(self):
+    def test_ours_merge_that_drops_trunk_code_is_reviewed(self):
+        self.record(self.main, self.c[4])
+        self.on("main", ("m1 adds security", "security.py", "check()\n"))
+        self.git("merge", "-q", "-s", "ours", "--no-edit", "main")
+        self.assertEqual(self.base(), (self.rev("main"), 0))
+
+    def test_conflict_resolved_to_our_side_is_reviewed(self):
         self.commit("c5 edits shared", "shared.txt", "a\nW\nc\n")
         self.record(self.main, "HEAD")
-        before = self.rev("HEAD")
         self.on("main", ("m1 edits shared", "shared.txt", "a\nM\nc\n"))
         self.git("merge", "-q", "--no-edit", "main", check=False)
-        with open(os.path.join(self.repo, "shared.txt"), "w") as f:
-            f.write("a\nWM\nc\n")
+        self.git("checkout", "--ours", "shared.txt")
         self.git("add", "shared.txt")
         self.git("commit", "-q", "--no-edit")
-        self.assertEqual(self.base(), (before, 0))
+        self.assertEqual(self.base(), (self.rev("main"), 0))
 
     def test_merge_of_a_non_trunk_branch_is_reviewed(self):
         self.record(self.main, self.c[4])
@@ -168,7 +170,47 @@ class Base(Fixture):
     def test_empty_commit_needs_no_review(self):
         self.record(self.main, self.c[4])
         self.commit("empty")
-        self.assertEqual(self.base(), (self.rev("HEAD"), 3))
+        self.assertEqual(self.base(), self.head_covered())
+
+    def test_reapplying_a_change_the_review_saw_canceled_is_reviewed(self):
+        bad = self.commit("disable auth", "shared.txt", "a\nOFF\nc\n")
+        fixed = self.commit("restore auth", "shared.txt", "a\nb\nc\n")
+        self.record(self.main, fixed)
+        self.git("cherry-pick", bad)
+        self.assertEqual(self.base(), (fixed, 0))
+
+    def test_whitespace_only_rewrite_is_reviewed(self):
+        self.record(self.main, self.c[4])
+        self.write("auth.py", "def ok(admin):\n    if admin:\n        return True\n    return False\n")
+        self.git("add", "auth.py")
+        self.git("commit", "-q", "-m", "auth")
+        self.record(self.main, "HEAD")
+        self.git("checkout", "-q", "-B", "work", self.c[4])
+        self.write("auth.py", "def ok(admin):\n    if admin:\n    return True\n    return False\n")
+        self.git("add", "auth.py")
+        self.git("commit", "-q", "-m", "auth")
+        self.assertEqual(self.base(), (self.c[4], 0))
+
+    def test_ignored_submodule_config_does_not_hide_a_gitlink_change(self):
+        self.record(self.main, self.c[4])
+        self.git("update-index", "--add", "--cacheinfo", f"160000,{self.c[1]},sub")
+        self.git("commit", "-q", "-m", "add gitlink")
+        self.git("config", "diff.ignoreSubmodules", "all")
+        self.assertEqual(self.base(), (self.c[4], 0))
+
+    def test_a_failing_git_diff_is_an_error_not_coverage(self):
+        self.record(self.main, self.c[2])
+        self.git("config", "diff.context", "bogus")
+        r = self.run_script("base", self.task, "main")
+        self.assertEqual((r.returncode, r.stdout), (2, ""))
+        self.assertIn("git diff", r.stderr)
+
+    def test_non_utf8_content_is_hashed(self):
+        self.write("latin.txt", b"caf\xe9\n", "wb")
+        self.git("add", "latin.txt")
+        self.git("commit", "-q", "-m", "latin")
+        self.record(self.main, "HEAD")
+        self.assertEqual(self.base(), self.head_covered())
 
     def test_reviewed_commit_elsewhere_does_not_cover(self):
         self.git("checkout", "-q", "-b", "side", self.c[2])
@@ -178,28 +220,33 @@ class Base(Fixture):
         self.assertEqual(self.base(), (self.main, 0))
 
     def test_record_rejects_bad_ranges(self):
-        r = self.run_script("record", self.task, self.c[3], self.c[1], "x")
+        r = self.run_script("record", self.task, "main", self.c[3], self.c[1], "x")
         self.assertEqual(r.returncode, 2)
         self.assertIn("not an ancestor", r.stderr)
-        r = self.run_script("record", self.task, "nope", self.c[1], "x")
+        r = self.run_script("record", self.task, "main", "nope", self.c[1], "x")
         self.assertEqual(r.returncode, 2)
         self.assertFalse(os.path.exists(os.path.join(self.task, "reviewed.tsv")))
 
-    def test_record_writes_one_line_per_commit(self):
-        self.commit("empty")
-        self.record("main", "HEAD")
+    def test_record_adds_the_whole_range_once_covered(self):
+        self.record(self.main, self.c[2])
+        self.record(self.c[2], self.c[4])
         with open(os.path.join(self.task, "reviewed.tsv")) as f:
             rows = [line.rstrip("\n").split("\t") for line in f]
-        self.assertEqual([r[1] for r in rows], self.c[1:] + [self.rev("HEAD")])
-        self.assertTrue(all(len(r[0]) == 40 for r in rows[:4]))
-        self.assertEqual(rows[4][0], "-")
-        self.assertEqual({r[2] for r in rows}, {"review-loop"})
+        self.assertEqual([(r[0], r[1]) for r in rows],
+                         [(self.main, self.c[2]), (self.c[2], self.c[4]), (self.main, self.c[4])])
+        self.assertTrue(all(len(r[2]) == 64 and r[3] == "review-loop" for r in rows))
+
+    def test_old_ledger_rows_are_ignored(self):
+        os.makedirs(self.task)
+        with open(os.path.join(self.task, "reviewed.tsv"), "w") as f:
+            f.write(f"{self.main}\t{self.c[4]}\tpre-push\n")
+        self.assertEqual(self.base(), (self.main, 0))
 
 
 class Args(Fixture):
-    def args(self, effort, **kw):
-        r = self.run_script("args", self.task, "main", effort, "Add retries to the client.", **kw)
-        return r
+    def args(self, effort, label=None, **kw):
+        extra = ["--label", label] if label else []
+        return self.run_script("args", self.task, "main", effort, "Add retries to the client.", *extra, **kw)
 
     def test_standard_runs_one_reviewer_over_the_unreviewed_range(self):
         self.record(self.main, self.c[2])
@@ -207,7 +254,8 @@ class Args(Fixture):
         self.assertEqual(r.returncode, 0, r.stderr)
         a = json.loads(r.stdout)
         [t] = a["targets"]
-        self.assertEqual((t["key"], t["base"], t["cwd"]), ("branch", self.c[2], os.path.realpath(self.repo)))
+        self.assertEqual((t["key"], t["base"], t["head"], t["cwd"]),
+                         ("branch", self.c[2], self.c[4], os.path.realpath(self.repo)))
         self.assertIn("Add retries to the client.", t["task"])
         self.assertIn(f"Review only the commits after {self.c[2][:12]}", t["task"])
         self.assertEqual(a["reviewers"], [{"agent": "reviewer", "label": "reviewer"}])
@@ -238,6 +286,16 @@ class Args(Fixture):
         r = self.args("standard")
         self.assertEqual((r.returncode, r.stdout), (3, ""))
         self.assertIn("already passed review", r.stderr)
+
+    def test_record_hint_runs_and_records_the_reviewed_head(self):
+        self.task = os.path.join(self.tmp, "task dir")
+        r = self.args("standard", label="pre merge")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        cmd = r.stderr.split("run: ", 1)[1].strip()
+        self.commit("fix after review", "fix.txt", "f\n")
+        done = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.base(), (self.c[4], 0))
 
     def test_bad_input(self):
         self.assertEqual(self.args("huge").returncode, 2)
