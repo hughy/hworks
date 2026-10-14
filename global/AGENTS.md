@@ -16,6 +16,12 @@
 - To undo your own change, edit it back in place or `git revert` the commit. For a before/after check, read the old version with `git show <rev>:<file>`, or check the old commit out in a temporary worktree (`git worktree add`). Do not use `git stash` for it: every worktree of a repo shares one stash list, so a parallel agent can pop your entry or you theirs. Never discard work with `git reset --hard`, `git checkout -- <path>`, or `git restore <path>`: they also wipe edits you did not make or did not mean to touch.
 - On pi, `autonomy.ts` (from `~/dev/hworks/extensions/`, linked into `~/.pi/agent/extensions/`) blocks `ask_user_question` and the git commands that destroy history or uncommitted work (`reset --hard`, force-push, `branch -D`, `clean -f`, `stash drop`, `worktree remove --force`). It does not catch `rm` or `checkout --`; judge those yourself. A blocked call returns its reason; follow it instead of retrying the call another way.
 
+## Friction
+
+- When the operator corrects your work, a reviewer, test, or CI catches a defect in it, or you redo work because an assumption was wrong, add one line to `$TASK_DIR/friction.md` at that moment: `- <YYYY-MM-DD> [<category>] <what happened> | <caught by> | <cost> | <what would have helped>`.
+- Caught by is one of `operator`, `reviewer`, `test`, `ci`, `self`. Category is one of `missed-defect`, `wrong-assumption`, `test-gap`, `toolchain`, `environment`, `spec-gap`, `missing-tool`; add a new one only when none fits. Cost is what you observed (review rounds, reverted commits, reruns), not a time estimate. What would have helped names a tool, doc, check, or brief line, or is `-`.
+- `hworks/scripts/blockers.sh` groups these lines, and retrospectives read them to learn what agents missed.
+
 ## Prose
 
 - Omit needless words. Prefer active voice, short words ("use" not "utilize"), and concrete claims over hedges ("kind of", "a number of").
