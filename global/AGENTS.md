@@ -41,6 +41,11 @@
 - Concision means cutting filler, not insight. Protect the sentence that states a non-obvious implication, a key distinction, or a correction to the question's premise — even when it reads as "extra." Cut hedges, restatements, and ceremony; never cut the one idea that reorganizes the reader's understanding.
 - Exception: revert to full, careful prose for security warnings, destructive or irreversible actions, and anything where brevity risks misreading.
 
+## Tool hygiene
+
+- Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands as background processes that wake you on exit or on a log match, and use a PR tracker, not polling, for CI and reviews.
+- Read files with `hashread` and an `offset`/`limit` range. Pipe any command that may print more than 200 lines through `head`, `tail`, or a filter (`rg -m`, `git diff --stat`, `jq`).
+
 ## Comments
 
 - Default to no comments. Only add one when the WHY is non-obvious: a hidden constraint, a subtle invariant, or behavior that would surprise a reader.
