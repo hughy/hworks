@@ -10,8 +10,8 @@
 #
 # <branch> is the branch lowercased with / as --. When that loses information (a character
 # outside [a-z0-9._/-], a --, -/ or /- substring, or a leading . or -), it gets - plus the first
-# 8 hex chars of `git hash-object --stdin` of the raw branch name, so distinct branches never
-# share a dir.
+# 8 hex chars of the SHA-1 (sha1sum or shasum) of the raw branch name, so distinct branches never
+# share a dir. -/ and /- count as lossy because a-/b and a/-b both encode to a---b.
 # A newly created task dir gets a .task file of key=value lines: created, repo, branch, slug, cwd.
 set -euo pipefail
 
@@ -22,6 +22,8 @@ lossless() {
     *[!a-z0-9._/-]* | *--* | *-/* | */-* | [.-]*) return 1 ;;
   esac
 }
+
+sha1() { if command -v sha1sum >/dev/null; then sha1sum; else shasum -a 1; fi; }
 
 slug=$(clean "${1:-}")
 [ -n "$slug" ] || { echo "usage: task-dir.sh <task-slug> [path]" >&2; exit 2; }
@@ -41,7 +43,7 @@ if top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null); then
   branch=$(git -C "$dir" branch --show-current 2>/dev/null || true)
   [ -n "$branch" ] || branch=detached-$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo unborn)
   bdir=$(clean "$branch")
-  lossless "$branch" || bdir=$bdir-$(printf '%s' "$branch" | git hash-object --stdin | cut -c1-8)
+  lossless "$branch" || bdir=$bdir-$(printf '%s' "$branch" | sha1 | cut -c1-8)
   out="$root/$repo/$bdir/$slug"
   cwd=$top
 else
@@ -50,8 +52,9 @@ else
   cwd=$(cd "$dir" 2>/dev/null && pwd -P) || cwd=$dir
 fi
 
-if [ ! -d "$out" ]; then
-  mkdir -p "$out"
+mkdir -p "$(dirname "$out")"
+# Only the caller whose mkdir creates the leaf writes .task, so concurrent calls cannot clobber it.
+if mkdir "$out" 2>/dev/null; then
   printf 'created=%s\nrepo=%s\nbranch=%s\nslug=%s\ncwd=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$repo" "$branch" "$slug" "$cwd" > "$out/.task"
 fi

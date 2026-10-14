@@ -1,3 +1,4 @@
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -30,8 +31,10 @@ class TaskDirTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_script(self, *args, env=None):
-        r = subprocess.run(["bash", SCRIPT, *args], env=env or self.env, capture_output=True, text=True, check=True)
+    def run_script(self, *args, env=None, cwd=None):
+        r = subprocess.run(
+            ["bash", SCRIPT, *args], env=env or self.env, cwd=cwd, capture_output=True, text=True, check=True
+        )
         return r.stdout.strip()
 
     def on_branch(self, name, slug="t"):
@@ -86,11 +89,37 @@ class TaskDirTest(unittest.TestCase):
 
     def test_suffix_deterministic(self):
         first = self.on_branch("Feat")
-        expected = subprocess.run(
-            ["git", "hash-object", "--stdin"], input="Feat", capture_output=True, text=True, check=True
-        ).stdout[:8]
+        expected = hashlib.sha1(b"Feat").hexdigest()[:8]
         self.assertEqual(os.path.basename(os.path.dirname(first)), "feat-" + expected)
         self.assertEqual(self.run_script("t", self.repo), first)
+
+    def test_suffix_independent_of_caller_repo(self):
+        first = self.on_branch("Feat")
+        caller = os.path.join(self.base, "sha256")
+        os.makedirs(caller)
+        git(caller, "init", "-q", "--object-format=sha256")
+        self.assertEqual(self.run_script("t", self.repo, cwd=caller), first)
+
+    def test_concurrent_creator_marker_kept(self):
+        out = os.path.join(self.state, "agent-tasks", "github.com--owner--proj", "main", "t")
+        shims = os.path.join(self.base, "bin")
+        os.makedirs(shims)
+        real = subprocess.run(["sh", "-c", "command -v mkdir"], capture_output=True, text=True).stdout.strip()
+        shim = os.path.join(shims, "mkdir")
+        with open(shim, "w") as f:
+            f.write(
+                "#!/bin/sh\n"
+                'for a; do last=$a; done\n'
+                'if [ "$last" = "$RACE_DIR" ] && [ ! -e "$last" ]; then\n'
+                f'  {real} -p "$last" && echo sentinel > "$last/.task"\n'
+                "fi\n"
+                f'exec {real} "$@"\n'
+            )
+        os.chmod(shim, 0o755)
+        env = dict(self.env, PATH=shims + os.pathsep + self.env["PATH"], RACE_DIR=out)
+        self.assertEqual(self.run_script("t", self.repo, env=env), out)
+        with open(os.path.join(out, ".task")) as f:
+            self.assertEqual(f.read(), "sentinel\n")
 
     def test_marker_written_once(self):
         out = self.on_branch("feat/x")
