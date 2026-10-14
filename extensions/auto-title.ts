@@ -33,16 +33,23 @@ export function messages(entries: any[]): { role: "user" | "assistant"; text: st
   return out;
 }
 
-// pi-acp names a new session with the first 80 characters of the first prompt.
+// pi-acp names a new session with the first 80 characters of the first prompt's text blocks.
 export function promptTitle(text: string): string {
   return Array.from(normalize(text)).slice(0, 80).join("");
+}
+
+// pi-acp appends "[Context] <uri>" lines for @mentions and attached files, and joins text blocks without a space, so
+// the stored first message can run past the title it derived. Compare the name as a whitespace-free prefix.
+const squash = (s: string) => s.replace(/\s+/gu, "");
+function isPromptTitle(name: string, firstUser: string): boolean {
+  return name === promptTitle(firstUser) || squash(firstUser).startsWith(squash(name));
 }
 
 export function canReplace(current: string | undefined, firstUser: string | undefined, ours: string | undefined): boolean {
   const name = (current ?? "").trim();
   if (!name) return true;
   if (ours && name === ours) return true;
-  return !!firstUser && name === promptTitle(firstUser);
+  return !!firstUser && isPromptTitle(name, firstUser);
 }
 
 export function cleanTitle(raw: string): string | undefined {
