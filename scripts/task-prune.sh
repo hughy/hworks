@@ -223,18 +223,25 @@ def candidates(unit, unit_fd):
 
 
 def rmtree_at(name, parent_fd):
+    # Returns False when a .task file was kept, which also keeps its ancestors. A task
+    # resumed after the scan can write one into a dir already chosen for deletion.
     fd = os.open(name, DIR_FLAGS, dir_fd=parent_fd)
+    whole = True
     try:
         with os.scandir(fd) as it:
             entries = [(e.name, e.is_dir(follow_symlinks=False)) for e in it]
         for n, is_dir in entries:
             if is_dir:
-                rmtree_at(n, fd)
+                whole = rmtree_at(n, fd) and whole
+            elif n == ".task":
+                whole = False
             else:
                 os.unlink(n, dir_fd=fd)
     finally:
         os.close(fd)
-    os.rmdir(name, dir_fd=parent_fd)
+    if whole:
+        os.rmdir(name, dir_fd=parent_fd)
+    return whole
 
 
 def delete(path, kind, unit):
@@ -248,7 +255,8 @@ def delete(path, kind, unit):
             fds.append(os.open(name, DIR_FLAGS, dir_fd=fds[-1]))
         st = lstat_at(rel[-1], fds[-1])
         if kind == "dir" and stat.S_ISDIR(st.st_mode):
-            rmtree_at(rel[-1], fds[-1])
+            if bulk_scan(rel[-1], fds[-1])[1] or not rmtree_at(rel[-1], fds[-1]):
+                return False
         elif kind == "file" and stat.S_ISREG(st.st_mode):
             os.unlink(rel[-1], dir_fd=fds[-1])
         else:

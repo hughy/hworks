@@ -48,6 +48,27 @@ def delete(path, kind, unit):
     return _real_delete(path, kind, unit)
 """
 
+TASK_AFTER_SCAN_WRAPPER = """
+_real_candidates = candidates
+def candidates(unit, unit_fd):
+    found = _real_candidates(unit, unit_fd)
+    for path, _, kind in found:
+        if os.path.basename(path) == "build-cache":
+            open(os.path.join(os.environ["PRUNE_ROOT"], path, ".task"), "w").close()
+    return found
+"""
+
+TASK_AFTER_RESCAN_WRAPPER = """
+_real_bulk_scan = bulk_scan
+_scans = {}
+def bulk_scan(top, dir_fd):
+    r = _real_bulk_scan(top, dir_fd)
+    _scans[top] = _scans.get(top, 0) + 1
+    if top == "build-cache" and _scans[top] == 2:
+        open(os.path.join(os.environ["TASK_DIR_HOOK"], ".task"), "w").close()
+    return r
+"""
+
 
 def embedded_python():
     with open(SCRIPT) as f:
@@ -259,6 +280,31 @@ class TaskPrune(unittest.TestCase):
         self.assertTrue(os.path.exists(task))
         self.assertFalse(os.path.exists(dep))
         self.assertFalse(os.path.exists(big))
+
+    def run_hooked(self, wrapper, **env_extra):
+        src = embedded_python().replace("\nreport = {", wrapper + "\nreport = {", 1)
+        env = dict(os.environ, PRUNE_ROOT=self.root, PRUNE_OLDER="14d", PRUNE_APPLY="1",
+                   PRUNE_JSON="1", **env_extra)
+        out = subprocess.run(["python3", "-c", src], capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_task_file_created_after_scan_kept_on_apply(self):
+        cache = os.path.join(self.idle, "build-cache")
+        write(os.path.join(cache, "old.bin"), 1024)
+        rep = self.run_hooked(TASK_AFTER_SCAN_WRAPPER)
+        self.assertTrue(os.path.exists(os.path.join(cache, ".task")))
+        self.assertTrue(os.path.exists(os.path.join(cache, "old.bin")))
+        self.assertIn(os.path.relpath(cache, self.root), [c["path"] for c in rep["candidates"]])
+        self.assertEqual(rep["freed_bytes"], rep["reclaimable_bytes"] - 1024)
+
+    def test_rmtree_never_unlinks_task_file(self):
+        inner = os.path.join(self.idle, "build-cache", "inner")
+        write(os.path.join(inner, "old.bin"), 1024)
+        rep = self.run_hooked(TASK_AFTER_RESCAN_WRAPPER, TASK_DIR_HOOK=inner)
+        self.assertTrue(os.path.exists(os.path.join(inner, ".task")))
+        self.assertFalse(os.path.exists(os.path.join(inner, "old.bin")))
+        self.assertEqual(rep["freed_bytes"], rep["reclaimable_bytes"] - 1024)
 
     def test_stray_double_dash_dir_is_one_unit(self):
         stray = os.path.join(self.root, "old--clone")
