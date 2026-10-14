@@ -11,6 +11,37 @@ OLD = time.time() - 30 * 86400
 BIG = (1 << 20) + 1
 
 
+RACE_PRELUDE = """
+import os, shutil  # shutil checks os.open for dir_fd support at import, before the patch
+_armed = [False]
+def _swap_after(fn):
+    def wrapper(*a, **k):
+        r = fn(*a, **k)
+        if _armed[0]:
+            _armed[0] = False
+            frames = os.environ["RACE_DIR"]
+            os.rename(frames, frames + ".real")
+            os.symlink(os.environ["RACE_TARGET"], frames)
+        return r
+    return wrapper
+os.path.realpath = _swap_after(os.path.realpath)
+os.open = _swap_after(os.open)
+"""
+
+RACE_WRAPPER = """
+_real_delete = delete
+def delete(path, kind, unit):
+    _armed[0] = path == os.path.join(os.environ["RACE_DIR"], "big.bin")
+    return _real_delete(path, kind, unit)
+"""
+
+
+def embedded_python():
+    with open(SCRIPT) as f:
+        src = f.read()
+    return src.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0]
+
+
 def write(path, size=10, old=True):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
@@ -131,6 +162,37 @@ class TaskPrune(unittest.TestCase):
         self.assertEqual(rep["idle_units"], 0)
         self.assertEqual(rep["candidates"], [])
         self.assertTrue(self.exists("idle_big"))
+
+    def test_unreadable_subdir_keeps_unit_active(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores dir permissions")
+        private = os.path.join(self.root, "legacy", "private")
+        write(os.path.join(private, "fresh.md"), old=False)
+        os.chmod(private, 0)
+        try:
+            out = self.run_prune("--json", "--apply")
+        finally:
+            os.chmod(private, 0o755)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("treating it as active", out.stderr)
+        self.assertTrue(self.exists("legacy_big"))
+        self.assertEqual(json.loads(out.stdout)["active_units"], 2)
+
+    def test_dir_swapped_for_symlink_before_delete_is_not_followed(self):
+        frames = os.path.dirname(self.files["idle_big"])
+        target = os.path.join(self.outside, "frames")
+        write(os.path.join(target, "big.bin"), BIG)
+        src = embedded_python().replace("\nreport = {", RACE_WRAPPER + "\nreport = {", 1)
+        env = dict(os.environ, PRUNE_ROOT=self.root, PRUNE_OLDER="14d", PRUNE_APPLY="1",
+                   PRUNE_JSON="1", RACE_DIR=frames, RACE_TARGET=target)
+        out = subprocess.run(["python3", "-c", RACE_PRELUDE + src], capture_output=True,
+                             text=True, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertTrue(os.path.islink(frames), "race hook did not run")
+        self.assertTrue(os.path.exists(os.path.join(target, "big.bin")))
+        self.assertTrue(os.path.exists(os.path.join(frames + ".real", "big.bin")))
+        rep = json.loads(out.stdout)
+        self.assertEqual(rep["freed_bytes"], rep["reclaimable_bytes"] - BIG)
 
     def test_unsafe_roots_refused(self):
         home = os.path.join(self.base, "home")

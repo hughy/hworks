@@ -76,18 +76,32 @@ def units():
             yield top
 
 
-def files(path):
-    for d, dirs, fs in os.walk(path, followlinks=False):
+def raise_error(err):
+    raise err
+
+
+def files(path, strict=False):
+    for d, dirs, fs in os.walk(path, followlinks=False, onerror=raise_error if strict else None):
         for f in fs:
             p = os.path.join(d, f)
-            st = os.lstat(p)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                if strict:
+                    raise
+                continue
             if stat.S_ISREG(st.st_mode):
                 yield p, st
 
 
 def newest(unit):
-    times = [st.st_mtime for _, st in files(unit)]
-    return max(times) if times else os.lstat(unit).st_mtime
+    # A scan that cannot read every dir may miss fresh files, so treat the unit as active.
+    try:
+        times = [st.st_mtime for _, st in files(unit, strict=True)]
+        return max(times) if times else os.lstat(unit).st_mtime
+    except OSError as err:
+        print(f"task-prune: cannot scan {unit}: {err}; treating it as active", file=sys.stderr)
+        return float("inf")
 
 
 def is_bulk(name):
@@ -118,26 +132,37 @@ def candidates(unit):
     return found
 
 
-def inside(path):
-    parent = os.path.realpath(os.path.dirname(path))
-    return parent == root or parent.startswith(root + os.sep)
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
 def delete(path, kind, unit):
-    if os.path.islink(path) or not inside(path):
+    # Walk from the root through dir fds opened with O_NOFOLLOW and delete relative to
+    # them, so a dir swapped for a symlink after the scan cannot redirect the deletion.
+    rel = os.path.relpath(path, root).split(os.sep)
+    depth = len(os.path.relpath(unit, root).split(os.sep))
+    fds = []
+    try:
+        fds.append(os.open(root, DIR_FLAGS))
+        for name in rel[:-1]:
+            fds.append(os.open(name, DIR_FLAGS, dir_fd=fds[-1]))
+        st = os.stat(rel[-1], dir_fd=fds[-1], follow_symlinks=False)
+        if kind == "dir" and stat.S_ISDIR(st.st_mode):
+            shutil.rmtree(rel[-1], dir_fd=fds[-1])
+        elif kind == "file" and stat.S_ISREG(st.st_mode):
+            os.unlink(rel[-1], dir_fd=fds[-1])
+        else:
+            return False
+        for i in range(len(rel) - 1, depth, -1):
+            try:
+                os.rmdir(rel[i - 1], dir_fd=fds[i - 1])
+            except OSError:
+                break
+        return True
+    except OSError:
         return False
-    if kind == "dir":
-        shutil.rmtree(path)
-    else:
-        os.unlink(path)
-    d = os.path.dirname(path)
-    while d != unit and d.startswith(unit + os.sep):
-        try:
-            os.rmdir(d)
-        except OSError:
-            break
-        d = os.path.dirname(d)
-    return True
+    finally:
+        for fd in fds:
+            os.close(fd)
 
 
 report = {"root": root, "older_than": os.environ["PRUNE_OLDER"], "apply": apply,
