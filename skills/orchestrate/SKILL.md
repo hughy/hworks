@@ -116,7 +116,8 @@ When the predicate holds, or nothing is launchable:
 3. Close the mission (`mission.close`).
 4. Report per unit: attempts, review rounds, wall time, manual interventions, gate run by host or reviewers, and downgraded findings. Read token use from the run status files; mission totals stayed at zero in testing.
 5. Run `<hworks>/scripts/blockers.sh --since <start date>` and report the top classes.
-6. Questions evidence could not settle go last, with options and a recommendation.
+6. If any unit is `pr-open`, run `/skill:handoff` so fresh sessions own the PRs' CI and review wakes, and print its prompts in the report. The coordinator's context holds every unit's history, so each wake it answers costs far more than the same wake in a session holding only the handoff note.
+7. Questions evidence could not settle go last, with options and a recommendation.
 
 Stopping early: launch nothing new and drain. Never kill a child to stop; a parked unit keeps its reservation until `reconcile` shows its writers terminal.
 
