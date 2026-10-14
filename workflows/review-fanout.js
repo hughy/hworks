@@ -15,11 +15,11 @@ function isObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-if (!Array.isArray(args.targets) || args.targets.length === 0) throw new Error("args.targets must be a non-empty array of {key, cwd, task, base?}");
+if (!Array.isArray(args.targets) || args.targets.length === 0) throw new Error("args.targets must be a non-empty array of {key, cwd, task, base?, head?}");
 const seenKeys = new Set();
 args.targets.forEach((t, i) => {
   const at = "args.targets[" + i + "]";
-  if (!isObject(t)) throw new Error(at + " must be an object {key, cwd, task, base?}");
+  if (!isObject(t)) throw new Error(at + " must be an object {key, cwd, task, base?, head?}");
   if (typeof t.key !== "string" || !TARGET_KEY.test(t.key)) throw new Error(at + ".key must be 1 to 120 letters, digits, '.', '_' or '-', starting with a letter or digit");
   if (seenKeys.has(t.key)) throw new Error("args.targets has duplicate key '" + t.key + "'");
   seenKeys.add(t.key);
@@ -27,6 +27,8 @@ args.targets.forEach((t, i) => {
   if (!nonEmpty(t.task)) throw new Error(at + ".task must be a non-empty string (target '" + t.key + "')");
   // A ref such as main or HEAD moves between launch and review, so two reviewers could read different diffs.
   if (t.base !== undefined && (typeof t.base !== "string" || !SHA.test(t.base))) throw new Error(at + ".base must be a full commit SHA (40 or 64 hex chars), not a ref (target '" + t.key + "')");
+  if (t.head !== undefined && (typeof t.head !== "string" || !SHA.test(t.head))) throw new Error(at + ".head must be a full commit SHA (40 or 64 hex chars), not a ref (target '" + t.key + "')");
+  if (t.head !== undefined && t.base === undefined) throw new Error(at + ".head needs a base (target '" + t.key + "')");
 });
 
 if (args.review2Model !== undefined && !nonEmpty(args.review2Model)) throw new Error("args.review2Model must be a non-empty model id");
@@ -89,7 +91,10 @@ function reviewTask(target) {
   if (nonEmpty(args.task)) parts.push(args.task.trim());
   parts.push(target.task.trim());
   let rules = "";
-  if (target.base) rules += "Diff: run `git diff " + target.base + "...HEAD` in your cwd and read the surrounding code, not only the diff. ";
+  if (target.head) {
+    rules += "Diff: run `git diff " + target.base + "..." + target.head + "` in your cwd and read the surrounding code, not only the diff. " +
+      "Review commit " + target.head + ": if `git rev-parse HEAD` differs, read files with `git show " + target.head + ":<path>`. ";
+  } else if (target.base) rules += "Diff: run `git diff " + target.base + "...HEAD` in your cwd and read the surrounding code, not only the diff. ";
   rules +=
     "Verify every claim against the code before reporting it. " +
     "You are read-only: do not edit, commit, or stage anything.";

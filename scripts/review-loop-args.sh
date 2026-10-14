@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Print the args JSON for workflows/review-loop.js.
 # usage: review-loop-args.sh <brief> <gate> <base> <effort> [worktree [task-dir]]
-#   base: a ref; emitted as the merge-base SHA of it and the worktree's HEAD
+#   base: a ref; emitted as the merge-base SHA of it and the worktree's HEAD, or, when task-dir
+#     holds a review ledger (scripts/review-range.py), as the furthest commit it covers
 #   effort: quick (gate only, coder at :low), standard (1 reviewer), exhaustive (2 reviewers, coder on the exhaustive slot)
 #   worktree: where the children run (default: the current directory); emitted as cwd when given
 #   task-dir: directory for each child's output file (created if missing); emitted as an absolute taskDir when given
@@ -10,7 +11,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-if [ $# -lt 4 ] || [ $# -gt 6 ]; then sed -n '2,8p' "$0" >&2; exit 2; fi
+if [ $# -lt 4 ] || [ $# -gt 6 ]; then sed -n '2,9p' "$0" >&2; exit 2; fi
 brief=$1; gate=$2; base=$3; effort=$4; worktree=${5:-}; task_dir=${6:-}
 
 case "$effort" in
@@ -41,6 +42,16 @@ fi
 if ! base_sha=$(git -C "${worktree:-.}" merge-base "$base" HEAD 2>/dev/null); then
   echo "cannot resolve the merge-base of $base and HEAD in ${worktree:-$PWD}" >&2
   exit 2
+fi
+if [ -n "$task_dir" ] && [ -f "$task_dir/reviewed.tsv" ]; then
+  # Exit 3 means HEAD is covered: the reviewers then read only the coder's new commits.
+  rc=0
+  covered=$(python3 "$root/scripts/review-range.py" base "$task_dir" "$base" --cwd "${worktree:-.}") || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+    echo "review-range.py base failed ($rc); not starting from the review ledger" >&2
+    exit 2
+  fi
+  base_sha=$covered
 fi
 
 session=""

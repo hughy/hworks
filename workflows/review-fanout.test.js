@@ -335,6 +335,19 @@ test("a base that is not a full commit SHA is rejected", async () => {
   }
 });
 
+test("a head pins the reviewed diff and needs a full SHA and a base", async () => {
+  for (const head of ["HEAD", "main", "0123abc", ""]) {
+    await assert.rejects(run({}, { targets: [{ ...targetA, head }] }), /args\.targets\[0\]\.head must be a full commit SHA/, head);
+  }
+  await assert.rejects(run({}, { targets: [{ key: "pr-1", cwd: "/work/pr-1", task: "t", head: SHA_B }] }), /args\.targets\[0\]\.head needs a base/);
+  const { out, calls } = await run({ "pr-1.r1": clean, "pr-1.r2": clean }, { targets: [{ ...targetA, head: SHA_B }] });
+  assert.equal(out.ok, true);
+  const task = calls.find((c) => c.key === "pr-1.r1").task;
+  assert.match(task, new RegExp("git diff " + SHA_A + "\\.\\.\\." + SHA_B));
+  assert.match(task, new RegExp("git show " + SHA_B + ":<path>"));
+  assert.doesNotMatch(task, /\.\.\.HEAD/);
+});
+
 test("omitted reviewers need review2Model so the second review runs on another model", async () => {
   await assert.rejects(run({}, { review2Model: undefined }), /args\.review2Model is required/);
   await assert.rejects(run({}, { review2Model: "" }), /args\.review2Model must be a non-empty model id/);

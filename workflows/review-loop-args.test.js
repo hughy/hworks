@@ -64,6 +64,31 @@ test("without a worktree argument the base resolves in the current directory and
   assert.equal("cwd" in r.json, false);
 });
 
+test("a review ledger in the task dir moves the base to the furthest covered commit", () => {
+  const fx = fixture();
+  const task = path.join(path.dirname(fx.repo), "task");
+  const rr = path.join(__dirname, "..", "scripts", "review-range.py");
+  const rec = spawnSync("python3", [rr, "record", task, "main", fx.mainSha, fx.headSha, "review-loop", "--cwd", fx.repo], { encoding: "utf8" });
+  assert.equal(rec.status, 0, rec.stderr);
+  fs.copyFileSync(rr, path.join(fx.root, "scripts", "review-range.py"));
+  const r = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo, task], { models: pinned });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.json.base, fx.headSha);
+  const none = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo, path.join(path.dirname(fx.repo), "empty-task")], { models: pinned });
+  assert.equal(none.json.base, fx.mainSha);
+});
+
+test("a ledger the script cannot read fails instead of reviewing from it", () => {
+  const fx = fixture();
+  const task = path.join(path.dirname(fx.repo), "task");
+  fs.mkdirSync(task);
+  fs.writeFileSync(path.join(task, "reviewed.tsv"), "");
+  fs.writeFileSync(path.join(fx.root, "scripts", "review-range.py"), "import sys\nsys.exit(1)\n");
+  const r = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo, task], { models: pinned });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /review-range\.py base failed/);
+});
+
 test("an unknown base ref fails", () => {
   const fx = fixture();
   const r = runArgs(fx, [fx.brief, "true", "no-such-ref", "standard", fx.repo], { models: pinned });
