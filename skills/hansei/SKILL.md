@@ -1,11 +1,11 @@
 ---
 name: hansei
-description: Periodic feedback for the operator on how they work with agents. Runs scripts/operator-signals.py over the operator's own prompts (approvals after the agent asked permission, status checks, corrections, interrupts, repeated prompts, skill use, prompt shape), verifies each finding in a few example sessions, and renders a local HTML page with candid findings and copy-paste prompts that queue each fix. Use for "/hansei" or a request for feedback on how the operator prompts, uses skills, or works with agents; run every week or two, alongside retro.
+description: Periodic feedback for the operator on how they work with agents. Runs scripts/operator-signals.py over the operator's own prompts (approvals after the agent asked permission, status checks, corrections, interrupts, repeated prompts, skill use, prompt shape), verifies each finding in a few example sessions, and renders a local HTML page with candid findings and copy-paste prompts that queue each fix. Use for "/hansei" or a request for feedback on how the operator prompts, uses skills, or works with agents; run every week or two, alongside kaizen.
 ---
 
 # hansei
 
-Hansei is the Toyota practice of reflecting on your own shortfalls and committing to change them. `retro` looks at what agents do; hansei looks at what the operator types: where prompts cost turns, where the agent stopped to ask for a yes it did not need, where the same instruction gets retyped. The agents' transcripts supply the evidence. Run it every week or two over the default 14-day window, alongside `retro`.
+Hansei is the Toyota practice of reflecting on your own shortfalls and committing to change them. `kaizen` looks at what agents do; hansei looks at what the operator types: where prompts cost turns, where the agent stopped to ask for a yes it did not need, where the same instruction gets retyped. The agents' transcripts supply the evidence. Run it every week or two over the default 14-day window, alongside `kaizen`.
 
 It keeps no state beyond its task dir: `TASK_DIR=$(<hworks>/scripts/task-dir.sh hansei)`, run from the hworks checkout. Each run writes `findings-<YYYY-MM-DD>.json` and `hansei-<YYYY-MM-DD>.html` there. Read the previous `findings-*.json` first and fill the `previous` field: which findings went away, which came back, and whether a queued fix landed.
 
@@ -37,14 +37,14 @@ The signals are heuristics. A group is a lead, not a fact. Before stating a find
 A finding needs at least 3 sessions and an observed cost: extra turns, a correction, re-explained context, a stalled run. Each gets one owner:
 
 - `you`: a habit or prompt change the operator makes.
-- `system`: a fix in hworks. Do not act on it here; hand it to `retro` as a copy-paste prompt that names the retro outcome it likely fits (an ignored tool, a repeated mistake, a guidance gap).
+- `system`: a fix in hworks. Do not act on it here; hand it to `kaizen` as a copy-paste prompt that names the kaizen outcome it likely fits (an ignored tool, a repeated mistake, a guidance gap).
 - `both`: a habit change and a system fix together.
 
 A bare approval after the agent asked permission is usually `system`: guidance should have let it proceed. When the action was irreversible (a push, a deploy, a message sent), asking was correct; drop it. Shorter prompts are not better or worse by themselves; report prompt shape only when it tracks a cost. Drop everything else with a one-line reason in `dropped`.
 
 ## Write the findings
 
-Write each finding as upward feedback: candid, specific, quoting the operator's own words. Give one concrete better prompt or habit, and at least one copy-paste prompt that queues the fix, for example `/skill:hughy-router ...`, `/skill:retro ...`, a brief to add a line to `global/AGENTS.md`, or a reusable prompt to save as a skill. List strengths only with evidence from the same window.
+Write each finding as upward feedback: candid, specific, quoting the operator's own words. Give one concrete better prompt or habit, and at least one copy-paste prompt that queues the fix, for example `/skill:hughy-router ...`, `/skill:kaizen ...`, a brief to add a line to `global/AGENTS.md`, or a reusable prompt to save as a skill. List strengths only with evidence from the same window.
 
 ## Output
 

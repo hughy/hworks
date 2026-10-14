@@ -6,7 +6,7 @@ scripts, repeated helper definitions, and calls that failed and were retried wit
 shape. A group marked [exists] names a script or skill that already exists, so the reader
 can tell a missing tool from an ignored one. Output goes to stdout and can quote private
 transcript content: do not redirect it into a repo.
-usage: retro-sessions.py [--since YYYY-MM-DD|7d] [--min-sessions N] [--top N] [--cwd-match TEXT]... [--json]
+usage: kaizen-sessions.py [--since YYYY-MM-DD|7d] [--min-sessions N] [--top N] [--cwd-match TEXT]... [--json]
 
 Sources (each optional; a missing one is reported, not fatal):
   HWORKS_PI_SESSIONS   pi session transcripts, **/*.jsonl (default ~/.pi/agent/sessions)
