@@ -76,10 +76,10 @@ class TaskDirTest(unittest.TestCase):
         self.assertRegex(b, r"^feat--a-[0-9a-f]{8}$")
         self.assertNotEqual(a, b)
 
-    def test_dash_slash_distinct(self):
+    def test_dash_slash_unchanged(self):
         a = os.path.basename(os.path.dirname(self.on_branch("a/-b")))
         b = os.path.basename(os.path.dirname(self.on_branch("a-/b")))
-        self.assertNotEqual(a, b)
+        self.assertEqual((a, b), ("a---b", "a---b"))
 
     def test_case_distinct(self):
         lower = os.path.basename(os.path.dirname(self.on_branch("feat")))
@@ -142,6 +142,15 @@ class TaskDirTest(unittest.TestCase):
         os.makedirs(pre)
         self.assertEqual(self.run_script("t", self.repo), pre)
         self.assertFalse(os.path.exists(os.path.join(pre, ".task")))
+
+    def test_file_blocking_leaf_fails(self):
+        blocked = os.path.join(self.state, "agent-tasks", "github.com--owner--proj", "main", "t")
+        os.makedirs(os.path.dirname(blocked))
+        open(blocked, "w").close()
+        r = subprocess.run(["bash", SCRIPT, "t", self.repo], env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("mkdir", r.stderr)
 
 
 if __name__ == "__main__":

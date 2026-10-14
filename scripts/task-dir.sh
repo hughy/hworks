@@ -9,9 +9,9 @@
 # repo level and differ by branch.
 #
 # <branch> is the branch lowercased with / as --. When that loses information (a character
-# outside [a-z0-9._/-], a --, -/ or /- substring, or a leading . or -), it gets - plus the first
-# 8 hex chars of the SHA-1 (sha1sum or shasum) of the raw branch name, so distinct branches never
-# share a dir. -/ and /- count as lossy because a-/b and a/-b both encode to a---b.
+# outside [a-z0-9._/-], a -- substring, or a leading . or -), it gets - plus the first 8 hex
+# chars of the SHA-1 (sha1sum or shasum) of the raw branch name. Branches that pass the check keep
+# their old dir, so a-/b and a/-b still share a---b.
 # A newly created task dir gets a .task file of key=value lines: created, repo, branch, slug, cwd.
 set -euo pipefail
 
@@ -19,7 +19,7 @@ clean() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's#/#--#g' -e '
 
 lossless() {
   case "$1" in
-    *[!a-z0-9._/-]* | *--* | *-/* | */-* | [.-]*) return 1 ;;
+    *[!a-z0-9._/-]* | *--* | [.-]*) return 1 ;;
   esac
 }
 
@@ -57,5 +57,7 @@ mkdir -p "$(dirname "$out")"
 if mkdir "$out" 2>/dev/null; then
   printf 'created=%s\nrepo=%s\nbranch=%s\nslug=%s\ncwd=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$repo" "$branch" "$slug" "$cwd" > "$out/.task"
+elif [ ! -d "$out" ]; then
+  mkdir "$out"
 fi
 printf '%s\n' "$out"
