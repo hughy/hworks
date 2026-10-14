@@ -33,6 +33,8 @@ check("consumed option value", !isRunnerArgv([node, "/bin/pi", "--system-prompt"
 check("long argv ending in --extension bootstrap", !isRunnerArgv([node, "/bin/pi", "--mode", "json", "-p", "a", "b", "c", "--system-prompt", "--extension", binary]));
 check("tail with one flag changed", !isRunnerArgv([node, "/bin/pi", ...host.map((a) => (a === "rpc" ? "json" : a)), binary]));
 check("prompt after --", !isRunnerArgv([node, "/bin/pi", "-p", "--", "--extension", binary]));
+check("extra argument before bootstrap", !isRunnerArgv([node, "/bin/pi", ...host, "/tmp/other.js", binary]));
+check("whole tail as prompt after -p --", !isRunnerArgv([node, "/bin/pi", "-p", "--", ...host, binary]));
 writeFileSync(join(bg, "other.js"), "");
 check("tail with another extension", !isRunnerArgv([node, "/bin/pi", ...host, join(bg, "other.js")]));
 {

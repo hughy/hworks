@@ -23,24 +23,23 @@ const hasRunnerSibling = (bootstrap: string) =>
     existsSync(join(dirname(bootstrap), `subagent-runner-bootstrap${ext}`)),
   );
 
-// The exact argv tail pi-subagents passes when the runner is a pi binary.
+// The exact arguments pi-subagents passes when the runner is a compiled pi binary.
 const BINARY_HOST_TAIL = ["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-session", "--mode", "rpc", "--extension"];
 
 // pi-subagents starts the runner in one of two shapes:
 //   node [node flags] .../subagent-runner-bootstrap.js cfg.json
 //   pi --no-extensions --no-skills --no-prompt-templates --no-session --mode rpc --extension .../binary-bootstrap.js
 // Node consumes its own flags, and jiti rewrites argv before it imports the
-// runner, so the script is argv[1]. For the binary host, the whole fixed tail
-// must match and end in an absolute binary-bootstrap that sits next to the
-// runner bootstrap, so prompt text or option values cannot fake it. If
+// runner, so the script is argv[1]. For the binary host, everything after the
+// executable and its entry must be exactly those arguments, ending in an
+// absolute binary-bootstrap that sits next to the runner bootstrap, so prompt
+// text or option values cannot fake it. If
 // pi-subagents changes this shape, the guard stops matching and runs fail with
 // the original error instead of hiding other exits.
 export function isRunnerArgv(argv: readonly string[], exists = hasRunnerSibling): boolean {
   if (isEntry(argv[1], "subagent-runner-bootstrap")) return true;
-  const n = BINARY_HOST_TAIL.length;
-  if (argv.length < n + 3) return false;
-  const tail = argv.slice(-n - 1, -1);
-  if (!tail.every((arg, i) => arg === BINARY_HOST_TAIL[i])) return false;
+  if (argv.length !== BINARY_HOST_TAIL.length + 3) return false;
+  if (!BINARY_HOST_TAIL.every((arg, i) => argv[i + 2] === arg)) return false;
   const bootstrap = argv[argv.length - 1];
   return isAbsolute(bootstrap) && isEntry(bootstrap, "binary-bootstrap") && exists(bootstrap);
 }
