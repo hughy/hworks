@@ -7,6 +7,7 @@ if (typeof args.gate !== "string" || !args.gate) throw new Error("args.gate (she
 // A ref like HEAD or the branch name moves with the coder's commits and would empty every review diff.
 if (typeof args.base !== "string" || !/^[0-9a-f]{7,40}$/i.test(args.base)) throw new Error("args.base must be a commit SHA (7 to 40 hex chars), not a ref");
 if (args.cwd !== undefined && (typeof args.cwd !== "string" || !args.cwd)) throw new Error("args.cwd must be a non-empty path");
+if (args.taskDir !== undefined && (typeof args.taskDir !== "string" || !/^(?:\/|[A-Za-z]:[\\/])/.test(args.taskDir))) throw new Error("args.taskDir must be an absolute path");
 if (args.coderModel !== undefined && (typeof args.coderModel !== "string" || !args.coderModel)) throw new Error("args.coderModel must be a non-empty model id");
 const reviewerCount = args.reviewers === undefined ? 1 : args.reviewers;
 if (![0, 1, 2].includes(reviewerCount)) throw new Error("args.reviewers must be 0, 1 or 2");
@@ -106,6 +107,14 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
   return task;
 }
 
+const safeName = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, "-");
+
+// The label is capped so the basename stays under the 255-byte filename limit; the round suffix keeps it unique.
+function withOutput(item, name) {
+  if (args.taskDir) item.output = args.taskDir.replace(/[\\/]+$/, "") + "/" + safeName(label).slice(0, 160) + "-" + name + ".md";
+  return item;
+}
+
 // worktree: false overrides a global worktree default so coder commits land on the caller's branch.
 function placed(item) {
   item.worktree = false;
@@ -125,6 +134,7 @@ function launchCoder(key, round, findings, gateFailure) {
     outputSchema: coderSchema,
   });
   if (args.coderModel) item.model = args.coderModel;
+  withOutput(item, "r" + round + "-coder" + (gateFailure ? "-retry" : ""));
   return runs.all([item]);
 }
 
@@ -138,6 +148,7 @@ function launchReview(round, prior, priorHead, gateCheck) {
       task: reviewerTask(round, prior, priorHead, gateCheck),
       outputSchema: reviewSchema,
     });
+    withOutput(item, "r" + round + "-reviewer-" + i);
     if (i === 2 && typeof args.review2Model === "string" && args.review2Model) item.model = args.review2Model;
     items.push(item);
   }

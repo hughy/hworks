@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Print the args JSON for workflows/review-loop.js.
-# usage: review-loop-args.sh <brief> <gate> <base> <effort> [worktree]
+# usage: review-loop-args.sh <brief> <gate> <base> <effort> [worktree [task-dir]]
 #   base: a ref; emitted as the merge-base SHA of it and the worktree's HEAD
 #   effort: quick (gate only, coder at :low), standard (1 reviewer), exhaustive (2 reviewers, coder on the exhaustive slot)
 #   worktree: where the children run (default: the current directory); emitted as cwd when given
+#   task-dir: directory for each child's output file (created if missing); emitted as an absolute taskDir when given
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-if [ $# -lt 4 ] || [ $# -gt 5 ]; then sed -n '2,6p' "$0" >&2; exit 2; fi
-brief=$1; gate=$2; base=$3; effort=$4; worktree=${5:-}
+if [ $# -lt 4 ] || [ $# -gt 6 ]; then sed -n '2,7p' "$0" >&2; exit 2; fi
+brief=$1; gate=$2; base=$3; effort=$4; worktree=${5:-}; task_dir=${6:-}
 
 case "$effort" in
   quick) reviewers=0 ;;
@@ -26,6 +27,10 @@ esac
 
 if [ -n "$worktree" ]; then
   worktree=$(cd "$worktree" && pwd -P)
+fi
+if [ -n "$task_dir" ]; then
+  mkdir -p "$task_dir"
+  task_dir=$(cd "$task_dir" && pwd -P)
 fi
 if ! base_sha=$(git -C "${worktree:-.}" merge-base "$base" HEAD 2>/dev/null); then
   echo "cannot resolve the merge-base of $base and HEAD in ${worktree:-$PWD}" >&2
@@ -77,10 +82,11 @@ if [ "$reviewers" -eq 2 ]; then
 fi
 
 node -e '
-  const [brief, gate, base, reviewers, review2, coderModel, cwd, rubricDir] = process.argv.slice(1);
+  const [brief, gate, base, reviewers, review2, coderModel, cwd, rubricDir, taskDir] = process.argv.slice(1);
   const args = { brief, gate, base, reviewers: Number(reviewers), rubricDir };
   if (review2) args.review2Model = review2;
   if (coderModel) args.coderModel = coderModel;
   if (cwd) args.cwd = cwd;
+  if (taskDir) args.taskDir = taskDir;
   process.stdout.write(JSON.stringify(args) + "\n");
-' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/skills/interrogate/references"
+' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/skills/interrogate/references" "$task_dir"

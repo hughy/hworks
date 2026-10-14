@@ -23,7 +23,7 @@ A unit without `paths` runs alone: it starts only when no other unit is live or 
 
 ## Files
 
-`$S = $TASK_DIR/orchestrate/<slug>/` is written only by orchestrate.py. The coordinator's own files live in `$TASK_DIR`:
+`$S = $TASK_DIR/orchestrate/<slug>/` is written only by orchestrate.py, except `$S/outputs/<id>/a<attempt>/`: each launch passes it as the unit's `taskDir`, and the children save their outputs there, so a retry never overwrites an earlier attempt's outputs. The coordinator's own files live in `$TASK_DIR`:
 
 - `units.json`: what Start imports; pass its absolute path.
 - `progress.md`: store path, runs dir, mission id, window, the end predicate, and before every yield, the live units and the next check.

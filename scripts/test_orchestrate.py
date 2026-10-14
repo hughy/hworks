@@ -149,6 +149,8 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(args["base"], sh(self.repo, "rev-parse", "main"))
         self.assertEqual(args["reviewers"], 1)
         self.assertEqual(args["gate"], "true")
+        self.assertEqual(args["taskDir"], os.path.realpath(os.path.join(self.store, "outputs", "A", "a1")))
+        self.assertTrue(os.path.isdir(args["taskDir"]))
         with open(args["brief"]) as f:
             brief = f.read()
         acceptance, process = brief.split("## Process")
@@ -384,6 +386,21 @@ class OrchestrateTest(unittest.TestCase):
         spec = self.launch("A")
         self.assertEqual(spec["attempt"], 2)
         self.assertEqual(self.rows()["A"]["start_head"], head)
+
+    def test_each_attempt_gets_its_own_output_dir(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        first = self.started("A", "wf-1")
+        head = self.commit("A")
+        self.g("record", "A", "1", self.workflow("unresolved", "wf-1", head))
+        second = self.launch("A")
+        dirs = []
+        for spec in (first, second):
+            with open(spec["args_path"]) as f:
+                dirs.append(json.load(f)["taskDir"])
+        out = os.path.realpath(os.path.join(self.store, "outputs", "A"))
+        self.assertEqual(dirs, [os.path.join(out, "a1"), os.path.join(out, "a2")])
+        self.assertTrue(all(os.path.isdir(d) for d in dirs))
 
     def test_adopting_clean_existing_worktree_on_branch_launches(self):
         self.init()
