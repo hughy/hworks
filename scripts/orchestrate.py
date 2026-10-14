@@ -5,6 +5,8 @@ The CLI never launches agents, pushes, deletes a worktree or branch, or discards
 A coordinator runs it, dispatches the workflow itself, and feeds results back with bind and record.
 
 Exit codes: 0 ok, 2 bad input or usage, 3 refused (the store is unchanged unless the message says otherwise).
+
+ORCHESTRATE_ARGS_SCRIPT, when set, names the script launch runs instead of review-loop-args.sh (tests use a fake).
 """
 
 import argparse
@@ -499,7 +501,8 @@ def cmd_launch(store, a):
         gate = units.get(row["id"], {}).get("gate") or cfg.get("gate")
         if not gate:
             return block("no gate: pass --gate to init or set gate on the unit")
-        p = subprocess.run(["bash", ARGS_SCRIPT, brief, gate, cfg["base"], row["effort"], row["worktree"]],
+        args_script = os.environ.get("ORCHESTRATE_ARGS_SCRIPT") or ARGS_SCRIPT
+        p = subprocess.run(["bash", args_script, brief, gate, cfg["base"], row["effort"], row["worktree"]],
                            cwd=cfg["repo"], capture_output=True, text=True)
         if p.returncode != 0:
             return block("review-loop-args.sh failed: %s" % one_line(p.stderr.strip()))
