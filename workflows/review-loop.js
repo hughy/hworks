@@ -96,7 +96,8 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
     task += "Apply the rubric at " + args.rubricDir + "/rubric.md and " + args.rubricDir + "/code-quality-review.md. ";
   }
   task +=
-    "Mark a finding blocking only when it is a verified defect, a gap against the brief, or a broken gate. " +
+    "Mark a finding blocking only when it is a verified defect, a gap against the brief, a broken gate, " +
+    "or an added flag, knob, field, timer, guard, or tool that the brief did not require and nothing in the diff or brief justifies. " +
     "Return verdict `blocked` if any finding is blocking, else `ok`.";
   if (round > 1) {
     task +=
