@@ -1,6 +1,6 @@
 delete process.env.PI_AUTO_TITLE_MODEL;
-process.env.PI_AUTO_TITLE = "1";
-const { default: register, messages, promptTitle, canReplace, cleanTitle, buildPrompt } = await import("./auto-title.ts");
+delete process.env.PI_AUTO_TITLE;
+const { default: register, messages, cleanTitle, buildPrompt } = await import("./auto-title.ts");
 
 let bad = 0;
 const check = (name: string, ok: boolean, detail?: unknown) => { if (!ok) { bad++; console.log("FAIL", name, detail ?? ""); } };
@@ -10,17 +10,6 @@ check("clean strips label", cleanTitle("Title: Zed thread naming") === "Zed thre
 check("clean takes first line", cleanTitle("\n\nA title\nextra") === "A title");
 check("clean caps length", Array.from(cleanTitle("word ".repeat(40))!).length <= 60);
 check("clean empty", cleanTitle(" \n ") === undefined);
-
-const long = "fix   the\nbug " + "x".repeat(200);
-check("promptTitle matches pi-acp", promptTitle(long) === Array.from("fix the bug " + "x".repeat(200)).slice(0, 80).join(""));
-check("replace empty", canReplace(undefined, "hi", undefined) && canReplace("  ", "hi", undefined));
-check("replace first-prompt name", canReplace(promptTitle(long), long, undefined));
-check("replace first-prompt name with appended context", canReplace("Look at this", "Look at this [Context] file:///a/b.ts", undefined));
-check("replace first-prompt name from joined blocks", canReplace("foo bar", "foobar [Context] file:///a", undefined));
-check("keep unrelated name with context", !canReplace("My name", "Look at this [Context] file:///a", undefined));
-check("replace own name", canReplace("Old auto", "hi", "Old auto"));
-check("keep user name", !canReplace("My name", "hi", "Old auto"));
-check("keep user name without ours", !canReplace("My name", "hi", undefined));
 
 const entries = [
   { type: "message", message: { role: "user", content: [{ type: "text", text: "rename  threads" }] } },
@@ -46,7 +35,7 @@ function make(opts: { name?: string; file?: string | undefined; reply?: string; 
   });
   const model = opts.model === undefined ? { id: "m" } : opts.model;
   const ctx = {
-    mode: opts.mode ?? "rpc",
+    mode: opts.mode ?? "tui",
     model,
     sessionManager: {
       getSessionFile: () => ("file" in opts ? opts.file : "/tmp/s.jsonl"),
@@ -68,42 +57,42 @@ function make(opts: { name?: string; file?: string | undefined; reply?: string; 
 const a = make();
 await a.end();
 check("names after first run", a.state.names.join() === "Zed thread naming" && a.state.completes === 1, a.state);
-check("records entry", a.state.entries[0]?.data.title === "Zed thread naming");
 await a.end();
 check("names once", a.state.completes === 1);
 
-const b = make({ name: "rename threads" });
-await b.end();
-check("replaces first-prompt name", b.state.names.length === 1, b.state);
-
 const c = make({ name: "My chosen name" });
 await c.end();
-check("keeps user name", c.state.completes === 0 && c.state.names.length === 0, c.state);
+check("keeps existing name", c.state.completes === 0 && c.state.names.length === 0, c.state);
+await c.end();
+check("does not recheck after skipping", c.state.completes === 0);
 await c.command().handler("", c.ctx);
-check("/auto-title overrides user name", c.state.names.join() === "Zed thread naming" && c.state.notes.at(-1)!.includes("Zed thread naming"), c.state);
+check("/auto-title overrides existing name", c.state.names.join() === "Zed thread naming" && c.state.notes.at(-1)!.includes("Zed thread naming"), c.state);
 
 const d = make({ file: undefined });
 await d.end();
 check("skips unpersisted session", d.state.completes === 0);
-const e = make({ mode: "print" });
+const e = make({ mode: "rpc" });
 await e.end();
-check("skips print mode", e.state.completes === 0);
+check("skips rpc mode", e.state.completes === 0);
+await e.command().handler("", e.ctx);
+check("/auto-title works in rpc mode", e.state.names.join() === "Zed thread naming", e.state);
+const p = make({ mode: "print" });
+await p.end();
+check("skips print mode", p.state.completes === 0);
 const f = make({ model: null });
 await f.end();
 check("skips without model", f.state.completes === 0 && f.state.names.length === 0);
 
-delete process.env.PI_AUTO_TITLE;
+process.env.PI_AUTO_TITLE = "0";
 const g = make();
 await g.end();
-check("off unless PI_AUTO_TITLE=1", g.state.completes === 0);
-await g.command().handler("", g.ctx);
-check("/auto-title works with the flag off", g.state.names.join() === "Zed thread naming", g.state);
-process.env.PI_AUTO_TITLE = "1";
+check("PI_AUTO_TITLE=0 turns it off", g.state.completes === 0);
+delete process.env.PI_AUTO_TITLE;
 
 const r = make();
-r.h.session_start({}, { ...r.ctx, sessionManager: { ...r.ctx.sessionManager, getBranch: () => [...entries, { type: "custom", customType: "auto-title", data: { title: "Done" } }] } });
+r.h.session_start({}, r.ctx);
 await r.end();
-check("resume does not re-title", r.state.completes === 0);
+check("new session titles again", r.state.completes === 1);
 
 console.log(bad ? `${bad} failures` : "all pass");
 process.exit(bad ? 1 : 0);

@@ -1,13 +1,10 @@
-// Names a pi session from its content so clients that show the name (Zed via pi-acp, `/resume`) stop showing the
-// first prompt. After the first finished agent run, it asks a model for a short title and calls pi.setSessionName().
-// It is off unless PI_AUTO_TITLE=1: a host-managed extension may already title sessions, and such an extension can
-// read any rename it did not make as a manual one and stop. Enable it only where that titling never runs, such as
-// Zed via pi-acp, which names every new session from its first prompt (set the flag in the Zed agent_servers entry).
-// It only replaces a name that is empty, that it set itself, or that is the first-prompt title pi-acp sets, so a
-// name you set with /name stays. `/auto-title` re-titles on demand, even over a name you set, with or without the flag.
-// PI_AUTO_TITLE_MODEL=provider/id picks the model (default: the session model).
+// Names an unnamed pi terminal session from its content. After the first finished agent run in the TUI, it asks a
+// model for a short title and calls pi.setSessionName(); pi puts the name in the terminal title, so a Zed or other
+// terminal tab shows it. It skips a session that already has a name (from /name or a host titling tool), and it
+// never runs in RPC mode, where a host may own titling. `/auto-title` re-titles on demand, even over a set name.
+// PI_AUTO_TITLE=0 turns off the automatic run. PI_AUTO_TITLE_MODEL=provider/id picks the model (default: session model).
+// If this extension names the session first, a host titler may read that rename as manual and stop renaming.
 
-const ENTRY = "auto-title";
 const MAX_TITLE = 60;
 const MAX_CHARS = 6000;
 
@@ -31,25 +28,6 @@ export function messages(entries: any[]): { role: "user" | "assistant"; text: st
     if (text) out.push({ role, text });
   }
   return out;
-}
-
-// pi-acp names a new session with the first 80 characters of the first prompt's text blocks.
-export function promptTitle(text: string): string {
-  return Array.from(normalize(text)).slice(0, 80).join("");
-}
-
-// pi-acp appends "[Context] <uri>" lines for @mentions and attached files, and joins text blocks without a space, so
-// the stored first message can run past the title it derived. Compare the name as a whitespace-free prefix.
-const squash = (s: string) => s.replace(/\s+/gu, "");
-function isPromptTitle(name: string, firstUser: string): boolean {
-  return name === promptTitle(firstUser) || squash(firstUser).startsWith(squash(name));
-}
-
-export function canReplace(current: string | undefined, firstUser: string | undefined, ours: string | undefined): boolean {
-  const name = (current ?? "").trim();
-  if (!name) return true;
-  if (ours && name === ours) return true;
-  return !!firstUser && isPromptTitle(name, firstUser);
 }
 
 export function cleanTitle(raw: string): string | undefined {
@@ -84,29 +62,21 @@ export function buildPrompt(msgs: { role: string; text: string }[]): string {
 }
 
 export default function (pi: any) {
-  let titled = false;
+  let done = false;
   let running = false;
-  let ours: string | undefined;
 
-  pi.on("session_start", (_event: any, ctx: any) => {
-    titled = false;
-    ours = undefined;
-    for (const e of ctx.sessionManager?.getBranch?.() ?? []) {
-      if (e.type === "custom" && e.customType === ENTRY && typeof e.data?.title === "string") {
-        titled = true;
-        ours = e.data.title;
-      }
-    }
+  pi.on("session_start", () => {
+    done = false;
   });
 
   async function run(ctx: any, force: boolean): Promise<string | undefined> {
     if (running || !ctx.sessionManager?.getSessionFile?.()) return;
     const msgs = messages(ctx.sessionManager.getBranch());
-    const firstUser = msgs.find((m) => m.role === "user")?.text;
-    if (!firstUser || !msgs.some((m) => m.role === "assistant")) return;
-    if (!force && !canReplace(pi.getSessionName?.() ?? ctx.sessionManager.getSessionName?.(), firstUser, ours)) {
-      titled = true;
-      return;
+    if (!msgs.some((m) => m.role === "user") || !msgs.some((m) => m.role === "assistant")) return;
+    if (!force) {
+      // One attempt per session: a failed model call is not retried on every run.
+      done = true;
+      if ((pi.getSessionName?.() ?? ctx.sessionManager.getSessionName?.() ?? "").trim()) return;
     }
 
     running = true;
@@ -124,9 +94,6 @@ export default function (pi: any) {
       const title = cleanTitle(textOf(res.content));
       if (!title) return;
       pi.setSessionName(title);
-      pi.appendEntry(ENTRY, { title });
-      ours = title;
-      titled = true;
       return title;
     } catch {
       // Best effort: a failed title must not affect the session.
@@ -136,7 +103,7 @@ export default function (pi: any) {
   }
 
   pi.on("agent_end", (_event: any, ctx: any) => {
-    if (process.env.PI_AUTO_TITLE !== "1" || titled || (ctx.mode !== "tui" && ctx.mode !== "rpc")) return;
+    if (done || ctx.mode !== "tui" || process.env.PI_AUTO_TITLE === "0") return;
     void run(ctx, false);
   });
 
