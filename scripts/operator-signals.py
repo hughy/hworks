@@ -50,6 +50,7 @@ Signals (groups below --min-sessions are hidden, except skills and prompt-shape)
 Counts are heuristic: compare them to each other, not to a target.
 """
 import argparse
+import bisect
 import glob
 import json
 import os
@@ -266,9 +267,9 @@ def jaccard(a, b):
 def cluster(sets, threshold, max_df=200):
     """Group indexes of sets whose Jaccard similarity is at least threshold, transitively.
 
-    Identical sets merge first. Among the distinct sets, a shingle shared by more than max_df
-    of them proposes no candidates: it bounds the pairwise work, and a near-duplicate pair is
-    still found through its rarer shingles.
+    Identical sets merge first. Each distinct set is then compared, per shingle, with at most
+    the next max_df sets that share that shingle. That bounds the pairwise work on common
+    shingles while near-duplicates still chain into one group through their neighbors.
     """
     same = defaultdict(list)
     for i, s in enumerate(sets):
@@ -289,8 +290,9 @@ def cluster(sets, threshold, max_df=200):
     for i, s in enumerate(uniq):
         cand = set()
         for x in s:
-            if len(index[x]) <= max_df:
-                cand.update(j for j in index[x] if j > i)
+            posting = index[x]
+            at = bisect.bisect_right(posting, i)
+            cand.update(posting[at:at + max_df])
         for j in cand:
             if find(i) != find(j) and jaccard(s, uniq[j]) >= threshold:
                 parent[find(i)] = find(j)

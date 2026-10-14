@@ -146,6 +146,13 @@ class Signals(unittest.TestCase):
         self.assertIn(list(range(201)), groups)
         self.assertIn([201], groups)
 
+    def test_repeat_survives_heavy_near_duplicates(self):
+        sets = [os_.shingles(f"please rebase this branch on main, rerun the full gate, and report each failure for ticket{n}")
+                for n in range(201)]
+        groups = os_.cluster(sets, os_.REPEAT_THRESHOLD, max_df=200)
+        self.assertEqual(groups, [list(range(201))])
+        self.assertEqual(len(os_.cluster(sets, os_.REPEAT_THRESHOLD, max_df=2)), 1)
+
     def test_repeat_threshold(self):
         a = os_.shingles("one two three four five six seven eight nine ten")
         b = os_.shingles("one two three four five six seven eight nine eleven")
