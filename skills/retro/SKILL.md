@@ -7,6 +7,8 @@ description: Periodic retrospective over recent agent sessions. Runs scripts/ret
 
 Agents keep writing the same throwaway tools, hitting the same harness bugs, and asking the same questions. retro turns that history into fixes. Run it every week or two over the default 14-day window; a longer gap only makes the reports noisier.
 
+Findings about how the operator prompts or works with agents belong to `one-on-one` (`../one-on-one/SKILL.md`), which hands its system findings to retro as prompts.
+
 It keeps no state beyond its task dir: `TASK_DIR=$(<hworks>/scripts/task-dir.sh retro)`, run from the hworks checkout. Each run writes `findings-<YYYY-MM-DD>.md` there. Read the previous one first: a finding that comes back after its fix landed means the fix did not work, and goes to a higher level (see Triage).
 
 ## Privacy
