@@ -125,6 +125,14 @@ class Page(unittest.TestCase):
         self.assertIn("mail [redacted:email]", p.stdout)
         self.assertIn('data-title="about [redacted:custom]"', p.stdout)
 
+    def test_escaped_quote_does_not_end_secret_redaction(self):
+        data = findings(mark="")
+        data["summary"] = "cfg {\"password\": \"ab" + "\\\"cdLEAK" + "PART\", \"n\": 1}"
+        p = render(data)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("LEAK", p.stdout)
+        self.assertIn("[redacted:secret]", p.stdout)
+
     def test_ids_default_by_position_and_explicit_ids_are_kept(self):
         html = render(findings()).stdout
         self.assertEqual(re.findall(r'class="pick-box"[^>]*data-id="([^"]+)"', html), ["H1", "H2"])

@@ -352,6 +352,13 @@ class Redaction(unittest.TestCase):
         self.assertEqual(os_.redact("{\"token\": " + "'two words', \"n\": 1}"),
                          "{\"token\": '[redacted:secret]', \"n\": 1}")
 
+    def test_quoted_secret_runs_past_escaped_quotes(self):
+        for q in "\"'":
+            value = "ab" + "\\" + q + "cdLEAK" + "\\\\" + "efLEAK"
+            out = os_.redact(f"{{\"token\": {q}{value}{q}, \"n\": 1}}")
+            self.assertEqual(out, f"{{\"token\": {q}[redacted:secret]{q}, \"n\": 1}}", q)
+        self.assertEqual(os_.redact("pwd=" + "\"abcd\\\nnext"), "pwd=\"[redacted:secret]\nnext")
+
     def test_plain_text_is_kept(self):
         for t in ("the primary key is id", "add a token bucket limiter", "see https://example.com/a@b",
                   "bearer of bad news", "ship it"):
