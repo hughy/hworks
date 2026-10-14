@@ -304,7 +304,7 @@ class TaskPrune(unittest.TestCase):
         rep = self.run_hooked(TASK_AFTER_RESCAN_WRAPPER, TASK_DIR_HOOK=inner)
         self.assertTrue(os.path.exists(os.path.join(inner, ".task")))
         self.assertFalse(os.path.exists(os.path.join(inner, "old.bin")))
-        self.assertEqual(rep["freed_bytes"], rep["reclaimable_bytes"] - 1024)
+        self.assertEqual(rep["freed_bytes"], rep["reclaimable_bytes"])
 
     def test_stray_double_dash_dir_is_one_unit(self):
         stray = os.path.join(self.root, "old--clone")

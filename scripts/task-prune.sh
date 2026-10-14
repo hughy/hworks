@@ -222,9 +222,10 @@ def candidates(unit, unit_fd):
     return found
 
 
-def rmtree_at(name, parent_fd):
+def rmtree_at(name, parent_fd, freed):
     # Returns False when a .task file was kept, which also keeps its ancestors. A task
     # resumed after the scan can write one into a dir already chosen for deletion.
+    # freed[0] grows by the size of each regular file unlinked, even on a partial delete.
     fd = os.open(name, DIR_FLAGS, dir_fd=parent_fd)
     whole = True
     try:
@@ -232,11 +233,14 @@ def rmtree_at(name, parent_fd):
             entries = [(e.name, e.is_dir(follow_symlinks=False)) for e in it]
         for n, is_dir in entries:
             if is_dir:
-                whole = rmtree_at(n, fd) and whole
+                whole = rmtree_at(n, fd, freed) and whole
             elif n == ".task":
                 whole = False
             else:
+                st = lstat_at(n, fd)
                 os.unlink(n, dir_fd=fd)
+                if stat.S_ISREG(st.st_mode):
+                    freed[0] += st.st_size
     finally:
         os.close(fd)
     if whole:
@@ -245,30 +249,33 @@ def rmtree_at(name, parent_fd):
 
 
 def delete(path, kind, unit):
-    # path and unit are root-relative. Every step goes through dir fds opened with
-    # O_NOFOLLOW from root_fd, so a dir swapped for a symlink cannot redirect deletion.
+    # Returns the bytes actually freed. path and unit are root-relative. Every step goes
+    # through dir fds opened with O_NOFOLLOW from root_fd, so a dir swapped for a symlink
+    # cannot redirect deletion.
     rel = path.split(os.sep)
     depth = len(unit.split(os.sep))
     fds = [os.dup(root_fd)]
+    freed = [0]
     try:
         for name in rel[:-1]:
             fds.append(os.open(name, DIR_FLAGS, dir_fd=fds[-1]))
         st = lstat_at(rel[-1], fds[-1])
         if kind == "dir" and stat.S_ISDIR(st.st_mode):
-            if bulk_scan(rel[-1], fds[-1])[1] or not rmtree_at(rel[-1], fds[-1]):
-                return False
+            if bulk_scan(rel[-1], fds[-1])[1] or not rmtree_at(rel[-1], fds[-1], freed):
+                return freed[0]
         elif kind == "file" and stat.S_ISREG(st.st_mode):
             os.unlink(rel[-1], dir_fd=fds[-1])
+            freed[0] = st.st_size
         else:
-            return False
+            return 0
         for i in range(len(rel) - 1, depth, -1):
             try:
                 os.rmdir(rel[i - 1], dir_fd=fds[i - 1])
             except OSError:
                 break
-        return True
+        return freed[0]
     except OSError:
-        return False
+        return freed[0]
     finally:
         for fd in fds:
             os.close(fd)
@@ -310,8 +317,8 @@ for unit, shallow in units():
     for path, size, kind in found:
         report["candidates"].append({"path": path, "bytes": size, "kind": kind})
         report["reclaimable_bytes"] += size
-        if apply and delete(path, kind, unit):
-            report["freed_bytes"] += size
+        if apply:
+            report["freed_bytes"] += delete(path, kind, unit)
 
 def human(n):
     for unit in ("B", "KiB", "MiB", "GiB"):
