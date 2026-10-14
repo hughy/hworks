@@ -3,9 +3,18 @@
 
 usage: hansei-page.py <findings.json> [-o page.html]
 
-Writes to stdout unless -o is given. The page has all CSS and JS inline and makes no external
-requests. Every string from the JSON is HTML-escaped. Each prompt renders in a <pre> with a
-Copy button. The page quotes the operator's prompts: keep it out of repos.
+Writes to stdout unless -o is given. The page has all CSS and JS inline, makes no external
+requests, and keeps no state. Every string from the JSON is redacted with operator-signals.py's
+redact() (including HWORKS_REDACT, read from adapters/local/*.env as there) and HTML-escaped.
+Each prompt renders in a <pre> with a Copy button. The page quotes the operator's prompts: keep
+it out of repos.
+
+Plan hand-back: each finding has a checkbox and a comment box, and the page has an overall
+note. A Plan section composes, as the operator types, one message to paste into any agent: the
+absolute path of the findings JSON the page was built from, each ticked finding as
+"[<id>] <title>" with its comment, then the note. Its Copy button falls back to selecting the
+read-only plan text when the clipboard is denied. skills/hansei/SKILL.md says how an agent
+handles the message.
 
 Input schema (keys marked * are required; a missing one exits 2 naming it):
   {
@@ -15,6 +24,7 @@ Input schema (keys marked * are required; a missing one exits 2 naming it):
     "strengths": ["evidence-backed things that work; may be empty"],
     "findings"*: [
       {
+        "id": "H1 (default H<n> by position; ids must be unique, a duplicate exits 2 naming it)",
         "title"*: "short claim",
         "owner"*: "you | system | both",
         "pattern"*: "what happens, with counts",
@@ -31,9 +41,16 @@ Input schema (keys marked * are required; a missing one exits 2 naming it):
 Findings render in the order given.
 """
 import argparse
+import importlib.util
 import json
+import os
 import sys
 from html import escape
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location("operator_signals", os.path.join(HERE, "operator-signals.py"))
+osig = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(osig)
 
 REQUIRED = ["title", "window", "summary", "findings"]
 FINDING_REQUIRED = ["title", "owner", "pattern", "cost", "suggestion", "prompts"]
@@ -65,6 +82,12 @@ pre { margin: .3rem 0 0; padding: .75rem 1rem; background: var(--soft); border: 
 button.copy { font: inherit; font-size: .85rem; padding: .15rem .7rem; color: var(--accent); background: #fff;
   border: 1px solid var(--accent); border-radius: 3px; cursor: pointer; }
 button.copy:hover { background: var(--soft); }
+.fid { margin-left: .5rem; color: var(--muted); font-size: .8rem; font-weight: 400; vertical-align: middle; }
+.pick { display: block; margin: 1rem 0 .3rem; font-weight: 600; }
+textarea { width: 100%; min-height: 3.5rem; padding: .5rem .75rem; border: 1px solid var(--rule); border-radius: 4px;
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+textarea#plan { min-height: 10rem; background: var(--soft);
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 """
 
 JS = """
@@ -74,18 +97,48 @@ function selectText(el) {
 }
 document.querySelectorAll('button.copy').forEach(function (b) {
   b.addEventListener('click', function () {
-    var pre = document.getElementById(b.getAttribute('data-target'));
+    var el = document.getElementById(b.getAttribute('data-target'));
+    var isField = el.tagName === 'TEXTAREA';
     var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
-    var fallback = function () { selectText(pre); b.textContent = 'Selected: press Ctrl+C or Cmd+C'; };
+    var fallback = function () {
+      if (isField) { el.focus(); el.select(); } else { selectText(el); }
+      b.textContent = 'Selected: press Ctrl+C or Cmd+C';
+    };
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(pre.textContent).then(done, fallback);
+      navigator.clipboard.writeText(isField ? el.value : el.textContent).then(done, fallback);
     } else { fallback(); }
   });
 });
+var plan = document.getElementById('plan');
+function composePlan() {
+  var lines = ['Hansei plan. Findings JSON: ' + plan.getAttribute('data-source'),
+    'Re-read each finding below by id from that file before acting on it.', ''];
+  var picked = 0;
+  document.querySelectorAll('input.pick-box').forEach(function (c) {
+    if (!c.checked) { return; }
+    picked++;
+    lines.push('[' + c.getAttribute('data-id') + '] ' + c.getAttribute('data-title'));
+    var note = document.getElementById(c.getAttribute('data-comment')).value.trim();
+    if (note) { lines.push('Comment: ' + note); }
+    lines.push('');
+  });
+  if (!picked) { lines.push('(no finding ticked)', ''); }
+  var overall = document.getElementById('note').value.trim();
+  if (overall) { lines.push('Note: ' + overall); }
+  plan.value = lines.join('\\n').trim() + '\\n';
+}
+document.querySelectorAll('input.pick-box, textarea.comment, textarea#note').forEach(function (el) {
+  el.addEventListener('input', composePlan); el.addEventListener('change', composePlan);
+});
+composePlan();
 """
 
 
 class MissingKey(Exception):
+    pass
+
+
+class DuplicateId(Exception):
     pass
 
 
@@ -95,15 +148,18 @@ def need(obj, key, where):
     return obj[key]
 
 
+REDACT_EXTRA = None
+
+
 def e(v):
-    return escape(str(v), quote=True)
+    return escape(osig.redact(str(v), REDACT_EXTRA), quote=True)
 
 
 def para(text):
     return "".join(f"<p>{e(p)}</p>" for p in str(text).split("\n\n") if p.strip())
 
 
-def render(data):
+def render(data, source=""):
     for k in REQUIRED:
         need(data, k, "")
     for i, f in enumerate(data["findings"]):
@@ -112,6 +168,12 @@ def render(data):
         for j, p in enumerate(f["prompts"]):
             for k in PROMPT_REQUIRED:
                 need(p, k, f"findings[{i}].prompts[{j}].")
+    ids = []
+    for i, f in enumerate(data["findings"]):
+        fid = str(f.get("id") or f"H{i + 1}")
+        if fid in ids:
+            raise DuplicateId(f"findings[{i}].id {fid}")
+        ids.append(fid)
 
     out = ["<!DOCTYPE html>", '<html lang="en"><head><meta charset="utf-8">',
            '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -125,7 +187,8 @@ def render(data):
     if not data["findings"]:
         out.append("<p>No finding met the bar this time.</p>")
     for i, f in enumerate(data["findings"]):
-        out.append(f'<h3>{i + 1}. {e(f["title"])}<span class="owner">{e(f["owner"])}</span></h3>')
+        out.append(f'<h3>{i + 1}. {e(f["title"])}<span class="owner">{e(f["owner"])}</span>'
+                   f'<span class="fid">{e(ids[i])}</span></h3>')
         out.append(para(f["pattern"]))
         ev = f.get("evidence") or {}
         if ev:
@@ -141,8 +204,19 @@ def render(data):
             out.append(f'<div class="prompt"><div class="prompt-head"><span class="label">{e(p["label"])}</span>'
                        f'<button class="copy" type="button" data-target="{pid}">Copy</button></div>'
                        f'<pre id="{pid}">{e(p["text"])}</pre></div>')
+        out.append(f'<label class="pick"><input type="checkbox" class="pick-box" id="pick-{i}" data-id="{e(ids[i])}" '
+                   f'data-title="{e(f["title"])}" data-comment="comment-{i}"> Add [{e(ids[i])}] to the plan</label>'
+                   f'<textarea class="comment" id="comment-{i}" aria-label="Comment on {e(ids[i])}" '
+                   f'placeholder="Optional comment for the agent"></textarea>')
     if data.get("dropped"):
         out += ["<h2>Dropped</h2>", "<ul>", *(f"<li>{e(d)}</li>" for d in data["dropped"]), "</ul>"]
+    out += ["<h2>Plan</h2>",
+            "<p>Tick findings above, comment on them, add a note, then copy the plan into an agent.</p>",
+            '<label class="pick" for="note">Note</label>',
+            '<textarea id="note" placeholder="Optional note for the whole plan"></textarea>',
+            '<div class="prompt"><div class="prompt-head"><span class="label">Plan message</span>'
+            '<button class="copy plan-copy" type="button" data-target="plan">Copy</button></div>'
+            f'<textarea id="plan" readonly data-source="{e(source)}"></textarea></div>']
     out.append(f"</main><script>{JS}</script></body></html>")
     return "\n".join(out) + "\n"
 
@@ -159,10 +233,16 @@ def main(argv=None):
     except (OSError, ValueError) as err:
         print(f"hansei-page: {args.findings}: {err}", file=sys.stderr)
         sys.exit(2)
+    global REDACT_EXTRA
+    osig.load_env_files()
+    REDACT_EXTRA = osig.redact_pattern()
     try:
-        html = render(data)
+        html = render(data, os.path.abspath(args.findings))
     except MissingKey as err:
         print(f"hansei-page: missing required key: {err}", file=sys.stderr)
+        sys.exit(2)
+    except DuplicateId as err:
+        print(f"hansei-page: duplicate finding id: {err}", file=sys.stderr)
         sys.exit(2)
     if args.output:
         with open(args.output, "w") as f:

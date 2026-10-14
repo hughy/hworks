@@ -4,11 +4,15 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "operator-signals.py")
 FIXTURES = os.path.join(HERE, "testdata", "operator-signals")
+CLAUDE = os.path.join(HERE, "testdata", "operator-signals-claude")
+CODEX = os.path.join(HERE, "testdata", "operator-signals-codex")
+NOWHERE = "/nonexistent/hworks-test"
 
 spec = importlib.util.spec_from_file_location("operator_signals", SCRIPT)
 os_ = importlib.util.module_from_spec(spec)
@@ -17,8 +21,13 @@ spec.loader.exec_module(os_)
 SKIP = re.compile("^AUTOPING")
 
 
-def run(since="2026-09-01", skip=SKIP, prefix=None, **kw):
-    src = {"sessions": FIXTURES, "skip": skip, "prefix": prefix}
+def run(since="2026-09-01", skip=SKIP, prefix=None, sessions=FIXTURES, claude=None, codex=None, redact=None, **kw):
+    src = {"sessions": sessions, "skip": skip, "prefix": prefix, "redact": redact}
+    if sessions is None:
+        del src["sessions"]
+    for k, v in (("claude", claude), ("codex", codex)):
+        if v:
+            src[k] = v
     kw.setdefault("min_sessions", 1)
     report, _ = os_.analyze(src, os_.parse_since(since), **kw)
     return report
@@ -90,6 +99,7 @@ class Injections(unittest.TestCase):
         out = subprocess.run([sys.executable, SCRIPT, "--since", "2026-09-01", "--json"], capture_output=True,
                              text=True, check=True,
                              env=dict(os.environ, HWORKS_PI_SESSIONS=FIXTURES, HWORKS_OPERATOR_SKIP="^AUTOPING",
+                                      HWORKS_CLAUDE_SESSIONS=NOWHERE, HWORKS_CODEX_SESSIONS=NOWHERE,
                                       HWORKS_INJECTED_PREFIX=r"Please refactor the parser module so that it handles"))
         r = json.loads(out.stdout)
         self.assertEqual(r["totals"]["skipped_no_operator_text"], 1)
@@ -137,7 +147,7 @@ class Signals(unittest.TestCase):
         groups = run()["repeat"]["groups"]
         self.assertEqual([(g["sessions"], g["count"]) for g in groups], [(2, 2)])
         self.assertEqual({e["session"] for e in groups[0]["examples"]},
-                         {"proj-a/2026-10-01_s1.jsonl", "proj-b/2026-10-02_s2.jsonl"})
+                         {"pi:proj-a/2026-10-01_s1.jsonl", "pi:proj-b/2026-10-02_s2.jsonl"})
 
     def test_repeat_survives_heavy_repetition(self):
         same = os_.shingles("please rebase this branch on main, rerun the full gate, and report each failure")
@@ -210,16 +220,157 @@ class Signals(unittest.TestCase):
         self.assertEqual(ex["after"], "Committed. Anything else?")
 
 
+def all_texts(ops):
+    return [o["text"] for o in ops]
+
+
+class ClaudeCode(unittest.TestCase):
+    def read(self):
+        return os_.read_claude(os.path.join(CLAUDE, "-w-claude", "c1.jsonl"), os_.parse_since("2026-09-01"),
+                               {"skip": None, "prefix": None}, [], set())
+
+    def test_operator_messages(self):
+        cwd, users, ops = self.read()
+        self.assertEqual(cwd, "/w/claude")
+        self.assertEqual(all_texts(ops), ["Add a retry to the fetch helper and cover it with a unit test.", "yes",
+                                          "Now run the full suite", "Actually, run only the fetch tests"])
+        self.assertEqual([o["prev_stop"] for o in ops], [None, "stop", None, "aborted"])
+        self.assertEqual(ops[1]["agent"], "Added the retry.\nShould I commit?")
+        self.assertEqual(ops[1]["after"], "Committed.")
+
+    def test_signals_and_scope(self):
+        r = run(sessions=None, claude=CLAUDE)
+        self.assertEqual((r["totals"]["sessions"], r["totals"]["skipped_subagent"]), (1, 1))
+        self.assertEqual(r["totals"]["harnesses"], {"claude": {"sessions": 1, "operator_messages": 4}})
+        self.assertEqual(keys(r, "approval"), {"yes": (1, 1)})
+        self.assertEqual(keys(r, "abort"), {"after an aborted turn": (1, 1)})
+        self.assertEqual(texts(r, "abort"), ["Actually, run only the fetch tests"])
+        self.assertEqual(r["approval"]["groups"][0]["examples"][0]["session"], "claude:-w-claude/c1.jsonl")
+
+
+class Codex(unittest.TestCase):
+    def read(self, name):
+        return os_.read_codex(os.path.join(CODEX, "2026", "10", "05", name), os_.parse_since("2026-09-01"),
+                              {"skip": None, "prefix": None}, [])
+
+    def test_operator_messages(self):
+        cwd, users, ops = self.read("rollout-2026-10-05T09-00-00-a.jsonl")
+        self.assertEqual(cwd, "/w/codex")
+        self.assertEqual(all_texts(ops), ["Rename the config loader and update every caller.", "go ahead",
+                                          "stop, push to the fork instead"])
+        self.assertEqual([o["prev_stop"] for o in ops], [None, "stop", "aborted"])
+        self.assertEqual([o["agent"] for o in ops], ["", "Renamed. Want me to push?", "Pushing to origin now."])
+
+    def test_thread_not_started_by_operator_is_skipped(self):
+        self.assertIsNone(self.read("rollout-2026-10-05T09-30-00-b.jsonl"))
+
+    def test_signals_and_scope(self):
+        r = run(sessions=None, codex=CODEX)
+        self.assertEqual((r["totals"]["sessions"], r["totals"]["skipped_subagent"]), (1, 1))
+        self.assertEqual(keys(r, "approval"), {"go ahead": (1, 1)})
+        self.assertEqual(keys(r, "abort"), {"after an aborted turn": (1, 1)})
+        self.assertEqual(keys(r, "correction"), {"stop": (1, 1)})
+
+
+class Harnesses(unittest.TestCase):
+    def test_all_harnesses_together_with_prefixed_keys(self):
+        r = run(claude=CLAUDE, codex=CODEX)
+        self.assertEqual(r["totals"]["harnesses"], {"pi": {"sessions": 3, "operator_messages": 15},
+                                                    "claude": {"sessions": 1, "operator_messages": 4},
+                                                    "codex": {"sessions": 1, "operator_messages": 3}})
+        self.assertEqual(r["totals"]["sessions"], 5)
+        self.assertEqual({e["session"].split(":")[0] for g in r["approval"]["groups"] for e in g["examples"]},
+                         {"pi", "claude", "codex"})
+
+    def test_missing_claude_and_codex_are_reported_not_fatal(self):
+        r = run(claude=NOWHERE, codex=NOWHERE)
+        self.assertEqual(r["totals"]["sessions"], 3)
+        self.assertIn(f"Claude Code sessions: not found ({NOWHERE})", r["missing"])
+        self.assertIn(f"Codex sessions: not found ({NOWHERE})", r["missing"])
+
+    def test_text_header_reports_each_harness_and_missing_source(self):
+        env = dict(os.environ, HWORKS_PI_SESSIONS=FIXTURES, HWORKS_CLAUDE_SESSIONS=CLAUDE,
+                   HWORKS_CODEX_SESSIONS=NOWHERE, HWORKS_OPERATOR_SKIP="^AUTOPING")
+        out = subprocess.run([sys.executable, SCRIPT, "--since", "2026-09-01"], capture_output=True, text=True,
+                             env=env, check=True).stdout
+        self.assertIn("pi: 3 sessions, 15 operator messages", out)
+        self.assertIn("claude: 1 sessions, 4 operator messages", out)
+        self.assertIn("codex: 0 sessions, 0 operator messages", out)
+        self.assertIn(f"missing: Codex sessions: not found ({NOWHERE})", out)
+
+
+# Built at runtime so no committed file looks like a live credential to a secret scanner.
+SECRETS = {
+    "private-key": ("-----BEGIN RSA PRIVATE KEY-----\nMIIEow" + "Q" * 40 + "\n-----END RSA PRIVATE KEY-----",
+                    "MIIEow"),
+    "aws-key": ("AKIA" + "ABCDEFGHIJKLMNOP", "AKIA" + "ABCDEFGHIJKLMNOP"),
+    "github-token": ("gh" + "p_" + "a1B2" * 9, "a1B2" * 9),
+    "slack-token": ("xo" + "xb-" + "1234567890-abcdefghij", "1234567890-abcdefghij"),
+    "jwt": ("eyJ" + "hbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnopqrstuv", "hbGciOiJIUzI1NiJ9"),
+    "bearer": ("Authorization: Bearer " + "abcdef0123456789xyz", "abcdef0123456789xyz"),
+    "secret": ("api_key=" + "s3cr3tvalue99", "s3cr3tvalue99"),
+    "url-credentials": ("https://deploy:" + "hunter2pass" + "@git.example.com/repo", "hunter2pass"),
+    "email": ("alice" + "@example.com", "alice" + "@example.com"),
+    "custom": ("ticket ACME-" + "4821 is the one", "ACME-" + "4821"),
+}
+
+
+class Redaction(unittest.TestCase):
+    def test_each_kind_is_replaced(self):
+        extra = re.compile(r"ACME-\d+")
+        for kind, (text, raw) in SECRETS.items():
+            out = os_.redact(f"before {text} after", extra)
+            self.assertNotIn(raw, out, kind)
+            self.assertIn(f"[redacted:{kind}]", out, kind)
+            self.assertTrue(out.startswith("before ") and out.endswith(" after"), out)
+        self.assertEqual(os_.redact("gh" + "o_" + "x" * 30), "[redacted:github-token]")
+        self.assertEqual(os_.redact("github_" + "pat_" + "11ABC" * 6), "[redacted:github-token]")
+        self.assertEqual(os_.redact("password: " + "\"hunter22\""), "password: \"[redacted:secret]\"")
+
+    def test_plain_text_is_kept(self):
+        for t in ("the primary key is id", "add a token bucket limiter", "see https://example.com/a@b",
+                  "bearer of bad news", "ship it"):
+            self.assertEqual(os_.redact(t), t)
+
+    def test_text_and_json_reports_are_redacted(self):
+        with tempfile.TemporaryDirectory() as d:
+            for n, (kind, (text, _)) in enumerate(SECRETS.items()):
+                rows = [{"type": "session", "cwd": "/w/r"},
+                        {"type": "message", "timestamp": f"2026-10-0{1 + n % 9}T10:00:00Z",
+                         "message": {"role": "assistant", "content": [{"type": "text", "text": f"Saw {text}."}],
+                                     "stopReason": "stop"}},
+                        {"type": "message", "timestamp": f"2026-10-0{1 + n % 9}T10:01:00Z",
+                         "message": {"role": "user", "content": f"Actually use {text} here"}}]
+                with open(os.path.join(d, f"s{n}.jsonl"), "w") as f:
+                    f.write("\n".join(json.dumps(r) for r in rows) + "\n")
+            env = dict(os.environ, HWORKS_PI_SESSIONS=d, HWORKS_CLAUDE_SESSIONS=NOWHERE,
+                       HWORKS_CODEX_SESSIONS=NOWHERE, HWORKS_REDACT=r"ACME-\d+")
+            env.pop("HWORKS_OPERATOR_SKIP", None)
+            env.pop("HWORKS_INJECTED_PREFIX", None)
+            args = [sys.executable, SCRIPT, "--since", "2026-09-01", "--min-sessions", "1", "--examples", "20",
+                    "--max-chars", "1000", "--context"]
+            text_out = subprocess.run(args, capture_output=True, text=True, env=env, check=True).stdout
+            json_out = subprocess.run(args + ["--json"], capture_output=True, text=True, env=env, check=True).stdout
+        examples = json.loads(json_out)["correction"]["groups"][0]["examples"]
+        self.assertEqual(len(examples), len(SECRETS))
+        for kind, (_, raw) in SECRETS.items():
+            for name, out in (("text", text_out), ("json", json_out)):
+                self.assertNotIn(raw, out, (kind, name))
+                self.assertGreaterEqual(out.count(f"[redacted:{kind}]"), 2, (kind, name))
+
+
 class Cli(unittest.TestCase):
     def cli(self, *args):
-        env = dict(os.environ, HWORKS_PI_SESSIONS=FIXTURES, HWORKS_OPERATOR_SKIP="^AUTOPING")
+        env = dict(os.environ, HWORKS_PI_SESSIONS=FIXTURES, HWORKS_OPERATOR_SKIP="^AUTOPING",
+                   HWORKS_CLAUDE_SESSIONS=NOWHERE, HWORKS_CODEX_SESSIONS=NOWHERE)
         env.pop("HWORKS_INJECTED_PREFIX", None)
+        env.pop("HWORKS_REDACT", None)
         return subprocess.run([sys.executable, SCRIPT, "--since", "2026-09-01", *args], capture_output=True,
                               text=True, env=env, check=True)
 
     def test_json_round_trips(self):
         r = json.loads(self.cli("--json", "--min-sessions", "1").stdout)
-        self.assertEqual(r, json.loads(json.dumps(run())))
+        self.assertEqual(r, json.loads(json.dumps(run(claude=NOWHERE, codex=NOWHERE))))
 
     def test_text_report_has_header_and_sections(self):
         out = self.cli().stdout

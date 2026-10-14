@@ -1,0 +1,2 @@
+{"type": "user", "uuid": "u101", "timestamp": "2026-10-04T10:01:00.000Z", "cwd": "/w/claude", "sessionId": "c1", "isSidechain": false, "message": {"role": "user", "content": "subagent task prompt"}}
+{"type": "assistant", "uuid": "u102", "timestamp": "2026-10-04T10:02:00.000Z", "cwd": "/w/claude", "sessionId": "c1", "isSidechain": false, "message": {"id": "s1", "role": "assistant", "content": [{"type": "text", "text": "subagent reply"}], "stop_reason": "end_turn"}}

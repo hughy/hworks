@@ -1,0 +1,15 @@
+{"timestamp": "2026-10-05T09:00:00.000Z", "type": "session_meta", "payload": {"id": "x1", "cwd": "/w/codex", "source": "cli", "thread_source": "user", "base_instructions": {"text": "instructions"}}}
+{"timestamp": "2026-10-05T09:01:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "# AGENTS.md instructions for /w/codex\n\nInjected guidance text."}]}}
+{"timestamp": "2026-10-05T09:01:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Rename the config loader and update every caller."}]}}
+{"timestamp": "2026-10-05T09:01:00.000Z", "type": "event_msg", "payload": {"type": "user_message", "message": "Rename the config loader and update every caller.", "images": []}}
+{"timestamp": "2026-10-05T09:01:00.000Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "t1"}}
+{"timestamp": "2026-10-05T09:02:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Renamed. Want me to push?"}]}}
+{"timestamp": "2026-10-05T09:02:00.000Z", "type": "event_msg", "payload": {"type": "agent_message", "message": "Renamed. Want me to push?"}}
+{"timestamp": "2026-10-05T09:02:00.000Z", "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "t1", "last_agent_message": "Renamed. Want me to push?"}}
+{"timestamp": "2026-10-05T09:03:00.000Z", "type": "event_msg", "payload": {"type": "user_message", "message": "go ahead", "images": []}}
+{"timestamp": "2026-10-05T09:04:00.000Z", "type": "event_msg", "payload": {"type": "agent_message", "message": "Pushing to origin now."}}
+{"timestamp": "2026-10-05T09:04:00.000Z", "type": "event_msg", "payload": {"type": "turn_aborted", "turn_id": "t2", "reason": "interrupted"}}
+{"timestamp": "2026-10-05T09:05:00.000Z", "type": "event_msg", "payload": {"type": "user_message", "message": "stop, push to the fork instead", "images": []}}
+{"timestamp": "2026-10-05T09:06:00.000Z", "type": "event_msg", "payload": {"type": "agent_message", "message": "Pushed to the fork."}}
+{"timestamp": "2026-10-05T09:06:00.000Z", "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "t3"}}
+{"timestamp": "2026-10-05T09:07:00.000Z", "type": "event_msg", "payload": {"type": "user_message", "message": "<environment_context>\n  <cwd>/w/codex</cwd>\n</environment_context>", "images": []}}
