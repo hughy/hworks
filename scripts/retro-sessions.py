@@ -11,7 +11,8 @@ usage: retro-sessions.py [--since YYYY-MM-DD|7d] [--min-sessions N] [--top N] [-
 Sources (each optional; a missing one is reported, not fatal):
   HWORKS_PI_SESSIONS   pi session transcripts, **/*.jsonl (default ~/.pi/agent/sessions)
   HWORKS_TASKS_DIR     task dirs; files written there count as scratch scripts
-                       (default ~/.local/state/agent-tasks)
+                       (default $XDG_STATE_HOME/agent-tasks; $XDG_STATE_HOME
+                       defaults to ~/.local/state)
   HWORKS_TOOL_DIRS     extra colon-separated dirs whose entry names count as existing tools,
                        besides this repo's scripts/ and skills/ (unset by default)
 adapters/local/*.env, when present, is read first to set any of these; values already in the
@@ -160,7 +161,8 @@ def sources():
     tmp = os.environ.get("TMPDIR") or "/tmp"
     return {
         "sessions": os.environ.get("HWORKS_PI_SESSIONS") or os.path.join(home, ".pi/agent/sessions"),
-        "tasks": os.environ.get("HWORKS_TASKS_DIR") or os.path.join(home, ".local/state/agent-tasks"),
+        "tasks": os.environ.get("HWORKS_TASKS_DIR")
+        or os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local/state"), "agent-tasks"),
         "tmp": tmp,
         "tool_dirs": [d for d in (os.environ.get("HWORKS_TOOL_DIRS") or "").split(":") if d],
     }

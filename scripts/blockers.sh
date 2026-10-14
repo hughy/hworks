@@ -5,8 +5,9 @@
 # usage: blockers.sh [--since YYYY-MM-DD|7d] [--json]
 #
 # Sources (each optional; a missing one is reported, not fatal):
-#   HWORKS_BLOCKERS_LOG        autonomy.ts log (default ~/.local/state/agent-tasks/blockers.jsonl)
-#   HWORKS_TASKS_DIR           open-questions.md files (default ~/.local/state/agent-tasks)
+#   HWORKS_BLOCKERS_LOG        autonomy.ts log (default $HWORKS_TASKS_DIR/blockers.jsonl)
+#   HWORKS_TASKS_DIR           open-questions.md files (default $XDG_STATE_HOME/agent-tasks;
+#                              $XDG_STATE_HOME defaults to ~/.local/state)
 #   HWORKS_SUBAGENT_RUNS       pi-subagents async run dirs (default $TMPDIR/pi-subagents-uid-$UID/async-subagent-runs)
 #   HWORKS_RUN_HISTORY         pi-subagents run history (default ~/.pi/agent/run-history.jsonl)
 #   HWORKS_HARNESS_AUDIT_LOG   a harness guard audit log: JSONL rows with ts, action, rule (unset by default)
@@ -22,14 +23,14 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --since) since=${2:?--since needs a value}; shift 2 ;;
     --json) json=1; shift ;;
-    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
 export BLOCKERS_SINCE=$since BLOCKERS_JSON=$json
-export HWORKS_BLOCKERS_LOG=${HWORKS_BLOCKERS_LOG:-$HOME/.local/state/agent-tasks/blockers.jsonl}
-export HWORKS_TASKS_DIR=${HWORKS_TASKS_DIR:-$HOME/.local/state/agent-tasks}
+export HWORKS_TASKS_DIR=${HWORKS_TASKS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-tasks}
+export HWORKS_BLOCKERS_LOG=${HWORKS_BLOCKERS_LOG:-$HWORKS_TASKS_DIR/blockers.jsonl}
 export HWORKS_SUBAGENT_RUNS=${HWORKS_SUBAGENT_RUNS:-${TMPDIR:-/tmp}/pi-subagents-uid-$(id -u)/async-subagent-runs}
 export HWORKS_RUN_HISTORY=${HWORKS_RUN_HISTORY:-$HOME/.pi/agent/run-history.jsonl}
 export HWORKS_HARNESS_AUDIT_LOG=${HWORKS_HARNESS_AUDIT_LOG:-}

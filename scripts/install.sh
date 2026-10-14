@@ -13,7 +13,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 pi=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}
 settings=${PI_SETTINGS:-$pi/settings.json}
-tasks=${HWORKS_TASKS_DIR:-$HOME/.local/state/agent-tasks}
+tasks=${HWORKS_TASKS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-tasks}
 
 check=0; profile=
 while [ $# -gt 0 ]; do
