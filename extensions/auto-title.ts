@@ -1,8 +1,11 @@
 // Names a pi session from its content so clients that show the name (Zed via pi-acp, `/resume`) stop showing the
 // first prompt. After the first finished agent run, it asks a model for a short title and calls pi.setSessionName().
+// It is off unless PI_AUTO_TITLE=1: a host-managed extension may already title sessions, and such an extension can
+// read any rename it did not make as a manual one and stop. Enable it only where that titling never runs, such as
+// Zed via pi-acp, which names every new session from its first prompt (set the flag in the Zed agent_servers entry).
 // It only replaces a name that is empty, that it set itself, or that is the first-prompt title pi-acp sets, so a
-// name you set with /name stays. `/auto-title` re-titles the session on demand, even over a name you set.
-// PI_AUTO_TITLE=0 disables it. PI_AUTO_TITLE_MODEL=provider/id picks the model (default: the session model).
+// name you set with /name stays. `/auto-title` re-titles on demand, even over a name you set, with or without the flag.
+// PI_AUTO_TITLE_MODEL=provider/id picks the model (default: the session model).
 
 const ENTRY = "auto-title";
 const MAX_TITLE = 60;
@@ -126,7 +129,7 @@ export default function (pi: any) {
   }
 
   pi.on("agent_end", (_event: any, ctx: any) => {
-    if (process.env.PI_AUTO_TITLE === "0" || titled || (ctx.mode !== "tui" && ctx.mode !== "rpc")) return;
+    if (process.env.PI_AUTO_TITLE !== "1" || titled || (ctx.mode !== "tui" && ctx.mode !== "rpc")) return;
     void run(ctx, false);
   });
 

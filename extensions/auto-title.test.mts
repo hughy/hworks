@@ -1,5 +1,5 @@
-delete process.env.PI_AUTO_TITLE;
 delete process.env.PI_AUTO_TITLE_MODEL;
+process.env.PI_AUTO_TITLE = "1";
 const { default: register, messages, promptTitle, canReplace, cleanTitle, buildPrompt } = await import("./auto-title.ts");
 
 let bad = 0;
@@ -89,11 +89,13 @@ const f = make({ model: null });
 await f.end();
 check("skips without model", f.state.completes === 0 && f.state.names.length === 0);
 
-process.env.PI_AUTO_TITLE = "0";
+delete process.env.PI_AUTO_TITLE;
 const g = make();
 await g.end();
-check("PI_AUTO_TITLE=0 disables", g.state.completes === 0);
-delete process.env.PI_AUTO_TITLE;
+check("off unless PI_AUTO_TITLE=1", g.state.completes === 0);
+await g.command().handler("", g.ctx);
+check("/auto-title works with the flag off", g.state.names.join() === "Zed thread naming", g.state);
+process.env.PI_AUTO_TITLE = "1";
 
 const r = make();
 r.h.session_start({}, { ...r.ctx, sessionManager: { ...r.ctx.sessionManager, getBranch: () => [...entries, { type: "custom", customType: "auto-title", data: { title: "Done" } }] } });
