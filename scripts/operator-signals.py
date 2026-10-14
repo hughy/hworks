@@ -264,12 +264,12 @@ def jaccard(a, b):
     return len(a & b) / len(a | b) if a or b else 1.0
 
 
-def cluster(sets, threshold, max_df=200):
+def cluster(sets, threshold):
     """Group indexes of sets whose Jaccard similarity is at least threshold, transitively.
 
-    Identical sets merge first. Each distinct set is then compared, per shingle, with at most
-    the next max_df sets that share that shingle. That bounds the pairwise work on common
-    shingles while near-duplicates still chain into one group through their neighbors.
+    Exact: identical sets merge first, then every pair of distinct sets that shares a shingle
+    is compared, skipping pairs whose sizes alone rule the threshold out
+    (Jaccard <= min/max size). A periodic report over a few thousand messages runs in seconds.
     """
     same = defaultdict(list)
     for i, s in enumerate(sets):
@@ -291,10 +291,13 @@ def cluster(sets, threshold, max_df=200):
         cand = set()
         for x in s:
             posting = index[x]
-            at = bisect.bisect_right(posting, i)
-            cand.update(posting[at:at + max_df])
+            cand.update(posting[bisect.bisect_right(posting, i):])
+        n = len(s)
         for j in cand:
-            if find(i) != find(j) and jaccard(s, uniq[j]) >= threshold:
+            m = len(uniq[j])
+            if min(n, m) < threshold * max(n, m) or find(i) == find(j):
+                continue
+            if jaccard(s, uniq[j]) >= threshold:
                 parent[find(i)] = find(j)
     groups = defaultdict(list)
     for i, s in enumerate(uniq):

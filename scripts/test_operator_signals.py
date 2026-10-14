@@ -142,16 +142,22 @@ class Signals(unittest.TestCase):
     def test_repeat_survives_heavy_repetition(self):
         same = os_.shingles("please rebase this branch on main, rerun the full gate, and report each failure")
         other = os_.shingles("something unrelated entirely about writing the release notes for the week")
-        groups = os_.cluster([same] * 201 + [other], os_.REPEAT_THRESHOLD, max_df=200)
+        groups = os_.cluster([same] * 201 + [other], os_.REPEAT_THRESHOLD)
         self.assertIn(list(range(201)), groups)
         self.assertIn([201], groups)
 
     def test_repeat_survives_heavy_near_duplicates(self):
         sets = [os_.shingles(f"please rebase this branch on main, rerun the full gate, and report each failure for ticket{n}")
                 for n in range(201)]
-        groups = os_.cluster(sets, os_.REPEAT_THRESHOLD, max_df=200)
-        self.assertEqual(groups, [list(range(201))])
-        self.assertEqual(len(os_.cluster(sets, os_.REPEAT_THRESHOLD, max_df=2)), 1)
+        self.assertEqual(os_.cluster(sets, os_.REPEAT_THRESHOLD), [list(range(201))])
+
+    def test_repeat_survives_interleaved_template_distractors(self):
+        base = "please rebase this branch on main, rerun the full gate, and report each failure"
+        words = [f"w{n}" for n in range(201 * 30)]
+        distractors = [os_.shingles(base + " " + " ".join(words[k * 30:(k + 1) * 30])) for k in range(201)]
+        a, b = os_.shingles(base + " for ticket0"), os_.shingles(base + " for ticket1")
+        groups = os_.cluster([a] + distractors + [b], os_.REPEAT_THRESHOLD)
+        self.assertIn([0, 202], groups)
 
     def test_repeat_threshold(self):
         a = os_.shingles("one two three four five six seven eight nine ten")
