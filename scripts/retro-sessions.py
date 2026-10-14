@@ -6,7 +6,7 @@ scripts, repeated helper definitions, and calls that failed and were retried wit
 shape. A group marked [exists] names a script or skill that already exists, so the reader
 can tell a missing tool from an ignored one. Output goes to stdout and can quote private
 transcript content: do not redirect it into a repo.
-usage: retro-sessions.py [--since YYYY-MM-DD|7d] [--min-sessions N] [--top N] [--json]
+usage: retro-sessions.py [--since YYYY-MM-DD|7d] [--min-sessions N] [--top N] [--cwd-match TEXT]... [--json]
 
 Sources (each optional; a missing one is reported, not fatal):
   HWORKS_PI_SESSIONS   pi session transcripts, **/*.jsonl (default ~/.pi/agent/sessions)
@@ -16,6 +16,11 @@ Sources (each optional; a missing one is reported, not fatal):
                        besides this repo's scripts/ and skills/ (unset by default)
 adapters/local/*.env, when present, is read first to set any of these; values already in the
 environment win.
+
+Scope: --cwd-match keeps only sessions whose working directory (from the transcript header,
+else the transcript path) contains the text, case-insensitively; repeat it to keep any of
+several. Use it to report on one project's sessions, for example its repo name, which also
+matches worktrees named after the repo.
 
 Command shapes: each bash command is split into simple commands (on |, &&, ||, ;, newlines)
 after heredoc bodies, comments, quoted strings, $(...), and redirections are removed. A shape
@@ -594,7 +599,7 @@ def ordinary(word, subs, scripts, flags):
     return not flags
 
 
-def analyze(src, since, min_sessions=3, top=15, root=ROOT):
+def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=()):
     notes = []
     sroot = src["sessions"]
     if not os.path.isdir(sroot):
@@ -608,7 +613,10 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT):
                 continue
         except OSError:
             continue
-        calls, cwds[p] = read_session(p, since, notes)
+        calls, cwd = read_session(p, since, notes)
+        if cwd_match and not any(m.lower() in (cwd or os.path.relpath(p, sroot)).lower() for m in cwd_match):
+            continue
+        cwds[p] = cwd
         if calls:
             sessions[p] = calls
 
@@ -739,10 +747,12 @@ def main(argv=None):
     ap.add_argument("--since", default="14d", help="YYYY-MM-DD or Nd (default 14d)")
     ap.add_argument("--min-sessions", type=int, default=3, help="hide groups seen in fewer sessions (default 3)")
     ap.add_argument("--top", type=int, default=15, help="groups per section (default 15)")
+    ap.add_argument("--cwd-match", action="append", default=[], metavar="TEXT",
+                    help="keep sessions whose cwd contains TEXT (repeatable)")
     ap.add_argument("--json", action="store_true", help="one JSON object per group")
     args = ap.parse_args(argv)
     since = parse_since(args.since)
-    report, notes = analyze(sources(), since, args.min_sessions, args.top)
+    report, notes = analyze(sources(), since, args.min_sessions, args.top, cwd_match=args.cwd_match)
     if args.json:
         for section, rows in report.items():
             if section != "stats":
