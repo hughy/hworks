@@ -499,7 +499,7 @@ def cmd_launch(store, a):
         gate = units.get(row["id"], {}).get("gate") or cfg.get("gate")
         if not gate:
             return block("no gate: pass --gate to init or set gate on the unit")
-        out_dir = os.path.join(store, "outputs", row["id"])
+        out_dir = os.path.join(store, "outputs", row["id"], "a%d" % row["attempt"])
         os.makedirs(out_dir, exist_ok=True)
         p = subprocess.run(["bash", ARGS_SCRIPT, brief, gate, cfg["base"], row["effort"], row["worktree"], out_dir],
                            cwd=cfg["repo"], capture_output=True, text=True)
