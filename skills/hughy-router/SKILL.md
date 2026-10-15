@@ -53,7 +53,7 @@ A one-off slowness: `perf-issue.md`. Sustained improvement of one metric: `hillc
 
 ### Ship
 
-Open a PR: `opening-a-pr.md`. Drive a PR to merge-ready: `babysit.md`, with `../../pstack/skills/poteto-mode/references/bugbot-triage.md` for bot comments. Land a verified stack: `shipping.md`. Resume or hand off: `session-pickup.md`, `pause-safely.md`.
+Open a PR: `opening-a-pr.md`. Drive a PR to merge-ready: `babysit.md`, with `../../pstack/skills/poteto-mode/references/bugbot-triage.md` for bot comments. Land a verified stack: `shipping.md`. Resume or hand off: `session-pickup.md`, `pause-safely.md`. Scope a task out of a long session for a new session to own: `../handoff/SKILL.md`.
 
 ### Long run
 

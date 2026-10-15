@@ -21,7 +21,7 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 
 ### mattpocock/skills (49dd158, evaluated 2026-10-15)
 
-`writing-for-agents` was adopted as `skills/writing-for-agents/`. The skills in Watching above are not repeated here.
+`writing-for-agents` and `handoff` were adopted as `skills/writing-for-agents/` and `skills/handoff/`. The skills in Watching above are not repeated here.
 
 | skill | reason |
 |---|---|
@@ -33,7 +33,6 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 | `code-review` | The `reviewer` agent checks intent first and diversity comes from models, not axes. The smell baseline is default model behavior. No observed failure |
 | `research` | `explorer`, `synthesizer`, and `why` cover it |
 | `prototype` | pstack's `prototype.md` playbook covers it: throwaway, variants behind a switcher, observation as the test |
-| `handoff` | `$TASK_DIR/progress.md` and the session-pickup playbook cover hand-off |
 | `ask-matt` | hughy-router is the router, and `kaizen-setup.py` reports stale references. Its phase-boundary tree (`/clear`, `/compact`, hand-off) is harness-specific |
 | `retro` | kaizen, `/skill:correct`, and `friction.md` cover the retrospective. Its review-side split is in Watching |
 | `wait-what` | Same job as `bro` |
