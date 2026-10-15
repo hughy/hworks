@@ -48,6 +48,8 @@ import re
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timezone
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -72,39 +74,113 @@ PATHLIKE = re.compile(r"^(?:\.{1,2}/)*[\w.-]+(?:/[\w.-]+)+/?$")
 PLAIN_REF = re.compile(r"(?<![\w./~$<-])(scripts/[\w.-]*\w(?:/[\w.-]*\w)*|skills/[\w-]*\w|agents/[\w.-]*\w\.md)(?![\w/*<{-])")
 
 
-def yaml_scalar(first, rest):
-    """A top-level YAML scalar from its first-line text and its indented continuation lines:
-    block (| or >, with chomping), quoted, or plain folded across lines."""
-    block = re.match(r"([|>])([+-]?)\d*\s*(?:#.*)?$", first)
-    if block:
-        lines = [ln for ln in rest]
-        while lines and not lines[-1].strip():
-            lines.pop()
-        ind = min((len(ln) - len(ln.lstrip()) for ln in lines if ln.strip()), default=0)
-        lines = [ln[ind:] for ln in lines]
-        if block.group(1) == "|":
-            text = "\n".join(lines)
+_ESC = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f",
+        "r": "\r", "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", "N": "\x85",
+        "_": "\xa0", "L": "\u2028", "P": "\u2029"}
+_ESC_RE = re.compile(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)", re.S)
+
+
+def _unescape(s):
+    def sub(m):
+        e = m.group(1)
+        return chr(int(e[1:], 16)) if len(e) > 1 else _ESC.get(e, e)
+    return _ESC_RE.sub(sub, s)
+
+
+def _fold_block(lines, folded):
+    out, prev, blanks = "", None, 0
+    for ln in lines:
+        if not ln.strip(" \t") and not (ln and not folded):
+            blanks += 1
+            continue
+        if prev is None:
+            out = "\n" * blanks + ln
+        elif not folded:
+            out += "\n" * (blanks + 1) + ln
         else:
-            text, prev_blank = "", True
-            for ln in lines:
-                if not ln.strip():
-                    text += "\n"
-                    prev_blank = True
-                elif ln[:1] in " \t":
-                    text += ("" if prev_blank else "\n") + ln
-                    prev_blank = False
-                else:
-                    text += ("" if prev_blank else " ") + ln
-                    prev_blank = False
-        return text if block.group(2) == "-" else text + "\n"
-    parts = [first.strip()] + [ln.strip() for ln in rest]
-    text = " ".join(p for p in parts if p)
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
-        text = text[1:-1]
-        text = text.replace("''", "'") if first.lstrip()[:1] == "'" else text.replace('\\"', '"')
-    elif " #" in text:
-        text = text.split(" #", 1)[0].rstrip()
-    return text
+            plain = prev[:1] not in " \t" and ln[:1] not in " \t"
+            out += ("\n" * (blanks + (0 if plain else 1))) if blanks else (" " if plain else "\n")
+            out += ln
+        prev, blanks = ln, 0
+    return out, blanks
+
+
+def _fold_flow(lines, escapes):
+    out, k, joined = "", 0, False
+    for i, ln in enumerate(lines):
+        last = i == len(lines) - 1
+        if i:
+            ln = ln.lstrip(" \t")
+        esc = False
+        if not last:
+            if escapes and (len(ln) - len(ln.rstrip("\\"))) % 2:
+                ln, esc = ln[:-1], True
+            else:
+                ln = ln.rstrip(" \t")
+        if i and not last and not ln and not esc:
+            k += 1
+            continue
+        if i:
+            out += "" if joined and not k else ("\n" * k if k else " ")
+        out += ln
+        k, joined = 0, esc
+    return out
+
+
+def yaml_scalar(first, rest):
+    """A top-level YAML scalar from its first-line text and its continuation lines: block (| or
+    >, with indentation and chomping indicators), single- or double-quoted (escapes, folding),
+    or plain folded across lines."""
+    block = re.match(r"([|>])([1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#.*)?$", first)
+    if block:
+        style, ind_chomp = block.group(1), block.group(2) or ""
+        chomp = "".join(c for c in ind_chomp if c in "+-")
+        digit = "".join(c for c in ind_chomp if c.isdigit())
+        lines = list(rest)
+        if digit:
+            ind = int(digit)
+        else:
+            ind = next((len(ln) - len(ln.lstrip(" ")) for ln in lines if ln.strip(" \t")), 0)
+        lines = [ln[ind:] if len(ln) >= ind else "" for ln in lines]
+        text, trailing = _fold_block(lines, style == ">")
+        if chomp == "-" or not text:
+            return text if chomp != "+" else text + "\n" * trailing
+        return text + "\n" + ("\n" * trailing if chomp == "+" else "")
+    raw = "\n".join([first.lstrip(" \t")] + list(rest))
+    q = raw[:1]
+    if q in "'\"" and q:
+        i, n = 1, len(raw)
+        while i < n:
+            c = raw[i]
+            if q == '"' and c == "\\":
+                i += 2
+                continue
+            if c == q:
+                if q == "'" and raw[i + 1:i + 2] == "'":
+                    i += 2
+                    continue
+                break
+            i += 1
+        body = _fold_flow(raw[1:i].split("\n"), q == '"')
+        return _unescape(body) if q == '"' else body.replace("''", "'")
+    lines = []
+    for ln in raw.split("\n"):
+        cut = re.search(r"(?:^|[ \t])#", ln)
+        if cut:
+            ln = ln[:cut.start()]
+            lines.append(ln)
+            break
+        lines.append(ln)
+    out, k = "", 0
+    for ln in lines:
+        ln = ln.strip(" \t")
+        if not ln:
+            k += 1
+            continue
+        out += ("\n" * k if k else " ") if out else ""
+        out += ln
+        k = 0
+    return out
 
 
 def frontmatter(path):
@@ -148,12 +224,12 @@ def load_json(path, notes, label):
 
 def pathlike(v):
     v = v.lstrip("-!+")
-    return v.startswith(("/", "~/", "./", "../")) or v == "~"
+    return v.startswith(("/", "~/", "./", "../", "file://")) or v == "~"
 
 
 def is_pattern(v):
-    """pi treats these resource entries as filters, not paths to load."""
-    return v.startswith(("!", "+", "-")) or "*" in v or "?" in v
+    """pi treats these resource entries as filters or builtin names, not paths to load."""
+    return v.startswith(("!", "+", "-", "builtin:")) or "*" in v or "?" in v
 
 
 def is_local_source(v):
@@ -204,7 +280,13 @@ def local_packages(settings, base):
 
 
 def resolve_setting(v, base):
-    v = os.path.expanduser(v.lstrip("-!+"))
+    """A settings path the way pi's resolvePath reads it: trimmed, ~ expanded, file:// URLs
+    converted, relative to base."""
+    v = v.lstrip("-!+").strip()
+    if v == "~" or v.startswith("~/"):
+        v = os.path.expanduser(v)
+    elif v.startswith("file://"):
+        v = url2pathname(urlparse(v).path)
     return os.path.normpath(v if os.path.isabs(v) else os.path.join(base, v))
 
 

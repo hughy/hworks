@@ -215,6 +215,39 @@ class Loader(unittest.TestCase):
                                    "subagents.agentOverrides.a.subagentOnlyExtensions[0]":
                                        os.path.join(pi, "sub", "ext.ts")})
 
+    def test_builtin_and_file_url_settings(self):
+        pi = os.path.join(self.d, "pi")
+        ext = write(os.path.join(pi, "ext dir", "e.ts"))
+        sk = os.path.join(self.d, "file-skills")
+        skill(sk, "fileurl")
+        url = lambda p: "file://" + p.replace(" ", "%20")
+        settings = {"extensions": ["builtin:fixture", url(ext), url(os.path.join(pi, "gone.ts"))],
+                    "skills": [url(sk)]}
+        rows = ksu.audit_settings(settings, os.path.join(pi, "settings.json"), pi, None,
+                                  ksu.kt.Owners(self.d, rules=[]))
+        self.assertEqual([(r["key"], r["path"]) for r in rows if r["issue"] == "missing path"],
+                         [("extensions[2]", os.path.join(pi, "gone.ts"))])
+        roots = ksu.skill_roots(self.d, settings, None, pi)
+        rows, _ = ksu.audit_skills(roots[:1], None, ksu.kt.Owners(self.d, rules=[]), [])
+        self.assertEqual([r["name"] for r in rows], ["fileurl"])
+
+    def test_multiline_scalars_match_pi_yaml(self):
+        cases = {
+            'description: "Multi\n  line \\"q\\" here\\\n  joined\n\n  para\\tTab"\n':
+                'Multi line "q" herejoined\npara\tTab',
+            "description: |+\n  One line\n\n\n": "One line\n\n",
+            "description: |-\n  a\n\n  b\n\n": "a\n\nb",
+            "description: >\n  a\n  b\n\n  c\n    indented\n  d\n\n": "a b\nc\n  indented\nd\n",
+            "description: >2-\n    deep\n  base\n": "  deep\nbase",
+            "description: plain text\n  continues here\n\n  new para # comment\n":
+                "plain text continues here\nnew para",
+            "description: 'it''s\n  folded\n\n  para'\n": "it's folded\npara",
+            'description: "\\x41\\u00e9 \\/ \\\\ end"\n': "A\u00e9 / \\ end",
+        }
+        for i, (body, want) in enumerate(cases.items()):
+            p = write(os.path.join(self.d, f"y{i}.md"), "---\n" + body + "---\n")
+            self.assertEqual(ksu.frontmatter(p).get("description"), want, body)
+
     def test_plain_and_file_relative_refs(self):
         root = os.path.join(self.d, "hworks")
         write(os.path.join(root, "scripts", "real.py"))
