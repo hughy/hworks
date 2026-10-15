@@ -165,6 +165,88 @@ class Audit(unittest.TestCase):
         self.assertEqual(rep["skills"], [])
 
 
+class Loader(unittest.TestCase):
+    """Cases where pi's own loader and frontmatter parser decide what the audit must report."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.d = tmp.name
+
+    def test_folded_description(self):
+        p = write(os.path.join(self.d, "s", "SKILL.md"),
+                  "---\nname: s\ndescription: >-\n  Summarizes a pull request review\n  into useful notes.\n"
+                  "other: |\n  a\n  b\n---\nbody\n")
+        fm = ksu.frontmatter(p)
+        self.assertEqual(fm["description"], "Summarizes a pull request review into useful notes.")
+        self.assertEqual(fm["other"], "a\nb\n")
+        q = write(os.path.join(self.d, "t.md"), "---\ndescription: 'it''s plain'\nname: t\n---\n")
+        self.assertEqual(ksu.frontmatter(q), {"description": "it's plain", "name": "t"})
+
+    def test_skill_discovery_matches_pi(self):
+        root = os.path.join(self.d, "root")
+        skill(os.path.join(root, "a", "b", "c"), "four")
+        write(os.path.join(root, "plain.md"), "---\nname: plain\ndescription: loose skill\n---\n")
+        write(os.path.join(root, "nodesc.md"), "# no frontmatter\n")
+        skill(root, "parent")
+        skill(os.path.join(root, "parent"), "child")
+        skill(os.path.join(root, "node_modules"), "dep")
+        write(os.path.join(root, "x", "nested.md"), "---\ndescription: below root\n---\n")
+        single = write(os.path.join(self.d, "single.md"), "---\nname: single\ndescription: one file\n---\n")
+        roots = [(root, "settings skills", "pi"), (single, "settings skills", "pi")]
+        rows, _ = ksu.audit_skills(roots, None, ksu.kt.Owners(self.d, rules=[]), [])
+        self.assertEqual(sorted(r["name"] for r in rows), ["four", "parent", "plain", "single"])
+        rows, _ = ksu.audit_skills([(root, "~/.agents/skills", "agents")], None, ksu.kt.Owners(self.d, rules=[]), [])
+        self.assertEqual(sorted(r["name"] for r in rows), ["four", "parent", "x"])
+
+    def test_plain_relative_settings_paths(self):
+        pi = os.path.join(self.d, "pi")
+        os.makedirs(os.path.join(pi, "extensions"))
+        write(os.path.join(pi, "extensions", "here.ts"))
+        settings = {"extensions": ["extensions/missing.ts", "extensions/here.ts", "!extensions/x.ts"],
+                    "skills": ["missing-skills"], "packages": ["npm:foo", "local-pkg"],
+                    "subagents": {"agentOverrides": {"a": {"subagentOnlyExtensions": ["sub/ext.ts"]}}}}
+        rows = ksu.audit_settings(settings, os.path.join(pi, "settings.json"), pi, None,
+                                  ksu.kt.Owners(self.d, rules=[]))
+        missing = {r["key"]: r["path"] for r in rows if r["issue"] == "missing path"}
+        self.assertEqual(missing, {"extensions[0]": os.path.join(pi, "extensions", "missing.ts"),
+                                   "skills[0]": os.path.join(pi, "missing-skills"),
+                                   "packages[1]": os.path.join(pi, "local-pkg"),
+                                   "subagents.agentOverrides.a.subagentOnlyExtensions[0]":
+                                       os.path.join(pi, "sub", "ext.ts")})
+
+    def test_plain_and_file_relative_refs(self):
+        root = os.path.join(self.d, "hworks")
+        write(os.path.join(root, "scripts", "real.py"))
+        write(os.path.join(root, "skills", "own", "references", "here.md"))
+        write(os.path.join(root, "global", "AGENTS.md"),
+              "Run scripts/gone.py or scripts/real.py, load skills/vanished or skills/own, read agents/ghost.md.\n"
+              "See `gone-dir/file.md`. `~/.pi/agent/x.md` and https://h/scripts/web.py are not repo paths.\n")
+        write(os.path.join(root, "skills", "own", "SKILL.md"),
+              "---\nname: own\ndescription: d\n---\nRead `references/gone.md` and `references/here.md`.\n")
+        rows = ksu.audit_refs(root, {"own"}, ksu.kt.Owners(root, rules=[]))
+        self.assertEqual({(r["file"], r["ref"]) for r in rows},
+                         {("global/AGENTS.md", "scripts/gone.py"), ("global/AGENTS.md", "skills/vanished"),
+                          ("global/AGENTS.md", "agents/ghost.md"), ("global/AGENTS.md", "gone-dir/file.md"),
+                          ("skills/own/SKILL.md", "references/gone.md")})
+
+    def test_leftover_and_broken_link_owners(self):
+        root = os.path.join(self.d, "hworks")
+        os.makedirs(root)
+        pi = os.path.join(self.d, "pi")
+        write(os.path.join(pi, "fixture", "settings.json.bak"))
+        write(os.path.join(pi, "mine.bak"))
+        ext = os.path.join(pi, "extensions")
+        os.makedirs(ext)
+        os.symlink(os.path.join(root, "extensions", "gone.ts"), os.path.join(ext, "gone.ts"))
+        os.symlink(os.path.join(self.d, "elsewhere.ts"), os.path.join(ext, "lost.ts"))
+        owners = ksu.kt.Owners(root, rules=[(os.sep + "fixture" + os.sep, "upstream:fixture")])
+        left = {os.path.basename(r["path"]): r["owner"] for r in ksu.audit_leftovers(pi, owners, [])}
+        self.assertEqual(left, {"settings.json.bak": "upstream:fixture", "mine.bak": "local"})
+        exts = {r["name"]: (r["kind"], r["owner"]) for r in ksu.audit_extensions(ext, owners, [])}
+        self.assertEqual(exts, {"gone.ts": ("broken link", "hworks"), "lost.ts": ("broken link", "local")})
+
+
 class Cli(unittest.TestCase):
     def test_json_and_text(self):
         with tempfile.TemporaryDirectory() as d:

@@ -8,19 +8,21 @@ usage: kaizen-setup.py [--since YYYY-MM-DD|7d] [--cwd DIR] [--json]
 Sections:
   skills         every skill in the roots pi loads: settings.json `skills`, skill dirs of
                  settings.json `packages`, ~/.agents/skills, ~/.pi/agent/skills, and .pi/skills
-                 and .agents/skills under --cwd. Name, root, description length, and whether
-                 ~/.agents/.skill-lock.json manages it.
+                 and .agents/skills under --cwd, found the way pi's loader finds them. Name,
+                 root, description length, and whether ~/.agents/.skill-lock.json manages it.
   duplicates     a skill name loaded from more than one root.
-  settings       paths named in ~/.pi/agent/settings.json that do not exist or that pin a
+  settings       paths named in ~/.pi/agent/settings.json (resource lists, local packages,
+                 agentOverrides extension lists, other path-like strings) that do not exist or pin a
                  versioned install directory, and subagents.agentOverrides keys that name no
                  agent in ~/.pi/agent/agents/**, a package's agents/, or .pi/agents under --cwd
                  ("may be a builtin" unless subagents.disableBuiltins is true).
   extensions     each entry in ~/.pi/agent/extensions: kind, link target, broken links.
   leftovers      *.bak, *.pre-*, *.orig, and *~ files under ~/.pi/agent (sessions skipped).
-  stale refs     backticked paths, `scripts/...`, `skills/<name>`, `agents/<name>.md`,
-                 ../<name>/SKILL.md, and /skill:<name> in global/AGENTS.md, agents/*.md,
+  stale refs     backticked paths, scripts/..., skills/<name>, agents/<name>.md (backticked or
+                 not), ../<name>/SKILL.md, and /skill:<name> in global/AGENTS.md, agents/*.md,
                  adapters/*.md, and skills/*/SKILL.md that resolve to no file or skill. A
-                 relative path resolves against the file that names it, then the repo root.
+                 relative path resolves against the file that names it, then the repo root, then
+                 skills/ (a path that starts with a skill name).
   overlap        for each hworks skill, agent, and extension, the harness tools, skills, and
                  agents whose name and description share words with it, from the baseline prompt
                  of pi sessions since --since (default 14d). The score is word-set overlap
@@ -67,23 +69,69 @@ BACKTICK = re.compile(r"`([^`\n]+)`")
 SKILL_LINK = re.compile(r"(?<![\w.])((?:\.\./)+[\w.-]+/SKILL\.md)")
 SKILL_CMD = re.compile(r"/skill:([\w-]+)")
 PATHLIKE = re.compile(r"^(?:\.{1,2}/)*[\w.-]+(?:/[\w.-]+)+/?$")
+PLAIN_REF = re.compile(r"(?<![\w./~$<-])(scripts/[\w.-]*\w(?:/[\w.-]*\w)*|skills/[\w-]*\w|agents/[\w.-]*\w\.md)(?![\w/*<{-])")
+
+
+def yaml_scalar(first, rest):
+    """A top-level YAML scalar from its first-line text and its indented continuation lines:
+    block (| or >, with chomping), quoted, or plain folded across lines."""
+    block = re.match(r"([|>])([+-]?)\d*\s*(?:#.*)?$", first)
+    if block:
+        lines = [ln for ln in rest]
+        while lines and not lines[-1].strip():
+            lines.pop()
+        ind = min((len(ln) - len(ln.lstrip()) for ln in lines if ln.strip()), default=0)
+        lines = [ln[ind:] for ln in lines]
+        if block.group(1) == "|":
+            text = "\n".join(lines)
+        else:
+            text, prev_blank = "", True
+            for ln in lines:
+                if not ln.strip():
+                    text += "\n"
+                    prev_blank = True
+                elif ln[:1] in " \t":
+                    text += ("" if prev_blank else "\n") + ln
+                    prev_blank = False
+                else:
+                    text += ("" if prev_blank else " ") + ln
+                    prev_blank = False
+        return text if block.group(2) == "-" else text + "\n"
+    parts = [first.strip()] + [ln.strip() for ln in rest]
+    text = " ".join(p for p in parts if p)
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        text = text[1:-1]
+        text = text.replace("''", "'") if first.lstrip()[:1] == "'" else text.replace('\\"', '"')
+    elif " #" in text:
+        text = text.split(" #", 1)[0].rstrip()
+    return text
 
 
 def frontmatter(path):
-    """name and description from a markdown file's YAML frontmatter, or {} when absent."""
+    """Top-level scalar keys of a markdown file's YAML frontmatter, or {} when absent. Handles the
+    scalar forms skills use (plain, quoted, block, folded); not a full YAML parser."""
     try:
         with open(path, errors="replace") as f:
             text = f.read(20000)
     except OSError:
         return {}
-    m = re.match(r"---\s*\n(.*?)\n---", text, re.S)
-    if not m:
+    text = text.lstrip("\ufeff").replace("\r\n", "\n")
+    if not text.startswith("---"):
         return {}
-    out = {}
-    for line in m.group(1).splitlines():
-        kv = re.match(r"(name|description):\s*(.*)$", line)
-        if kv:
-            out[kv.group(1)] = kv.group(2).strip().strip("'\"")
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}
+    out, key, first, rest = {}, None, "", []
+    for line in text[4:end].splitlines():
+        kv = re.match(r"([A-Za-z_][\w-]*):(?:\s+(.*))?$", line)
+        if kv and not line[:1].isspace():
+            if key:
+                out[key] = yaml_scalar(first, rest)
+            key, first, rest = kv.group(1), kv.group(2) or "", []
+        elif key and not line.startswith("#"):
+            rest.append(line)
+    if key:
+        out[key] = yaml_scalar(first, rest)
     return out
 
 
@@ -103,6 +151,58 @@ def pathlike(v):
     return v.startswith(("/", "~/", "./", "../")) or v == "~"
 
 
+def is_pattern(v):
+    """pi treats these resource entries as filters, not paths to load."""
+    return v.startswith(("!", "+", "-")) or "*" in v or "?" in v
+
+
+def is_local_source(v):
+    """A package source pi resolves as a local path (pi's isLocalPath)."""
+    return not v.strip().startswith(("npm:", "git:", "github:", "http:", "https:", "ssh:", "builtin:"))
+
+
+RESOURCE_KEYS = ("skills", "extensions", "prompts", "themes")
+OVERRIDE_PATH_KEYS = ("extensions", "subagentOnlyExtensions")
+
+
+def setting_paths(settings):
+    """(key, value) for every settings string pi resolves as a filesystem path: plain entries of
+    the resource lists, local package sources, agentOverrides extension lists, and any other
+    string that starts like a path."""
+    seen = set()
+    for k in RESOURCE_KEYS:
+        for i, v in enumerate(settings.get(k) or []):
+            if isinstance(v, str) and not is_pattern(v):
+                seen.add(f"{k}[{i}]")
+                yield f"{k}[{i}]", v
+    for i, v in enumerate(settings.get("packages") or []):
+        src = v.get("source") if isinstance(v, dict) else v
+        if isinstance(src, str) and is_local_source(src):
+            key = f"packages[{i}]" + (".source" if isinstance(v, dict) else "")
+            seen.add(key)
+            yield key, src
+    sub = settings.get("subagents") if isinstance(settings.get("subagents"), dict) else {}
+    overrides = sub.get("agentOverrides") if isinstance(sub.get("agentOverrides"), dict) else {}
+    for name, o in overrides.items():
+        for k in OVERRIDE_PATH_KEYS:
+            vals = o.get(k) if isinstance(o, dict) else None
+            for i, v in enumerate(vals if isinstance(vals, list) else []):
+                if isinstance(v, str) and not is_pattern(v):
+                    key = f"subagents.agentOverrides.{name}.{k}[{i}]"
+                    seen.add(key)
+                    yield key, v
+    for key, v in walk_strings(settings):
+        if key not in seen and pathlike(v):
+            yield key, v
+
+
+def local_packages(settings, base):
+    for v in (settings or {}).get("packages") or []:
+        src = v.get("source") if isinstance(v, dict) else v
+        if isinstance(src, str) and is_local_source(src):
+            yield src, resolve_setting(src, base)
+
+
 def resolve_setting(v, base):
     v = os.path.expanduser(v.lstrip("-!+"))
     return os.path.normpath(v if os.path.isabs(v) else os.path.join(base, v))
@@ -120,16 +220,15 @@ def walk_strings(obj, key=""):
 
 
 def skill_roots(home, settings, cwd, pi_dir):
-    """(root, origin) for each skill root pi loads, in load order."""
+    """(root, origin, mode) for each skill root pi loads, in load order. A root can be a single
+    Markdown file. mode is pi's discovery mode: "pi" loads root-level .md files, "agents" loads
+    .md files only below the root."""
     roots = []
     base = pi_dir
     for v in (settings or {}).get("skills") or []:
-        if isinstance(v, str) and not v.startswith(("-", "!")):
-            roots.append((resolve_setting(v, base), "settings skills"))
-    for v in (settings or {}).get("packages") or []:
-        if not isinstance(v, str) or not pathlike(v):
-            continue
-        pkg = resolve_setting(v, base)
+        if isinstance(v, str) and not is_pattern(v):
+            roots.append((resolve_setting(v, base), "settings skills", "pi"))
+    for v, pkg in local_packages(settings, base):
         try:
             with open(os.path.join(pkg, "package.json")) as f:
                 meta = json.load(f).get("pi") or {}
@@ -137,30 +236,44 @@ def skill_roots(home, settings, cwd, pi_dir):
             meta = {}
         for s in meta.get("skills") or []:
             if isinstance(s, str):
-                roots.append((os.path.normpath(os.path.join(pkg, s)), f"package {v}"))
+                roots.append((os.path.normpath(os.path.join(pkg, s)), f"package {v}", "pi"))
         if os.path.isdir(os.path.join(pkg, "skills")):
-            roots.append((os.path.join(pkg, "skills"), f"package {v}"))
-    roots.append((os.path.join(home, ".agents", "skills"), "~/.agents/skills"))
-    roots.append((os.path.join(pi_dir, "skills"), "~/.pi/agent/skills"))
+            roots.append((os.path.join(pkg, "skills"), f"package {v}", "pi"))
+    roots.append((os.path.join(home, ".agents", "skills"), "~/.agents/skills", "agents"))
+    roots.append((os.path.join(pi_dir, "skills"), "~/.pi/agent/skills", "pi"))
     if cwd:
-        for sub in (".pi/skills", ".agents/skills"):
-            roots.append((os.path.join(cwd, sub), f"--cwd {sub}"))
+        roots.append((os.path.join(cwd, ".pi/skills"), "--cwd .pi/skills", "pi"))
+        roots.append((os.path.join(cwd, ".agents/skills"), "--cwd .agents/skills", "agents"))
     seen, out = set(), []
-    for r, origin in roots:
+    for r, origin, mode in roots:
         if r not in seen:
             seen.add(r)
-            out.append((r, origin))
+            out.append((r, origin, mode))
     return out
 
 
-def find_skills(root):
-    """SKILL.md files under root, at most three levels down."""
-    out = []
-    for depth in ("*", "*/*", "*/*/*"):
-        out += glob.glob(os.path.join(root, depth, "SKILL.md"))
+def find_skills(root, mode="pi", _top=None):
+    """Skill files pi discovers under root (pi's collectSkillEntries, without ignore files): a
+    dir holding SKILL.md is one skill and is not searched further; other dirs are searched to any
+    depth, skipping dot entries and node_modules; loose .md files load at the root in "pi" mode
+    and below it in "agents" mode."""
+    top = root if _top is None else _top
     if os.path.isfile(os.path.join(root, "SKILL.md")):
-        out.append(os.path.join(root, "SKILL.md"))
-    return sorted(set(out))
+        return [os.path.join(root, "SKILL.md")]
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        if name.startswith(".") or name == "node_modules":
+            continue
+        p = os.path.join(root, name)
+        if os.path.isdir(p):
+            out += find_skills(p, mode, top)
+        elif os.path.isfile(p) and name.endswith(".md") and (root == top) == (mode == "pi"):
+            out.append(p)
+    return out
 
 
 def lock_names(lock):
@@ -178,12 +291,18 @@ def audit_skills(roots, lock, owners, notes, lock_root=""):
     managed = lock_names(lock)
     lock_root = os.path.realpath(lock_root) + os.sep if lock_root else None
     rows = []
-    for root, origin in roots:
-        if not os.path.isdir(root):
+    for root, origin, mode in roots:
+        if os.path.isfile(root):
+            paths = [root]
+        elif os.path.isdir(root):
+            paths = find_skills(root, mode)
+        else:
             notes.append(f"skill root: not found ({root}, {origin})")
             continue
-        for path in find_skills(root):
+        for path in paths:
             fm = frontmatter(path)
+            if os.path.basename(path) != "SKILL.md" and not str(fm.get("description") or "").strip():
+                continue
             d = os.path.basename(os.path.dirname(path))
             name = fm.get("name") or d
             rows.append({"section": "skills", "name": name, "root": root, "origin": origin, "path": path,
@@ -215,9 +334,7 @@ def audit_settings(settings, settings_path, pi_dir, cwd, owners):
     if settings is None:
         return rows
     own = owners.path(settings_path)
-    for key, v in walk_strings(settings):
-        if not pathlike(v):
-            continue
+    for key, v in setting_paths(settings):
         p = resolve_setting(v, pi_dir)
         if not os.path.exists(p):
             rows.append({"section": "settings", "issue": "missing path", "key": key, "path": p,
@@ -229,9 +346,8 @@ def audit_settings(settings, settings_path, pi_dir, cwd, owners):
     sub = settings.get("subagents") if isinstance(settings.get("subagents"), dict) else {}
     overrides = sub.get("agentOverrides") if isinstance(sub.get("agentOverrides"), dict) else {}
     dirs = [os.path.join(pi_dir, "agents")]
-    for v in settings.get("packages") or []:
-        if isinstance(v, str) and pathlike(v):
-            dirs.append(os.path.join(resolve_setting(v, pi_dir), "agents"))
+    for _v, pkg in local_packages(settings, pi_dir):
+        dirs.append(os.path.join(pkg, "agents"))
     if cwd:
         dirs.append(os.path.join(cwd, ".pi", "agents"))
     known = agent_names(dirs)
@@ -255,13 +371,13 @@ def audit_extensions(ext_dir, owners, notes):
         target = os.readlink(p) if link else ""
         broken = link and not os.path.exists(p)
         kind = "broken link" if broken else ("link" if link else "dir" if os.path.isdir(p) else "file")
-        owner = "local" if broken else owners.path(p)
+        owner = owners.path(p)
         rows.append({"section": "extensions", "name": name, "kind": kind, "target": target, "broken": broken,
                      "owner": owner})
     return rows
 
 
-def audit_leftovers(pi_dir, notes):
+def audit_leftovers(pi_dir, owners, notes):
     if not os.path.isdir(pi_dir):
         notes.append(f"pi agent dir: not found ({pi_dir})")
         return []
@@ -275,7 +391,7 @@ def audit_leftovers(pi_dir, notes):
                     mt = datetime.fromtimestamp(os.path.getmtime(p), timezone.utc).strftime("%Y-%m-%d")
                 except OSError:
                     mt = "?"
-                rows.append({"section": "leftovers", "path": p, "mtime": mt, "owner": "local"})
+                rows.append({"section": "leftovers", "path": p, "mtime": mt, "owner": owners.path(p)})
     return sorted(rows, key=lambda r: r["path"])
 
 
@@ -296,8 +412,10 @@ def ref_candidates(text, top):
             if any(c in tok for c in "<>{}$*?[]|=\u2026") or "://" in tok or "..." in tok or not PATHLIKE.match(tok):
                 continue
             first = tok.split("/", 1)[0]
-            if first in (".", "..") or first in top:
+            if first in (".", "..") or first in top or re.search(r"\.\w+$", tok):
                 yield "path", tok.rstrip("/")
+    for m in PLAIN_REF.findall(text):
+        yield "path", m
     for m in SKILL_LINK.findall(text):
         yield "path", m
     for m in SKILL_CMD.findall(text):
@@ -323,7 +441,7 @@ def audit_refs(root, skill_names, owners):
             elif ref.startswith(("./", "../")):
                 ok = os.path.exists(os.path.normpath(os.path.join(here, ref)))
             else:
-                ok = os.path.exists(os.path.join(here, ref)) or os.path.exists(os.path.join(root, ref))
+                ok = any(os.path.exists(os.path.join(d, ref)) for d in (here, root, os.path.join(root, "skills")))
             if not ok:
                 rows.append({"section": "stale refs", "file": os.path.relpath(path, root), "kind": kind,
                              "ref": ("/skill:" if kind == "skill" else "") + ref, "owner": owners.path(path)})
@@ -455,7 +573,7 @@ def analyze(home, since, cwd=None, root=ROOT, sroot=None, owners=None):
         "duplicates": dups,
         "settings": audit_settings(settings, settings_path, pi_dir, cwd, owners),
         "extensions": audit_extensions(os.path.join(pi_dir, "extensions"), owners, notes),
-        "leftovers": audit_leftovers(pi_dir, notes),
+        "leftovers": audit_leftovers(pi_dir, owners, notes),
         "stale refs": audit_refs(root, names, owners),
         "overlap": audit_overlap(root, harness),
     }
