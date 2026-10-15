@@ -34,6 +34,10 @@ Model names live only in `models.conf`, `models.d/*.conf`, and the pi settings o
 
 Give every `coder` run a `gate` (the test command, typecheck, or the repo's verify skill). The gate result is the verification. The agent's summary is a report. A gate that did not run is not a pass. Where a pstack skill or playbook asks for a failing-test commit before the fix, the child instead shows the test failing with the fix reverted; every commit passes the gate.
 
+## Workflow scripts
+
+`subagent({ workflow: true })` runs the one fenced block tagged exactly `js workflow` in the same reply; to run a file, such as `workflows/review-loop.js`, pass its absolute path as `workflow`. `extensions/workflow-fence.ts` runs a reply's single untagged `js` block from a temp file and blocks other untagged shapes with this redirect.
+
 ## Enabling more of pstack
 
 `scripts/skill.sh enable <name>` links another pstack skill or principle into `skills/`. Playbooks need no enabling; reference them by path from `hughy-router`.
