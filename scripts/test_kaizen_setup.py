@@ -173,6 +173,7 @@ class Loader(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.d = tmp.name
 
+    @unittest.skipUnless(getattr(ksu, "yaml", None), "PyYAML not installed")
     def test_folded_description(self):
         p = write(os.path.join(self.d, "s", "SKILL.md"),
                   "---\nname: s\ndescription: >-\n  Summarizes a pull request review\n  into useful notes.\n"
@@ -231,6 +232,7 @@ class Loader(unittest.TestCase):
         rows, _ = ksu.audit_skills(roots[:1], None, ksu.kt.Owners(self.d, rules=[]), [])
         self.assertEqual([r["name"] for r in rows], ["fileurl"])
 
+    @unittest.skipUnless(getattr(ksu, "yaml", None), "PyYAML not installed")
     def test_multiline_scalars_match_pi_yaml(self):
         cases = {
             'description: "Multi\n  line \\"q\\" here\\\n  joined\n\n  para\\tTab"\n':
@@ -247,6 +249,47 @@ class Loader(unittest.TestCase):
         for i, (body, want) in enumerate(cases.items()):
             p = write(os.path.join(self.d, f"y{i}.md"), "---\n" + body + "---\n")
             self.assertEqual(ksu.frontmatter(p).get("description"), want, body)
+
+    @unittest.skipUnless(getattr(ksu, "yaml", None), "PyYAML not installed")
+    def test_bad_frontmatter_skips_one_skill(self):
+        root = os.path.join(self.d, "root")
+        skill(root, "good")
+        write(os.path.join(root, "esc", "SKILL.md"), '---\nname: esc\ndescription: "Oops \\UFFFFFFFF"\n---\n')
+        write(os.path.join(root, "syn", "SKILL.md"), "---\nname: syn\ndescription: [unclosed\n---\n")
+        notes = []
+        rows, _ = ksu.audit_skills([(root, "s", "pi")], None, ksu.kt.Owners(self.d, rules=[]), notes)
+        self.assertEqual([r["name"] for r in rows], ["good"])
+        text = "\n".join(notes)
+        self.assertIn(os.path.join(root, "esc", "SKILL.md"), text)
+        self.assertIn(os.path.join(root, "syn", "SKILL.md"), text)
+        self.assertIn("skill skipped", text)
+        self.assertIn("OverflowError", text)
+        self.assertIn("ParserError", text)
+
+    @unittest.skipUnless(getattr(ksu, "yaml", None), "PyYAML not installed")
+    def test_non_mapping_and_non_string_description_skip(self):
+        for i, body in enumerate(["- a list\n", "description: 3\n"]):
+            p = write(os.path.join(self.d, f"n{i}.md"), "---\n" + body + "---\n")
+            with self.assertRaises(ksu.FrontmatterError):
+                ksu.frontmatter(p)
+
+    @unittest.skipUnless(getattr(ksu, "yaml", None), "PyYAML not installed")
+    def test_pyyaml_edge_cases_match_safe_load(self):
+        for i, body in enumerate(['description: "a\\ \n  b"\n', "description: >\n  a\n   \n  b\n"]):
+            p = write(os.path.join(self.d, f"e{i}.md"), "---\n" + body + "---\n")
+            self.assertEqual(ksu.frontmatter(p)["description"], ksu.yaml.safe_load(body)["description"], body)
+
+    def test_fallback_parser_and_note(self):
+        p = write(os.path.join(self.d, "f", "SKILL.md"),
+                  "---\nname: f\ndescription: 'it''s one line'\nother: |\n  a\n  b\n---\n")
+        orig = ksu.yaml
+        ksu.yaml = None
+        self.addCleanup(setattr, ksu, "yaml", orig)
+        self.assertEqual(ksu.frontmatter(p)["description"], "it's one line")
+        self.assertEqual(ksu.frontmatter(p)["name"], "f")
+        _, notes = ksu.analyze(self.d, ksu.ks.parse_since("2000-01-01"), root=self.d,
+                               sroot=os.path.join(self.d, "s"), owners=ksu.kt.Owners(self.d, rules=[]))
+        self.assertEqual(sum("parsed approximately" in n for n in notes), 1)
 
     def test_plain_and_file_relative_refs(self):
         root = os.path.join(self.d, "hworks")

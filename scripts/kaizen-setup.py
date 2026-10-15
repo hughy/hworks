@@ -37,6 +37,8 @@ Sources (each optional; a missing one is reported, not fatal):
   HWORKS_PI_SESSIONS   pi session transcripts for the overlap section (default ~/.pi/agent/sessions)
   HWORKS_OWNER_MAP     owner overrides, as in kaizen-tokens.py
 adapters/local/*.env, when present, is read first; values already in the environment win.
+Frontmatter is parsed with PyYAML when installed, else approximately (a sources note says so);
+a file whose frontmatter fails to parse is skipped with a note, as pi skips it.
 """
 import argparse
 import fnmatch
@@ -50,6 +52,11 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from urllib.request import url2pathname
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -74,121 +81,46 @@ PATHLIKE = re.compile(r"^(?:\.{1,2}/)*[\w.-]+(?:/[\w.-]+)+/?$")
 PLAIN_REF = re.compile(r"(?<![\w./~$<-])(scripts/[\w.-]*\w(?:/[\w.-]*\w)*|skills/[\w-]*\w|agents/[\w.-]*\w\.md)(?![\w/*<{-])")
 
 
-_ESC = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f",
-        "r": "\r", "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", "N": "\x85",
-        "_": "\xa0", "L": "\u2028", "P": "\u2029"}
-_ESC_RE = re.compile(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)", re.S)
+class FrontmatterError(ValueError):
+    """A file whose frontmatter pi would reject; the audit skips it with a note."""
 
 
-def _unescape(s):
-    def sub(m):
-        e = m.group(1)
-        return chr(int(e[1:], 16)) if len(e) > 1 else _ESC.get(e, e)
-    return _ESC_RE.sub(sub, s)
+def _scalar(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+        return v[1:-1].replace("''", "'") if v[0] == "'" else v[1:-1]
+    return re.sub(r"[ \t]+#.*$", "", v)
 
 
-def _fold_block(lines, folded):
-    out, prev, blanks = "", None, 0
-    for ln in lines:
-        if not ln.strip(" \t") and not (ln and not folded):
-            blanks += 1
-            continue
-        if prev is None:
-            out = "\n" * blanks + ln
-        elif not folded:
-            out += "\n" * (blanks + 1) + ln
-        else:
-            plain = prev[:1] not in " \t" and ln[:1] not in " \t"
-            out += ("\n" * (blanks + (0 if plain else 1))) if blanks else (" " if plain else "\n")
-            out += ln
-        prev, blanks = ln, 0
-    return out, blanks
+def _approx(block):
+    """Top-level keys as single-line scalars, with | and > blocks joined by newline or space.
+    Used only without PyYAML; not YAML."""
+    out, key, style, lines = {}, None, None, []
 
+    def flush():
+        if key and style:
+            out[key] = ("\n" if style == "|" else " ").join(ln.strip() for ln in lines).strip()
 
-def _fold_flow(lines, escapes):
-    out, k, joined = "", 0, False
-    for i, ln in enumerate(lines):
-        last = i == len(lines) - 1
-        if i:
-            ln = ln.lstrip(" \t")
-        esc = False
-        if not last:
-            if escapes and (len(ln) - len(ln.rstrip("\\"))) % 2:
-                ln, esc = ln[:-1], True
-            else:
-                ln = ln.rstrip(" \t")
-        if i and not last and not ln and not esc:
-            k += 1
-            continue
-        if i:
-            out += "" if joined and not k else ("\n" * k if k else " ")
-        out += ln
-        k, joined = 0, esc
-    return out
-
-
-def yaml_scalar(first, rest):
-    """A top-level YAML scalar from its first-line text and its continuation lines: block (| or
-    >, with indentation and chomping indicators), single- or double-quoted (escapes, folding),
-    or plain folded across lines."""
-    block = re.match(r"([|>])([1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#.*)?$", first)
-    if block:
-        style, ind_chomp = block.group(1), block.group(2) or ""
-        chomp = "".join(c for c in ind_chomp if c in "+-")
-        digit = "".join(c for c in ind_chomp if c.isdigit())
-        lines = list(rest)
-        if digit:
-            ind = int(digit)
-        else:
-            ind = next((len(ln) - len(ln.lstrip(" ")) for ln in lines if ln.strip(" \t")), 0)
-        lines = [ln[ind:] if len(ln) >= ind else "" for ln in lines]
-        text, trailing = _fold_block(lines, style == ">")
-        if chomp == "-" or not text:
-            return text if chomp != "+" else text + "\n" * trailing
-        return text + "\n" + ("\n" * trailing if chomp == "+" else "")
-    raw = "\n".join([first.lstrip(" \t")] + list(rest))
-    q = raw[:1]
-    if q in "'\"" and q:
-        i, n = 1, len(raw)
-        while i < n:
-            c = raw[i]
-            if q == '"' and c == "\\":
-                i += 2
-                continue
-            if c == q:
-                if q == "'" and raw[i + 1:i + 2] == "'":
-                    i += 2
-                    continue
-                break
-            i += 1
-        body = _fold_flow(raw[1:i].split("\n"), q == '"')
-        return _unescape(body) if q == '"' else body.replace("''", "'")
-    lines = []
-    for ln in raw.split("\n"):
-        cut = re.search(r"(?:^|[ \t])#", ln)
-        if cut:
-            ln = ln[:cut.start()]
-            lines.append(ln)
-            break
-        lines.append(ln)
-    out, k = "", 0
-    for ln in lines:
-        ln = ln.strip(" \t")
-        if not ln:
-            k += 1
-            continue
-        out += ("\n" * k if k else " ") if out else ""
-        out += ln
-        k = 0
+    for line in block.splitlines():
+        kv = re.match(r"([A-Za-z_][\w-]*):(?:\s+(.*))?$", line)
+        if kv and not line[:1].isspace():
+            flush()
+            key, v, lines = kv.group(1), (kv.group(2) or "").strip(), []
+            style = v[0] if v[:1] in ("|", ">") else None
+            if not style:
+                out[key] = _scalar(v)
+        elif style and line.strip():
+            lines.append(line)
+    flush()
     return out
 
 
 def frontmatter(path):
-    """Top-level scalar keys of a markdown file's YAML frontmatter, or {} when absent. Handles the
-    scalar forms skills use (plain, quoted, block, folded); not a full YAML parser."""
+    """A markdown file's YAML frontmatter as a dict, {} when absent. Parsed with PyYAML when it
+    is installed, else approximately. Raises FrontmatterError where pi would skip the file."""
     try:
         with open(path, errors="replace") as f:
-            text = f.read(20000)
+            text = f.read()
     except OSError:
         return {}
     text = text.lstrip("\ufeff").replace("\r\n", "\n")
@@ -197,18 +129,34 @@ def frontmatter(path):
     end = text.find("\n---", 3)
     if end == -1:
         return {}
-    out, key, first, rest = {}, None, "", []
-    for line in text[4:end].splitlines():
-        kv = re.match(r"([A-Za-z_][\w-]*):(?:\s+(.*))?$", line)
-        if kv and not line[:1].isspace():
-            if key:
-                out[key] = yaml_scalar(first, rest)
-            key, first, rest = kv.group(1), kv.group(2) or "", []
-        elif key and not line.startswith("#"):
-            rest.append(line)
-    if key:
-        out[key] = yaml_scalar(first, rest)
-    return out
+    block = text[4:end]
+    if not block.endswith("\n"):
+        # pi's yaml library ends an unterminated last line as if it had a line break; PyYAML does not.
+        block += "\n"
+    if yaml is None:
+        return _approx(block)
+    try:
+        fm = yaml.safe_load(block)
+    except Exception as e:
+        raise FrontmatterError(type(e).__name__) from e
+    if fm is None:
+        return {}
+    if not isinstance(fm, dict):
+        raise FrontmatterError(f"frontmatter is a {type(fm).__name__}, not a mapping")
+    if "description" in fm and fm["description"] is not None and not isinstance(fm["description"], str):
+        raise FrontmatterError(f"description is a {type(fm['description']).__name__}, not a string")
+    if not isinstance(fm.get("name"), (str, type(None))):
+        fm["name"] = None
+    return fm
+
+
+def read_frontmatter(path, notes, kind):
+    """frontmatter(path), or None after adding a skip note."""
+    try:
+        return frontmatter(path)
+    except FrontmatterError as e:
+        notes.append(f"{kind} skipped: {path}: {e}")
+        return None
 
 
 def load_json(path, notes, label):
@@ -382,7 +330,9 @@ def audit_skills(roots, lock, owners, notes, lock_root=""):
             notes.append(f"skill root: not found ({root}, {origin})")
             continue
         for path in paths:
-            fm = frontmatter(path)
+            fm = read_frontmatter(path, notes, "skill")
+            if fm is None:
+                continue
             if os.path.basename(path) != "SKILL.md" and not str(fm.get("description") or "").strip():
                 continue
             d = os.path.basename(os.path.dirname(path))
@@ -403,15 +353,17 @@ def audit_skills(roots, lock, owners, notes, lock_root=""):
     return rows, dups
 
 
-def agent_names(dirs):
+def agent_names(dirs, notes):
     names = set()
     for d in dirs:
         for p in glob.glob(os.path.join(d, "**", "*.md"), recursive=True):
-            names.add(frontmatter(p).get("name") or os.path.splitext(os.path.basename(p))[0])
+            fm = read_frontmatter(p, notes, "agent")
+            if fm is not None:
+                names.add(fm.get("name") or os.path.splitext(os.path.basename(p))[0])
     return names
 
 
-def audit_settings(settings, settings_path, pi_dir, cwd, owners):
+def audit_settings(settings, settings_path, pi_dir, cwd, owners, notes=None):
     rows = []
     if settings is None:
         return rows
@@ -432,7 +384,7 @@ def audit_settings(settings, settings_path, pi_dir, cwd, owners):
         dirs.append(os.path.join(pkg, "agents"))
     if cwd:
         dirs.append(os.path.join(cwd, ".pi", "agents"))
-    known = agent_names(dirs)
+    known = agent_names(dirs, [] if notes is None else notes)
     builtins_off = sub.get("disableBuiltins") is True
     for name in sorted(overrides):
         if name not in known:
@@ -553,14 +505,16 @@ def ext_description(path):
     return " ".join(lines)
 
 
-def hworks_items(root):
+def hworks_items(root, notes):
     items = []
     for p in sorted(glob.glob(os.path.join(root, "skills", "*", "SKILL.md"))):
-        fm = frontmatter(p)
-        items.append(("skill", fm.get("name") or os.path.basename(os.path.dirname(p)), fm.get("description") or ""))
+        fm = read_frontmatter(p, notes, "skill")
+        if fm is not None:
+            items.append(("skill", fm.get("name") or os.path.basename(os.path.dirname(p)), fm.get("description") or ""))
     for p in sorted(glob.glob(os.path.join(root, "agents", "*.md"))):
-        fm = frontmatter(p)
-        items.append(("agent", fm.get("name") or os.path.splitext(os.path.basename(p))[0], fm.get("description") or ""))
+        fm = read_frontmatter(p, notes, "agent")
+        if fm is not None:
+            items.append(("agent", fm.get("name") or os.path.splitext(os.path.basename(p))[0], fm.get("description") or ""))
     for p in sorted(glob.glob(os.path.join(root, "extensions", "*.ts"))):
         if ".test." not in p:
             items.append(("extension", os.path.splitext(os.path.basename(p))[0], ext_description(p)))
@@ -608,9 +562,9 @@ def harness_parts(sroot, since, owners, notes):
     return list(parts.values())
 
 
-def audit_overlap(root, harness):
+def audit_overlap(root, harness, notes=None):
     rows = []
-    hw = [(k, n, d, words(n, d)) for k, n, d in hworks_items(root)]
+    hw = [(k, n, d, words(n, d)) for k, n, d in hworks_items(root, [] if notes is None else notes)]
     hs = [(p, words(p["name"], p["description"])) for p in harness]
     for kind, name, _desc, w in hw:
         if not w:
@@ -632,7 +586,7 @@ def audit_overlap(root, harness):
 
 
 def analyze(home, since, cwd=None, root=ROOT, sroot=None, owners=None):
-    notes = []
+    notes = [] if yaml else ["frontmatter: PyYAML not installed; descriptions parsed approximately"]
     owners = owners or kt.Owners(root)
     pi_dir = os.path.join(home, ".pi", "agent")
     settings_path = os.path.join(pi_dir, "settings.json")
@@ -653,15 +607,15 @@ def analyze(home, since, cwd=None, root=ROOT, sroot=None, owners=None):
     report = {
         "skills": skills,
         "duplicates": dups,
-        "settings": audit_settings(settings, settings_path, pi_dir, cwd, owners),
+        "settings": audit_settings(settings, settings_path, pi_dir, cwd, owners, notes),
         "extensions": audit_extensions(os.path.join(pi_dir, "extensions"), owners, notes),
         "leftovers": audit_leftovers(pi_dir, owners, notes),
         "stale refs": audit_refs(root, names, owners),
-        "overlap": audit_overlap(root, harness),
+        "overlap": audit_overlap(root, harness, notes),
     }
     report["stats"] = {"skill_roots": len(roots), "skills": len(skills), "harness_parts": len(harness),
                        **{k: len(v) for k, v in report.items() if k not in ("skills",)}}
-    return report, notes
+    return report, list(dict.fromkeys(notes))
 
 
 def print_text(report, notes):
