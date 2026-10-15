@@ -70,6 +70,32 @@ class Friction(unittest.TestCase):
         self.assertEqual(len(both), len(self.rows()))
         self.assertEqual(self.rows("--cwd-match", "gamma"), [])
 
+    def test_state_field_sets_stage_and_verdict(self):
+        write(os.path.join(self.tasks, "github.com--o--alpha", "main", "t3", "open-questions.md"),
+              "- [permission] push to main? | no | user grant missing | push later | deferred\n"
+              "- [permission] delete branch? | keep | unmerged | delete later | deferred:reversed\n"
+              "- [ambiguous-brief] scope the API? | v1 only | spec says v1 | widen later | asked:kept\n"
+              "- [tooling] which runner | pytest | repo uses it | switch | deferred:Kept\n"
+              "- [tooling] bad state | x | y | z | later\n")
+        got = sorted((r["kind"], r["rule"], r["verdict"]) for r in self.rows() if r["cwd"].endswith("t3"))
+        self.assertEqual(got, [("asked", "ambiguous-brief", "kept"), ("deferred", "permission", "open"),
+                               ("deferred", "permission", "reversed"), ("deferred", "tooling", "kept"),
+                               ("unrecorded", "tooling", None)])
+
+    def test_legacy_entry_without_state_is_unrecorded(self):
+        legacy = [r for r in self.rows() if r["source"] == "open-questions" and r["cwd"].endswith("t1")]
+        self.assertEqual([(r["kind"], r["verdict"]) for r in legacy], [("unrecorded", None)])
+
+    def test_text_report_counts_outcomes(self):
+        write(os.path.join(self.tasks, "github.com--o--alpha", "main", "t3", "open-questions.md"),
+              "- [permission] a | b | c | d | deferred:reversed\n- [permission] e | f | g | h | deferred:kept\n"
+              "- [permission] i | j | k | l | deferred\n")
+        out = self.run_script("--since", "2026-01-01").stdout
+        self.assertIn("Decision outcomes", out)
+        self.assertRegex(out, r"deferred\s+\(all\)\s+1\s+1\s+1\s+1/2 \(50%\)")
+        self.assertRegex(out, r"deferred\s+permission\s+1\s+1\s+1\s+1/2 \(50%\)")
+        self.assertIn("1 open-question entries have no state field", out)
+
     def test_text_report_names_the_class(self):
         out = self.run_script("--since", "2026-01-01").stdout
         self.assertIn("friction / reviewer / missed-defect", out)
