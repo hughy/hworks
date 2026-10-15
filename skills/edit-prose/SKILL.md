@@ -1,6 +1,6 @@
 ---
 name: edit-prose
-description: Draft or edit prose for clarity, concision, and style per references/style-guide.md - design docs, doc review comments, issues, PR descriptions, READMEs, and draft replies. Removes AI writing tropes. Returns only the text, with no preamble or commentary. Use when asked to edit, tighten, polish, deslopify, or remove AI tropes from prose, to draft a doc section, issue, or PR description, or when invoked as a subagent to polish a draft.
+description: Draft or edit prose - design docs, doc review comments, issues, PR descriptions, READMEs, and draft replies. Use when asked to edit, tighten, polish, deslopify, or remove AI tropes from prose, to draft a doc section, issue, or PR description, or when invoked as a subagent to polish a draft.
 ---
 
 # Prose

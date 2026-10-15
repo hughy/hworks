@@ -19,13 +19,10 @@ Transcripts hold private content: code, ticket text, tokens, names from every re
 ```sh
 python3 <hworks>/scripts/operator-signals.py --since 14d --context > "$TASK_DIR/signals-<date>.txt"
 <hworks>/scripts/blockers.sh --since 14d > "$TASK_DIR/blockers-<date>.txt"
-<hworks>/scripts/blockers.sh --since 14d --json | python3 -c 'import json, sys
-for line in sys.stdin:
-    e = json.loads(line)
-    if e.get("source") == "friction" and e.get("kind") == "operator": print(line, end="")' > "$TASK_DIR/friction-<date>.jsonl"
+<hworks>/scripts/blockers.sh --since 14d --json --source friction --kind operator > "$TASK_DIR/friction-<date>.jsonl"
 ```
 
-`operator-signals.py` reads pi (`HWORKS_PI_SESSIONS`, default `~/.pi/agent/sessions`), Claude Code (`HWORKS_CLAUDE_SESSIONS`, default `~/.claude/projects`), and Codex CLI (`HWORKS_CODEX_SESSIONS`, default `~/.codex/sessions`) transcripts; the header gives sessions per harness and names each missing source, and each example's session key starts with its harness (`pi:`, `claude:`, `codex:`). It reads only sessions the operator started and strips harness injections from each message (its docstring lists the rules; `HWORKS_OPERATOR_SKIP` and `HWORKS_INJECTED_PREFIX`, set in `adapters/local/*.env`, cover harness-specific text). It prints a header with totals, then `approval`, `status-check`, `correction`, `abort`, and `repeat` groups ranked by distinct sessions, each with up to six examples quoting the operator's message, the end of the agent's text before it, and (with `--context`) the start of the agent's reply after it, then `skills` and `prompt-shape`.
+`operator-signals.py` reads pi, Claude Code, and Codex CLI transcripts (source dirs and harness-specific skip rules in its docstring, overrides in `adapters/local/*.env`); its header gives sessions per harness and names each missing source. It reads only sessions the operator started. Each example's session key starts with its harness (`pi:`, `claude:`, `codex:`). Groups (`approval`, `status-check`, `correction`, `abort`, `repeat`) rank by distinct sessions, each with up to six examples quoting the operator's message, the end of the agent's text before it, and (with `--context`) the start of the agent's reply after it.
 
 `friction-<date>.jsonl` holds every friction event agents logged with caught-by `operator` inside the window: the operator's corrections in the agents' own words, with the task dir each came from. The text report shows the same events as `friction / operator / <category>` classes, three per class. From `blockers.sh`, also read the `open-questions` classes `ambiguous-brief` and `missing-info`: decisions a brief left to the agent. They point at briefs that could carry one more line, or at questions the agent settled correctly on its own, which are not findings. If a source printed nothing or was missing, say so in the findings.
 
