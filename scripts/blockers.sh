@@ -4,8 +4,9 @@
 # how the operator judged them (kept or reversed), and friction (work the operator, a reviewer,
 # a test, or CI caught and sent back).
 # Read-only. Feed the output to /skill:correct to fix recurring classes.
-# usage: blockers.sh [--since YYYY-MM-DD|7d] [--cwd-match TEXT]... [--json]
+# usage: blockers.sh [--since YYYY-MM-DD|7d] [--cwd-match TEXT]... [--source S] [--kind K] [--json]
 #   --cwd-match keeps events whose cwd or task path contains TEXT, case-insensitively.
+#   --source and --kind keep events with that exact source or kind (e.g. --source friction --kind operator).
 #
 # Sources (each optional; a missing one is reported, not fatal):
 #   HWORKS_BLOCKERS_LOG        autonomy.ts log (default $HWORKS_TASKS_DIR/blockers.jsonl)
@@ -21,18 +22,20 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1091
 [ -f "$root/adapters/local/blockers.env" ] && . "$root/adapters/local/blockers.env"
 
-since=7d; json=0; match=
+since=7d; json=0; match=; source=; kind=
 while [ $# -gt 0 ]; do
   case "$1" in
     --since) since=${2:?--since needs a value}; shift 2 ;;
     --json) json=1; shift ;;
     --cwd-match) match="$match${match:+$'\n'}${2:?--cwd-match needs a value}"; shift 2 ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --source) source=${2:?--source needs a value}; shift 2 ;;
+    --kind) kind=${2:?--kind needs a value}; shift 2 ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-export BLOCKERS_SINCE=$since BLOCKERS_JSON=$json BLOCKERS_MATCH=$match
+export BLOCKERS_SINCE=$since BLOCKERS_JSON=$json BLOCKERS_MATCH=$match BLOCKERS_SOURCE=$source BLOCKERS_KIND=$kind
 export HWORKS_TASKS_DIR=${HWORKS_TASKS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-tasks}
 export HWORKS_BLOCKERS_LOG=${HWORKS_BLOCKERS_LOG:-$HWORKS_TASKS_DIR/blockers.jsonl}
 export HWORKS_SUBAGENT_RUNS=${HWORKS_SUBAGENT_RUNS:-${TMPDIR:-/tmp}/pi-subagents-uid-$(id -u)/async-subagent-runs}
@@ -75,6 +78,7 @@ def jsonl(path):
 
 since = parse_since(os.environ["BLOCKERS_SINCE"])
 match = [m.lower() for m in os.environ["BLOCKERS_MATCH"].split("\n") if m]
+only_source, only_kind = os.environ["BLOCKERS_SOURCE"], os.environ["BLOCKERS_KIND"]
 rows, notes = [], []
 
 def add(source, kind, rule, ts, session=None, cwd=None, detail="", verdict=None):
@@ -82,6 +86,8 @@ def add(source, kind, rule, ts, session=None, cwd=None, detail="", verdict=None)
     if dt is None or dt < since:
         return
     if match and not any(m in f"{cwd or ''} {session or ''}".lower() for m in match):
+        return
+    if (only_source and source != only_source) or (only_kind and kind != only_kind):
         return
     rows.append({"ts": dt.isoformat(timespec="seconds"), "source": source, "kind": kind, "rule": rule,
                  "session": session, "cwd": cwd, "detail": re.sub(r"\s+", " ", str(detail or ""))[:200],
