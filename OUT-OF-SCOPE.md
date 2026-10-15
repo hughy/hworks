@@ -16,7 +16,6 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 | Positive phrasing for rule files | mattpocock/skills `writing-for-agents` (49dd158) | Rewrite prohibitions in `global/AGENTS.md` as target behavior, on the claim that a prohibition primes the banned behavior | A run of the rewritten rules shows fewer violations than the current text |
 | PR body Evidence and Merge Danger | mattpocock/skills `pr` (49dd158) | Before/after evidence and a one-way or two-way door call with blast radius in `skills/edit-prose/references/issues-prs.md` | Reviewers ask how a PR was verified or how risky it is, in 3 PRs |
 | Wizard scripts for human-only steps | mattpocock/skills `wizard` (49dd158) | An interactive bash script for the irreversible or outside-the-machine steps Autonomy skips | The same skipped step is a multi-step manual procedure in 2 runs |
-| Opt-in alignment round before large builds | mattpocock/skills `grilling` (49dd158) | One batched round of product questions, each with a recommendation, before implementation on large scope | hansei shows corrections cluster in sessions with long first prompts on build tasks, beyond what session length explains |
 
 ## Declined
 

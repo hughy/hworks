@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Report where agent runs blocked: guard blocks, asks, supervisor decision requests,
-# idle or failed subagents, harness confirm prompts, deferred open questions, and friction
-# (work the operator, a reviewer, a test, or CI caught and sent back).
+# idle or failed subagents, harness confirm prompts, deferred and asked open questions with
+# how the operator judged them (kept or reversed), and friction (work the operator, a reviewer,
+# a test, or CI caught and sent back).
 # Read-only. Feed the output to /skill:correct to fix recurring classes.
 # usage: blockers.sh [--since YYYY-MM-DD|7d] [--cwd-match TEXT]... [--json]
 #   --cwd-match keeps events whose cwd or task path contains TEXT, case-insensitively.
@@ -76,14 +77,15 @@ since = parse_since(os.environ["BLOCKERS_SINCE"])
 match = [m.lower() for m in os.environ["BLOCKERS_MATCH"].split("\n") if m]
 rows, notes = [], []
 
-def add(source, kind, rule, ts, session=None, cwd=None, detail=""):
+def add(source, kind, rule, ts, session=None, cwd=None, detail="", verdict=None):
     dt = to_dt(ts)
     if dt is None or dt < since:
         return
     if match and not any(m in f"{cwd or ''} {session or ''}".lower() for m in match):
         return
     rows.append({"ts": dt.isoformat(timespec="seconds"), "source": source, "kind": kind, "rule": rule,
-                 "session": session, "cwd": cwd, "detail": re.sub(r"\s+", " ", str(detail or ""))[:200]})
+                 "session": session, "cwd": cwd, "detail": re.sub(r"\s+", " ", str(detail or ""))[:200],
+                 "verdict": verdict})
 
 def need(path, label):
     if path and os.path.exists(path):
@@ -98,6 +100,9 @@ if need(p, "autonomy log"):
 
 d = os.environ["HWORKS_TASKS_DIR"]
 entry = re.compile(r"^\s*-\s*\[([a-z-]+)\]\s*(.*)$")
+# The last field is the state: deferred or asked, then :kept or :reversed once the operator judged it.
+# Lines written before the state field existed are "unrecorded" and stay out of the rates.
+state = re.compile(r"^(deferred|asked)(?::(kept|reversed))?$")
 if need(d, "open questions"):
     for f in glob.glob(os.path.join(d, "**", "open-questions.md"), recursive=True):
         mtime = os.path.getmtime(f)
@@ -105,9 +110,12 @@ if need(d, "open questions"):
         for line in open(f, errors="replace"):
             m = entry.match(line)
             if m:
-                add("open-questions", "deferred", m.group(1), mtime, None, task, m.group(2))
+                fields = [x.strip() for x in m.group(2).split("|")]
+                sm = state.match(fields[-1].lower()) if len(fields) >= 5 else None
+                stage, verdict = (sm.group(1), sm.group(2) or "open") if sm else ("unrecorded", None)
+                add("open-questions", stage, m.group(1), mtime, None, task, m.group(2), verdict)
             elif line.lstrip().startswith("- "):
-                add("open-questions", "deferred", "uncategorized", mtime, None, task, line.strip()[2:])
+                add("open-questions", "unrecorded", "uncategorized", mtime, None, task, line.strip()[2:])
 
 friction = re.compile(r"^\s*-\s*(?:(\d{4}-\d{2}-\d{2})\s+)?\[([a-z0-9-]+)\]\s*(.*)$")
 if os.path.isdir(d):
@@ -176,9 +184,24 @@ for r in rows:
         parts = (r["cwd"] or "").split("/")
         by_branch["/".join(parts[:2]) if len(parts) >= 3 and "--" in parts[0] else f"(legacy) {parts[0]}"] += 1
 if by_branch:
-    print("\nDeferred decisions by repo/branch")
+    print("\nOpen-question entries by repo/branch")
     for k, n in sorted(by_branch.items(), key=lambda kv: -kv[1]):
         print(f"{n:>5}  {k}")
+outcomes = defaultdict(lambda: {"open": 0, "kept": 0, "reversed": 0})
+for r in rows:
+    if r["source"] == "open-questions" and r["verdict"]:
+        for key in ((r["kind"], r["rule"]), (r["kind"], "(all)")):
+            outcomes[key][r["verdict"]] += 1
+if outcomes:
+    print("\nDecision outcomes (reversed share of judged entries; deferred = the agent decided, asked = up-front round)")
+    print(f"{'stage':<9} {'category':<16} {'open':>5} {'kept':>5} {'rev':>5}  reversed")
+    for (stage, cat), c in sorted(outcomes.items(), key=lambda kv: (kv[0][0], kv[0][1] != "(all)", kv[0][1])):
+        judged = c["kept"] + c["reversed"]
+        share = f"{c['reversed']}/{judged} ({c['reversed'] / judged:.0%})" if judged else "-"
+        print(f"{stage:<9} {cat:<16} {c['open']:>5} {c['kept']:>5} {c['reversed']:>5}  {share}")
+unrecorded = sum(1 for r in rows if r["source"] == "open-questions" and not r["verdict"])
+if unrecorded:
+    print(f"\n{unrecorded} open-question entries have no state field (written before it existed or malformed)")
 for n in notes:
     print(f"\nnote: {n}", file=sys.stderr)
 PY

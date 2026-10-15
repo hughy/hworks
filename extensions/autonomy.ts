@@ -23,13 +23,16 @@ const TASK_DIR_SCRIPT = (() => {
 
 const ENTRY_FORMAT =
   `one line per entry in $TASK_DIR/open-questions.md (\`${TASK_DIR_SCRIPT} <task-slug>\` prints $TASK_DIR): ` +
-  "`- [<category>] <question> | <choice> | <evidence> | <how to reverse>`, where category is one of " +
+  "`- [<category>] <question> | <choice> | <evidence> | <how to reverse> | deferred`, where category is one of " +
   "missing-info, permission, irreversible, tooling, ambiguous-brief, external-wait.";
 
 const ASK_REASON =
   "Autonomy: do not ask mid-task. Settle the question from code, docs, git history, or a quick experiment, " +
   "pick the best-evidenced option, and record it as " + ENTRY_FORMAT + " Finish the task, then list only the " +
-  "questions evidence could not settle at the end of your final reply, with options and a recommendation.";
+  "questions evidence could not settle at the end of your final reply, with options and a recommendation. " +
+  "The one exception is the up-front round in the Autonomy section of global AGENTS.md (operator present, " +
+  "large work, a product call no experiment can settle that changes most of the plan): ask it in your reply " +
+  "text, record each question with state `asked`, and end the turn.";
 
 const DESTRUCTIVE_REASON =
   "Autonomy: blocked a command git on the working branch cannot undo. Use a reversible alternative " +
