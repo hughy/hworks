@@ -37,8 +37,10 @@ Sources (each optional; a missing one is reported, not fatal):
   HWORKS_PI_SESSIONS   pi session transcripts for the overlap section (default ~/.pi/agent/sessions)
   HWORKS_OWNER_MAP     owner overrides, as in kaizen-tokens.py
 adapters/local/*.env, when present, is read first; values already in the environment win.
-Frontmatter is parsed with PyYAML when installed, else approximately (a sources note says so);
-a file whose frontmatter fails to parse is skipped with a note, as pi skips it.
+Skill frontmatter is parsed with PyYAML when installed, else approximately (a sources note says
+so); a skill whose frontmatter fails to parse is skipped with a note, as pi skips it. Agent
+frontmatter is read with a port of pi-subagents' line-based parser, not YAML; an agent without a
+name or description is skipped with a note, as pi-subagents skips it.
 """
 import argparse
 import fnmatch
@@ -147,6 +149,81 @@ def frontmatter(path):
         raise FrontmatterError(f"description is a {type(fm['description']).__name__}, not a string")
     if not isinstance(fm.get("name"), (str, type(None))):
         fm["name"] = None
+    return fm
+
+
+def _strip_block(lines, folded):
+    raw = "\n".join(lines)
+    lead = re.search(r"^[ \t]+(?=\S)", raw, re.M)
+    if lead:
+        raw = re.sub(r"^\n", "", re.sub("^" + re.escape(lead.group(0)), "", raw, flags=re.M))
+    return _fold(raw) if folded else raw
+
+
+def _fold(block):
+    out, has, prev_more, blanks = "", False, False, 0
+    for line in block.split("\n"):
+        cur = line.rstrip()
+        if not cur.strip():
+            blanks += has
+            continue
+        more = len(cur) > len(cur.lstrip())
+        if has:
+            if blanks:
+                out += "\n" * (blanks + (1 if prev_more or more else 0))
+            else:
+                out += "\n" if prev_more or more else " "
+        out += cur
+        has, prev_more, blanks = True, more, 0
+    return out.strip()
+
+
+def agent_frontmatter(path):
+    """An agent file's frontmatter the way pi-subagents' line-based parseFrontmatter reads it:
+    not YAML, so a plain value containing ': ' is fine. Values are strings."""
+    try:
+        with open(path, errors="replace") as f:
+            text = f.read().replace("\r\n", "\n")
+    except OSError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}
+    fm, key, lines, indent, folded, literal = {}, None, None, 0, False, False
+    for line in text[4:end].split("\n"):
+        ind = len(line) - len(line.lstrip())
+        if key is not None and (ind > indent or ((folded or literal) and not line.strip())):
+            lines.append(line)
+            continue
+        if key is not None:
+            fm[key] = _strip_block(lines, folded)
+            key = None
+        m = re.match(r"([\w-]+):\s*(.*)$", line, re.ASCII)
+        if not m:
+            continue
+        raw = m.group(2).strip()
+        quoted = len(raw) >= 1 and raw[0] == raw[-1] and raw[0] in "'\""
+        value = raw[1:-1] if quoted else raw
+        folded = not quoted and raw in (">", ">-")
+        literal = not quoted and raw in ("|", "|-")
+        if value == "" or folded or literal:
+            key, lines, indent = m.group(1), [], ind
+        else:
+            fm[m.group(1)] = value
+    if key is not None:
+        fm[key] = _strip_block(lines, folded)
+    return fm
+
+
+def read_agent(path, notes):
+    """agent_frontmatter(path), or None after a skip note when pi-subagents would not load it
+    (it requires a non-empty name and description and has no filename fallback)."""
+    fm = agent_frontmatter(path)
+    if not fm.get("name") or not fm.get("description"):
+        notes.append(f"agent skipped: {path}: name and description are required")
+        return None
     return fm
 
 
@@ -360,9 +437,11 @@ def agent_names(dirs, notes):
     names = set()
     for d in dirs:
         for p in glob.glob(os.path.join(d, "**", "*.md"), recursive=True):
-            fm = read_frontmatter(p, notes, "agent")
+            if p.endswith(".chain.md"):
+                continue
+            fm = read_agent(p, notes)
             if fm is not None:
-                names.add(fm.get("name") or os.path.splitext(os.path.basename(p))[0])
+                names.add(fm["name"])
     return names
 
 
@@ -515,9 +594,9 @@ def hworks_items(root, notes):
         if fm is not None:
             items.append(("skill", fm.get("name") or os.path.basename(os.path.dirname(p)), fm.get("description") or ""))
     for p in sorted(glob.glob(os.path.join(root, "agents", "*.md"))):
-        fm = read_frontmatter(p, notes, "agent")
+        fm = read_agent(p, notes)
         if fm is not None:
-            items.append(("agent", fm.get("name") or os.path.splitext(os.path.basename(p))[0], fm.get("description") or ""))
+            items.append(("agent", fm["name"], fm["description"]))
     for p in sorted(glob.glob(os.path.join(root, "extensions", "*.ts"))):
         if ".test." not in p:
             items.append(("extension", os.path.splitext(os.path.basename(p))[0], ext_description(p)))

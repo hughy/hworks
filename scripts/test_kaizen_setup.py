@@ -216,6 +216,28 @@ class Loader(unittest.TestCase):
                                    "subagents.agentOverrides.a.subagentOnlyExtensions[0]":
                                        os.path.join(pi, "sub", "ext.ts")})
 
+    def test_agents_read_like_pi_subagents(self):
+        pi = os.path.join(self.d, "pi")
+        agents = os.path.join(pi, "agents")
+        write(os.path.join(agents, "advisor.md"),
+              "---\nname: advisor\ndescription: Modes (named in the task): draft plan | review\n---\n")
+        write(os.path.join(agents, "folded.md"),
+              "---\nname: folded\ndescription: >\n  one\n  two\n\n  three\ntools: read, bash\n---\n")
+        write(os.path.join(agents, "nameless.md"), "---\ndescription: d\n---\n")
+        write(os.path.join(agents, "flow.chain.md"), "---\nname: flow\n---\n")
+        settings = {"subagents": {"disableBuiltins": True,
+                                  "agentOverrides": {"advisor": {}, "folded": {}, "nameless": {}, "flow": {}}}}
+        notes = []
+        rows = ksu.audit_settings(settings, os.path.join(pi, "settings.json"), pi, None,
+                                  ksu.kt.Owners(self.d, rules=[]), notes)
+        self.assertEqual([r["key"] for r in rows if r["issue"] == "stale override"],
+                         ["subagents.agentOverrides.flow", "subagents.agentOverrides.nameless"])
+        self.assertEqual(notes, [f"agent skipped: {os.path.join(agents, 'nameless.md')}: name and description are required"])
+        fm = ksu.agent_frontmatter(os.path.join(agents, "folded.md"))
+        self.assertEqual((fm["description"], fm["tools"]), ("one two\nthree", "read, bash"))
+        lit = write(os.path.join(self.d, "lit.md"), "---\nname: lit\nprompt: |\n    a\n      b\n---\n")
+        self.assertEqual(ksu.agent_frontmatter(lit)["prompt"], "a\n  b")
+
     def test_builtin_and_file_url_settings(self):
         pi = os.path.join(self.d, "pi")
         ext = write(os.path.join(pi, "ext dir", "e.ts"))
