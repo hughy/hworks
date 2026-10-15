@@ -1,6 +1,7 @@
 ---
 name: kaizen
-description: Continuous improvement of the agent system from recent sessions. Runs scripts/kaizen-sessions.py (tooling agents keep rewriting), scripts/kaizen-tokens.py (where tokens go, who owns each cost, and spend on long-context turns), scripts/blockers.sh (where runs blocked), and scripts/kaizen-setup.py (an audit of the installed setup for duplicate skills, stale settings and overrides, broken links, leftover files, stale guidance references, and hworks parts that overlap the harness) over a window, verifies each finding in a few example sessions, and sends it to exactly one fix - a new tool built through orchestrate, a routing fix for an ignored tool, a correct pass for a repeated mistake, an upstream flag for a harness or dependency cause, or a guidance edit - and tracks each action until later sessions show it worked. Use for "/kaizen", a request to turn recent session history into fixes, or a request to make hworks more token-efficient; run every week or two.
+description: Improve the agent system from the last two weeks of sessions, routing each finding to one fix.
+disable-model-invocation: true
 ---
 
 # kaizen
@@ -54,6 +55,8 @@ Triage every group in at least 5 sessions, every blocker class in at least 3 (th
 
 Order verified findings by observed impact as well as distinct-session recurrence. Read the raw `cost` field of the related `friction.md` entries (review rounds, reverted commits, reruns) and cite it; do not combine unlike units into a score, and record a missing cost as unknown, not zero. A verified finding with high impact may be triaged below the frequency thresholds, with its impact evidence cited in its line.
 
+Check `<hworks>/OUT-OF-SCOPE.md` before routing. A finding that matches a Declined row needs evidence the row did not have; cite it, or drop the finding with the row as its reason. A finding that meets a Watching row's admit condition is that row's fix: route it through outcomes 1-5, and the deliverable removes the row. Read each Watching row's condition against this run's reports even when no finding points at it.
+
 Token rows route by owner. An `hworks` baseline part is outcome 5 (trim it, or move always-on text into a skill or reference loaded on demand) or a step down the outcome 2 ladder (a rule in `global/AGENTS.md` that only some tasks need). A `local` part is the same fix in the companion repo or the project it names, listed for the user when outside both. An `upstream:<name>` part, an `unexplained` cache-rewrite row, or any token cost whose cause is in the harness or a dependency is outcome 4. A tool-result group that agents read wastefully (whole files, unbounded logs) is outcome 2 when a narrower tool or option exists, outcome 5 when guidance should say how to read it, and outcome 4 only when the tool itself returns more than asked. Cite token-turns or dollars from the report as the finding's impact, and compare the next run's number for the same row to judge `effective`.
 
 The long-context row (cost on turns over the threshold, top sessions) is mostly an operator habit, letting one session run long instead of starting fresh, which belongs to hansei. kaizen acts only on the parts hworks owns: compaction guidance, and skills or workflows that keep sessions running long (outcome 5, or 2 when a tool exists). Cite the long-context share as the impact and compare it next run.
@@ -88,7 +91,7 @@ The id is stable: reuse it in every run while the finding stays open, and give a
 Then act on each outcome:
 
 - Outcome 1: write the units for `../orchestrate/SKILL.md` (its Start step owns the format) in `$TASK_DIR/units.json`. A reporter or classifier unit needs the accuracy contract orchestrate describes.
-- Outcomes 2 and 5: each edit is one brief for `../review-loop/SKILL.md`, or one orchestrate unit when there are several.
+- Outcomes 2 and 5: each edit is one brief for `../review-loop/SKILL.md`, or one orchestrate unit when there are several. A brief that edits a skill, an agent prompt, or `global/AGENTS.md` names `<hworks>/skills/writing-for-agents/SKILL.md`.
 - Outcome 3: run `/skill:correct` with the classes.
 - Outcome 4: the flags, grouped by owner and listed for the user. Nothing is drafted or filed.
 
