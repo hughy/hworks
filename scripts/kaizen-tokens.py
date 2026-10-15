@@ -3,11 +3,15 @@
 upstream dependency.
 
 Read-only. Output can quote private transcript content: do not redirect it into a repo.
-usage: kaizen-tokens.py [--since YYYY-MM-DD|7d] [--min-sessions N] [--top N] [--cwd-match TEXT]... [--json]
+usage: kaizen-tokens.py [--since YYYY-MM-DD|7d] [--min-sessions N] [--top N] [--cwd-match TEXT]...
+                       [--long-context TOKENS] [--json]
 
 Sections:
   totals        tokens and cost by kind (input, output, cache read, cache write), by model, and
                 main sessions against subagent children (children by agent where known).
+  long context  the share of cost spent on turns whose prompt (input + cache read + cache write)
+                exceeds --long-context tokens (default 150000), overall and main against subagents,
+                and the top sessions by that cost with their long turns and compactions.
   baseline      the always-on prompt each session starts with: one row per system-prompt
                 section, per project instructions file, per listed skill, per advertised agent,
                 and per tool schema. Each row has its median size and its token-turns: its size
@@ -280,6 +284,65 @@ def first_turn_tokens(s):
     return t["input"] + t["cr"] + t["cw"]
 
 
+def skill_blocks(val):
+    """(block, name, description, absolute location or "") for each skill listed in a section."""
+    base = BASE.search(val)
+    for block in SKILL.findall(val):
+        loc = tag(block, "location")
+        full = "" if not loc else loc if os.path.isabs(os.path.expanduser(loc)) else os.path.join(
+            base.group(1) if base else os.path.expanduser("~"), loc)
+        yield block, tag(block, "name") or loc, tag(block, "description"), full
+
+
+def agent_blocks(val):
+    """(block, name, description) for each advertised subagent in a section."""
+    for block in AGENT.findall(val):
+        yield block, tag(block, "name"), tag(block, "description")
+
+
+def first_system(path, max_lines=500):
+    """The first system prompt of a transcript as (sections, tools), reading no further than it;
+    (None, None) when none appears in the first max_lines lines."""
+    try:
+        with open(path, errors="replace") as f:
+            for i, line in enumerate(f):
+                if i >= max_lines:
+                    break
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(e, dict):
+                    continue
+                m = e.get("message")
+                if e.get("type") == "message" and isinstance(m, dict) and m.get("role") == "system":
+                    sec = m.get("sections") if isinstance(m.get("sections"), dict) else {}
+                    tools = m.get("toolsAdded") if isinstance(m.get("toolsAdded"), list) else []
+                    return sec, tools
+    except OSError:
+        pass
+    return None, None
+
+
+def listed_parts(sections, tools):
+    """Skills, advertised agents, and tool schemas a session saw, each as
+    {kind, name, description, location}."""
+    out = []
+    for val in (sections or {}).values():
+        if not isinstance(val, str):
+            continue
+        for _b, name, desc, full in skill_blocks(val):
+            out.append({"kind": "skill", "name": name, "description": desc, "location": full})
+        for _b, name, desc in agent_blocks(val):
+            out.append({"kind": "agent", "name": name, "description": desc, "location": ""})
+    for t in tools or []:
+        if isinstance(t, dict) and t.get("name"):
+            d = t.get("description")
+            out.append({"kind": "tool", "name": str(t["name"]), "description": d if isinstance(d, str) else "",
+                        "location": ""})
+    return out
+
+
 def components(s, owners):
     """(kind, name, owner, chars) for each part of the first system prompt and tool list."""
     out = []
@@ -293,16 +356,10 @@ def components(s, owners):
         for path, body in INSTR.findall(val):
             out.append(("instructions", path, owners.path(path), len(body)))
             rest = rest.replace(body, "", 1)
-        base = BASE.search(val)
-        for block in SKILL.findall(val):
-            loc = tag(block, "location")
-            full = loc if os.path.isabs(os.path.expanduser(loc)) else os.path.join(
-                base.group(1) if base else os.path.expanduser("~"), loc)
-            out.append(("skill", tag(block, "name") or loc, owners.path(full) if loc else "upstream:unattributed",
-                        len(block)))
+        for block, sk, _desc, full in skill_blocks(val):
+            out.append(("skill", sk, owners.path(full) if full else "upstream:unattributed", len(block)))
             rest = rest.replace(block, "", 1)
-        for block in AGENT.findall(val):
-            n = tag(block, "name")
+        for block, n, _desc in agent_blocks(val):
             out.append(("agent", n, owners.agent(n), len(block)))
             rest = rest.replace(block, "", 1)
         out.append(("section", name, owners.section(name), len(rest)))
@@ -487,7 +544,42 @@ def loop_report(sessions, rel, min_sessions):
     return out, stats
 
 
-def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=None):
+def long_context_report(sessions, rel, threshold, top):
+    """Cost on turns whose prompt (input + cache read + cache write) exceeds threshold: overall,
+    main against subagent, and the sessions that spent most that way."""
+    groups = defaultdict(lambda: [0.0, 0.0, 0, 0])
+    per = []
+    for p, s in sessions.items():
+        cost = long_cost = 0.0
+        long_turns = 0
+        for t in s["turns"]:
+            if not t["after"]:
+                continue
+            c = t["cost"].get("total") or 0
+            cost += c
+            if t["input"] + t["cr"] + t["cw"] > threshold:
+                long_cost += c
+                long_turns += 1
+        turns = sum(1 for t in s["turns"] if t["after"])
+        for g in ("all", "main" if s["kind"] == "main" else "subagent"):
+            groups[g][0] += cost
+            groups[g][1] += long_cost
+            groups[g][2] += turns
+            groups[g][3] += long_turns
+        if long_turns:
+            per.append({"section": "long context sessions", "session": rel(p), "kind": s["kind"],
+                        "long_turns": long_turns, "turns": turns,
+                        "compactions": sum(1 for r in s["results"] if "compaction" in r),
+                        "long_cost": round(long_cost, 2), "cost": round(cost, 2)})
+    rows = [{"section": "long context", "group": g, "threshold": threshold, "turns": v[2], "long_turns": v[3],
+             "cost": round(v[0], 2), "long_cost": round(v[1], 2),
+             "long_share": round(v[1] / v[0], 3) if v[0] else 0.0}
+            for g, v in sorted(groups.items(), key=lambda x: ("all", "main", "subagent").index(x[0]))]
+    per.sort(key=lambda r: (-r["long_cost"], r["session"]))
+    return rows, per[:top]
+
+
+def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=None, long_context=150000):
     notes = []
     sroot = src["sessions"]
     if not os.path.isdir(sroot):
@@ -647,11 +739,13 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=
                              "evidence": f"{r['turns']} turns in {r['sessions']} sessions, {r['tokens']} tokens written, "
                                          f"${r['cost']}"})
 
+    long_rows, long_sessions = long_context_report(sessions, rel, long_context, top)
     loop_sections, loop_stats = loop_report(sessions, rel, min_sessions)
     stats = {"sessions": len(sessions), "main": sum(1 for s in sessions.values() if s["kind"] == "main"), **loop_stats,
              "chars_per_token": round(cpt, 2), "calibrated_on": len(ratios),
              "first_turn_p50": int(statistics.median(firsts)) if firsts else 0, "first_turn_p90": p90(firsts)}
-    return {"stats": stats, "totals": totals, "baseline by owner": baseline_owners, "baseline": baseline[:top],
+    return {"stats": stats, "totals": totals, "long context": long_rows, "long context sessions": long_sessions,
+            "baseline by owner": baseline_owners, "baseline": baseline[:top],
             "tool results": results[:top], "cache writes": cache, **{k: v[:top] if k == "roles" else v for k, v in loop_sections.items()},
             "upstream": upstream[:top]}, notes
 
@@ -680,6 +774,15 @@ def print_text(report, since):
         print(f"{r['group'][:40]:40} {r.get('turns', 0):>7} {r.get('cost', 0):>9.2f} {fmt(r.get('input', 0)):>7} "
               f"{fmt(r.get('output', 0)):>7} {fmt(r.get('cache read', 0)):>7} {fmt(r.get('cache write', 0)):>7} "
               f"{r.get('cost cache read', 0):>8.2f} {r.get('cost cache write', 0):>8.2f}")
+    print("\n== long context ==  (cost on turns whose prompt exceeds the threshold)")
+    for r in report["long context"]:
+        print(f"  {r['group']:9} >{fmt(r['threshold'])} tokens: {r['long_turns']} of {r['turns']} turns, "
+              f"${r['long_cost']:.2f} of ${r['cost']:.2f} ({100 * r['long_share']:.0f}%)")
+    if report["long context sessions"]:
+        print(f"{'long':>6} {'turns':>6} {'compact':>7} {'$long':>8} {'$all':>8}  session  [kind]")
+    for r in report["long context sessions"]:
+        print(f"{r['long_turns']:>6} {r['turns']:>6} {r['compactions']:>7} {r['long_cost']:>8.2f} {r['cost']:>8.2f}  "
+              f"{r['session']}  [{r['kind']}]")
     print("\n== baseline by owner ==  (sums of the rows shown below the cut too)")
     for r in report["baseline by owner"]:
         print(f"  {r['owner']:32} {fmt(r['median_tokens']):>7} tokens  {fmt(r['token_turns']):>7} token-turns")
@@ -740,11 +843,14 @@ def main(argv=None):
     ap.add_argument("--top", type=int, default=15, help="rows per ranked section (default 15)")
     ap.add_argument("--cwd-match", action="append", default=[], metavar="TEXT",
                     help="keep sessions whose cwd contains TEXT (repeatable)")
+    ap.add_argument("--long-context", type=int, default=150000, metavar="TOKENS",
+                    help="prompt size above which a turn counts as long-context (default 150000)")
     ap.add_argument("--json", action="store_true", help="one JSON object per row")
     args = ap.parse_args(argv)
     since = ks.parse_since(args.since)
     src = {"sessions": os.environ.get("HWORKS_PI_SESSIONS") or os.path.expanduser("~/.pi/agent/sessions")}
-    report, notes = analyze(src, since, args.min_sessions, args.top, cwd_match=args.cwd_match)
+    report, notes = analyze(src, since, args.min_sessions, args.top, cwd_match=args.cwd_match,
+                           long_context=args.long_context)
     if args.json:
         for section, rows in report.items():
             if section == "stats":

@@ -274,6 +274,26 @@ class Report(unittest.TestCase):
         self.assertIn("upstream:pi or provider", owners)
         self.assertIn(("upstream:unattributed", "tool fastgrep"), {(r["owner"], r["what"]) for r in self.report["upstream"]})
 
+    def test_long_context_share_by_threshold(self):
+        rep, _ = kt.analyze({"sessions": self.sroot}, kt.ks.parse_since("2026-09-01"), min_sessions=3, top=50,
+                            root=self.root, owners=self.owners, long_context=5000)
+        rows = {r["group"]: r for r in rep["long context"]}
+        all_ = self.row("totals", group="all")
+        long_cost = 3 * ((0.01 + 0.003) + (0.01 + 0.0051))
+        self.assertEqual((rows["all"]["long_turns"], rows["main"]["long_turns"], rows["subagent"]["long_turns"]),
+                         (6, 6, 0))
+        self.assertAlmostEqual(rows["all"]["long_cost"], round(long_cost, 2))
+        self.assertAlmostEqual(rows["all"]["long_share"], round(round(long_cost, 2) / all_["cost"], 3), delta=0.01)
+        self.assertGreater(rows["all"]["long_share"], 0)
+        self.assertEqual(rows["subagent"]["long_cost"], 0)
+        top = rep["long context sessions"]
+        self.assertEqual(len(top), 3)
+        self.assertEqual((top[0]["long_turns"], top[0]["compactions"], top[0]["kind"]), (2, 1, "main"))
+        self.assertTrue(top[0]["session"].startswith("proj/s"))
+        self.assertEqual(self.report["long context"][0]["long_turns"], 0)
+        self.assertEqual(self.report["long context"][0]["threshold"], 150000)
+        self.assertEqual(self.report["long context sessions"], [])
+
     def test_since_and_cwd_filters(self):
         none, _ = kt.analyze({"sessions": self.sroot}, kt.ks.parse_since("2027-01-01"), root=self.root, owners=self.owners)
         self.assertEqual(none["stats"]["sessions"], 0)
@@ -377,6 +397,16 @@ class Loops(unittest.TestCase):
         self.assertEqual(len(kt.effective_blocking({"verdict": "blocked", "findings": [blocking("prior")]}, 2)), 1)
 
 
+class FirstSystem(unittest.TestCase):
+    def test_non_object_lines_are_skipped(self):
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "t.jsonl")
+        sysmsg = {"type": "message", "message": {"role": "system", "sections": {"a": "b"}, "toolsAdded": [{"name": "t"}]}}
+        with open(p, "w") as f:
+            f.write("null\n[1]\n" + json.dumps(sysmsg) + "\n")
+        self.assertEqual(kt.first_system(p), ({"a": "b"}, [{"name": "t"}]))
+
+
 class Cli(unittest.TestCase):
     def test_json_and_missing_source(self):
         with tempfile.TemporaryDirectory() as d:
@@ -391,6 +421,11 @@ class Cli(unittest.TestCase):
             text = subprocess.run([sys.executable, SCRIPT, "--since", "2026-09-01", "--min-sessions", "1"],
                                   capture_output=True, text=True, env=env, check=True).stdout
             self.assertIn("== upstream ==  (flags only: nothing filed or drafted)", text)
+            out = subprocess.run([sys.executable, SCRIPT, "--since", "2026-09-01", "--json", "--long-context", "5000"],
+                                 capture_output=True, text=True, env=env, check=True).stdout
+            [lc] = [json.loads(x) for x in out.splitlines() if '"group": "all"' in x and '"long context"' in x]
+            self.assertEqual((lc["threshold"], lc["long_turns"]), (5000, 2))
+            self.assertIn("long context sessions", {json.loads(x)["section"] for x in out.splitlines()})
             env["HWORKS_PI_SESSIONS"] = os.path.join(d, "absent")
             r = subprocess.run([sys.executable, SCRIPT], capture_output=True, text=True, env=env, check=True)
             self.assertIn("pi sessions: not found", r.stderr)
