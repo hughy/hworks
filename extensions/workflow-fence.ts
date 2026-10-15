@@ -2,7 +2,7 @@
 // pi-subagents accepts only a fence tagged exactly `js workflow` / `javascript workflow`, and its
 // "found 0" error does not name the tag, so agents retry blindly. With no tagged fence and exactly one
 // untagged js fence, this writes the body to a temp file and points `workflow` at it. Any other
-// untagged shape is blocked with a reason that names the tag and the path form.
+// shape except exactly one closed tagged fence is blocked with a reason that names the tag and the path form.
 // Pi appends the assistant message to the session on message_end, before it runs that message's tool
 // calls, so the issuing message is on the branch when tool_call fires. PI_WORKFLOW_FENCE=0 disables it.
 
@@ -85,8 +85,9 @@ export function decide(content: any[]): Decision {
   if (calls.length > 1) return { action: "none" };
   const text = content.flatMap((b) => (b?.type === "text" && typeof b.text === "string" ? [b.text] : [])).join("\n");
   const f = scanFences(text);
-  // A tagged fence means the agent used the right form; pi-subagents' own errors cover its mistakes.
-  if (f.tagged > 0 || f.taggedUnclosed) return { action: "none" };
+  if (f.taggedUnclosed) return { action: "block", reason: blockReason("an unclosed ```js workflow block") };
+  if (f.tagged > 1) return { action: "block", reason: blockReason(`${f.tagged} \`\`\`js workflow blocks`) };
+  if (f.tagged === 1) return { action: "none" };
   if (f.plainUnclosed) return { action: "block", reason: blockReason("an unclosed ```js block") };
   if (f.plain.length === 0) return { action: "block", reason: blockReason("no ```js block") };
   if (f.plain.length > 1) return { action: "block", reason: blockReason(`${f.plain.length} untagged \`\`\`js blocks`) };

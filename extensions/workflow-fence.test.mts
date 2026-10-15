@@ -61,6 +61,19 @@ function run(text: string, input: any, toolName = "subagent", id = `call-${n}`) 
   const { r, input } = run(`${F}js workflow\n${body}\n${F}\n${F}js\n${body}\n${F}`, { workflow: true });
   check("tagged plus plain untouched", r === undefined && input.workflow === true, { r, input });
 }
+// Malformed tagged fences: blocked with the redirect, since pi-subagents rejects them without naming it.
+{
+  const { r, input } = run(`${F}js workflow\n${body}\n`, { workflow: true });
+  check("unclosed tagged blocked", r?.block === true && input.workflow === true && /unclosed ```js workflow/.test(r?.reason ?? "") && (r?.reason ?? "").includes('workflow: "<absolute path>"'), r);
+}
+{
+  const { r, input } = run(`${F}js workflow\n${body}\n${F}\n${F}js workflow\n${body}\n${F}`, { workflow: true });
+  check("two tagged blocked", r?.block === true && input.workflow === true && /2 ```js workflow blocks/.test(r?.reason ?? ""), r);
+}
+{
+  const { r, input } = run(`${F}js workflow\n${body}\n${F}\n${F}javascript workflow\n${body}\n`, { workflow: true });
+  check("tagged plus unclosed tagged blocked", r?.block === true && input.workflow === true && /unclosed/.test(r?.reason ?? ""), r);
+}
 // No block: blocked, reason names the tag and the path form.
 {
   const { r, input } = run("Run review-loop with these args.", { workflow: true });
