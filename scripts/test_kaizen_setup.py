@@ -266,6 +266,20 @@ class Loader(unittest.TestCase):
         self.assertIn("OverflowError", text)
         self.assertIn("ParserError", text)
 
+    def test_declared_skill_without_description_is_skipped_with_note(self):
+        root = os.path.join(self.d, "root")
+        skill(root, "good")
+        bodies = {"nul": "description: null\n", "absent": "name: absent\n", "empty": 'description: ""\n'}
+        for name, body in bodies.items():
+            write(os.path.join(root, name, "SKILL.md"), "---\n" + body + "---\n")
+        write(os.path.join(root, "loose.md"), "---\nname: loose\n---\n")
+        notes = []
+        rows, _ = ksu.audit_skills([(root, "s", "pi")], None, ksu.kt.Owners(self.d, rules=[]), notes)
+        self.assertEqual([r["name"] for r in rows], ["good"])
+        for name in bodies:
+            self.assertIn(f"skill skipped: {os.path.join(root, name, 'SKILL.md')}: description is required", notes)
+        self.assertFalse(any("loose.md" in n for n in notes))
+
     @unittest.skipUnless(getattr(ksu, "yaml", None), "PyYAML not installed")
     def test_non_mapping_and_non_string_description_skip(self):
         for i, body in enumerate(["- a list\n", "description: 3\n"]):

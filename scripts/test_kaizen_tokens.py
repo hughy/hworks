@@ -397,6 +397,16 @@ class Loops(unittest.TestCase):
         self.assertEqual(len(kt.effective_blocking({"verdict": "blocked", "findings": [blocking("prior")]}, 2)), 1)
 
 
+class FirstSystem(unittest.TestCase):
+    def test_non_object_lines_are_skipped(self):
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "t.jsonl")
+        sysmsg = {"type": "message", "message": {"role": "system", "sections": {"a": "b"}, "toolsAdded": [{"name": "t"}]}}
+        with open(p, "w") as f:
+            f.write("null\n[1]\n" + json.dumps(sysmsg) + "\n")
+        self.assertEqual(kt.first_system(p), ({"a": "b"}, [{"name": "t"}]))
+
+
 class Cli(unittest.TestCase):
     def test_json_and_missing_source(self):
         with tempfile.TemporaryDirectory() as d:

@@ -333,12 +333,15 @@ def audit_skills(roots, lock, owners, notes, lock_root=""):
             fm = read_frontmatter(path, notes, "skill")
             if fm is None:
                 continue
-            if os.path.basename(path) != "SKILL.md" and not str(fm.get("description") or "").strip():
+            desc = fm.get("description")
+            if not isinstance(desc, str) or not desc.strip():
+                if os.path.basename(path) == "SKILL.md":
+                    notes.append(f"skill skipped: {path}: description is required")
                 continue
             d = os.path.basename(os.path.dirname(path))
             name = fm.get("name") or d
             rows.append({"section": "skills", "name": name, "root": root, "origin": origin, "path": path,
-                         "description_chars": len(fm.get("description") or ""),
+                         "description_chars": len(desc),
                          "lock_managed": bool(lock_root) and (name in managed or d in managed)
                          and os.path.realpath(path).startswith(lock_root), "owner": owners.path(path)})
     by_name = defaultdict(list)

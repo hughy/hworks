@@ -312,7 +312,9 @@ def first_system(path, max_lines=500):
                     e = json.loads(line)
                 except ValueError:
                     continue
-                m = e.get("message") if isinstance(e, dict) else None
+                if not isinstance(e, dict):
+                    continue
+                m = e.get("message")
                 if e.get("type") == "message" and isinstance(m, dict) and m.get("role") == "system":
                     sec = m.get("sections") if isinstance(m.get("sections"), dict) else {}
                     tools = m.get("toolsAdded") if isinstance(m.get("toolsAdded"), list) else []
