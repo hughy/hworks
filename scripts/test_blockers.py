@@ -70,6 +70,11 @@ class Friction(unittest.TestCase):
         self.assertEqual(len(both), len(self.rows()))
         self.assertEqual(self.rows("--cwd-match", "gamma"), [])
 
+    def test_source_and_kind_filter_events(self):
+        got = self.rows("--source", "friction", "--kind", "operator")
+        self.assertEqual([(r["source"], r["kind"], r["rule"]) for r in got], [("friction", "operator", "wrong-assumption")])
+        self.assertEqual({r["source"] for r in self.rows("--source", "open-questions")}, {"open-questions"})
+
     def test_state_field_sets_stage_and_verdict(self):
         write(os.path.join(self.tasks, "github.com--o--alpha", "main", "t3", "open-questions.md"),
               "- [permission] push to main? | no | user grant missing | push later | deferred\n"
