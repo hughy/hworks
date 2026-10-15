@@ -154,7 +154,9 @@ class Page(unittest.TestCase):
         self.assertEqual(len(re.findall(r'<input type="checkbox" class="pick-box"', html)), 2)
         self.assertEqual(len(re.findall(r'<textarea class="comment" id="comment-\d"', html)), 2)
         self.assertIn('<textarea id="note"', html)
-        self.assertIn(f'<textarea id="plan" readonly data-source="{path}">', html)
+        skill = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "hansei", "SKILL.md"))
+        self.assertTrue(os.path.isfile(skill))
+        self.assertIn(f'<textarea id="plan" readonly data-source="{path}" data-skill="{skill}">', html)
         self.assertTrue(os.path.isabs(path))
         self.assertIn('data-title="Second finding"', html)
         self.assertIn('<button class="copy plan-copy" type="button" data-target="plan">Copy</button>', html)
@@ -179,7 +181,7 @@ els['comment-0'] = mk('TEXTAREA', {}, {value: ' keep the tests '});
 els['comment-1'] = mk('TEXTAREA', {}, {value: 'ignored'});
 els['comment-2'] = mk('TEXTAREA', {});
 els.note = mk('TEXTAREA', {}, {value: 'overall note'});
-els.plan = mk('TEXTAREA', {'data-source': '/abs/findings.json'});
+els.plan = mk('TEXTAREA', {'data-source': '/abs/findings.json', 'data-skill': '/abs/SKILL.md'});
 globalThis.document = {getElementById: id => els[id],
   querySelectorAll: q => q === 'input.pick-box' ? boxes : []};
 globalThis.window = {}; globalThis.navigator = {};
@@ -188,6 +190,7 @@ globalThis.window = {}; globalThis.navigator = {};
                            capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stdout, "Hansei plan. Findings JSON: /abs/findings.json\n"
+                         "Follow \"Receive a plan message\" in /abs/SKILL.md.\n"
                          "Re-read each finding below by id from that file before acting on it.\n\n"
                          "[H1] First\nComment: keep the tests\n\n[H3] Third\n\nNote: overall note\n")
 

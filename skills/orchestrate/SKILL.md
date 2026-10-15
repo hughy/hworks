@@ -1,6 +1,7 @@
 ---
 name: orchestrate
-description: Experimental coordinator for pi with pi-subagents, adapted from pstack's orchestrate playbook. Drives the work items the user names (issue ids, a label, a milestone, "the top three ready") to reviewed, gate-passing branches, several at once, one fresh branch worktree per item, and recovers after a reload without starting a second writer. The session coordinates; scripts/orchestrate.py keeps the state and the safety checks; each item runs through the review-loop workflow. Use only for "/orchestrate" or an explicit request to drive several independent items at once; a short sequential list stays a plain brief with review-loop.
+description: Experimental. Drive several independent work items to reviewed, gate-passing branches at once, one worktree each, surviving a reload.
+disable-model-invocation: true
 ---
 
 # orchestrate

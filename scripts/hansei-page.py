@@ -48,6 +48,7 @@ import sys
 from html import escape
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+SKILL = os.path.normpath(os.path.join(HERE, "..", "skills", "hansei", "SKILL.md"))
 _spec = importlib.util.spec_from_file_location("operator_signals", os.path.join(HERE, "operator-signals.py"))
 osig = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(osig)
@@ -112,6 +113,7 @@ document.querySelectorAll('button.copy').forEach(function (b) {
 var plan = document.getElementById('plan');
 function composePlan() {
   var lines = ['Hansei plan. Findings JSON: ' + plan.getAttribute('data-source'),
+    'Follow "Receive a plan message" in ' + plan.getAttribute('data-skill') + '.',
     'Re-read each finding below by id from that file before acting on it.', ''];
   var picked = 0;
   document.querySelectorAll('input.pick-box').forEach(function (c) {
@@ -216,7 +218,7 @@ def render(data, source=""):
             '<textarea id="note" placeholder="Optional note for the whole plan"></textarea>',
             '<div class="prompt"><div class="prompt-head"><span class="label">Plan message</span>'
             '<button class="copy plan-copy" type="button" data-target="plan">Copy</button></div>'
-            f'<textarea id="plan" readonly data-source="{e(source)}"></textarea></div>']
+            f'<textarea id="plan" readonly data-source="{e(source)}" data-skill="{e(SKILL)}"></textarea></div>']
     out.append(f"</main><script>{JS}</script></body></html>")
     return "\n".join(out) + "\n"
 
