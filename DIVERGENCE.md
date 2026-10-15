@@ -2,6 +2,8 @@
 
 One line per pstack skill or principle that hworks does not link. `scripts/skill.sh enable <name>` removes a line; `disable` adds one. The last column is the pstack mirror commit the decision was made against.
 
+All pstack principles are linked for reference completeness. Read a principle when the selected workflow relies on it or the user names it; the restored links add no automatic triggers. `skills/hughy-router/SKILL.md` owns the loading policy and overrides for scope, public compatibility, autonomy, green commits, and design exploration.
+
 | skill | reason | mirror commit |
 |---|---|---|
 | `poteto-mode` | replaced by hughy-mode; mandatory how/architect/arena/interrogate chain and reply rituals | fa9a0ed |
@@ -18,21 +20,4 @@ One line per pstack skill or principle that hworks does not link. `scripts/skill
 | `show-me-your-work` | TSV trail with mandatory transcript audit and cross-model review; too heavy by default | fa9a0ed |
 | `typescript-best-practices` | paths: trigger is Cursor-only; re-enable on demand | fa9a0ed |
 | `architect` | runs arena of 3 models for any cross-boundary code; use arena directly when design is contested | fa9a0ed |
-| `principle-fix-root-causes` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-prove-it-works` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-laziness-protocol` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-subtract-before-you-add` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-minimize-reader-load` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-foundational-thinking` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-redesign-from-first-principles` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-experience-first` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-boundary-discipline` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-type-system-discipline` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-make-operations-idempotent` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-guard-the-context-window` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-model-the-domain` | default frontier-model behavior; restates what a rigorous prompt already gets | fa9a0ed |
-| `principle-migrate-callers-then-delete-legacy-apis` | contextual opinion (monorepo, fast CI, async human); wrong for libraries and public APIs | fa9a0ed |
-| `principle-outcome-oriented-execution` | contextual opinion (monorepo, fast CI, async human); wrong for libraries and public APIs | fa9a0ed |
-| `principle-never-block-on-the-human` | replaced by the Autonomy section of `global/AGENTS.md` and `extensions/autonomy.ts`. It confirms irreversible actions mid-task; hworks skips them, defers all questions to the final reply, and must apply in every session, which a `disable-model-invocation` principle cannot | fa9a0ed |
-| `principle-exhaust-the-design-space` | contextual opinion (monorepo, fast CI, async human); wrong for libraries and public APIs | fa9a0ed |
 | `poteto-mode/scripts/orch` (not a skill) | orchestrate.md's bun store and CLI duplicate pi-subagents missions and assume a Cursor fan-out coordinator (Task tool, cloud agents, gt). `skills/orchestrate` adapts the playbook for pi instead, over pi-subagents missions and `scripts/orchestrate.py` | c99b881 |

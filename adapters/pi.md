@@ -40,4 +40,4 @@ Give every `coder` run a `gate` (the test command, typecheck, or the repo's veri
 
 ## Enabling more of pstack
 
-`scripts/skill.sh enable <name>` links another pstack skill or principle into `skills/`. Playbooks need no enabling; reference them by path from `hughy-router`.
+All pstack principles are linked into `skills/` for on-demand reference. Follow hughy-router's principle-loading policy and hworks overrides; availability does not add automatic triggers. `scripts/skill.sh enable <name>` links another pstack skill into `skills/`. Playbooks need no enabling; reference them by path from `hughy-router`.
