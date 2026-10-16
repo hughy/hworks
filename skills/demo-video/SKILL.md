@@ -1,6 +1,6 @@
 ---
 name: demo-video
-description: Record a short narrated or silent demo, walkthrough, or scenario video of a running web app (screen capture, on-page annotations, local text-to-speech, one or two voices), including a live command-line run shown in a terminal page, or re-cut one after feedback on voice, wording, pacing, or length. Also screenshot a running web UI at several viewports and check for overflow, without a video.
+description: Record a short demo, walkthrough, or scenario video, narrated or silent, of a running web app or a live command-line run, or re-cut one after feedback on voice, wording, pacing, or length. Also screenshot a running web UI at several viewports and check for overflow, without a video.
 ---
 
 # demo-video
@@ -28,9 +28,9 @@ PLAYWRIGHT_FROM=<project>/package.json node scripts/shot.mjs http://localhost:30
 - `--local-storage key=value` stores `value` as given, before the page's scripts run, on the shot page's origin only. Pass JSON text when the app parses the key as JSON.
 - Each shot gets a fresh browser context, so storage one page writes does not leak into the next.
 - `--wait-for` waits until the selector is visible; `--settle` then waits a fixed time for animations and fonts. `--timeout` (default 30000 ms) limits the load, the wait, the measurement, and the screenshot. `--full-page` captures the whole page instead of the viewport.
-- `--action <js>` runs a script in the page after load and `--settle`, without waiting for it to finish; `--at 0.5,2,6` then shoots at those seconds after the action starts, one `<name><slug>-<w>x<h>-t<s>.png` and JSON line (with `at`) per time. Use them for a demo that starts on a click or a call, such as `--action 'window.demo.start()'`. `--at` without `--action` counts from the end of `--settle`.
+- To shoot a page mid-run or mid-animation, pass `--action <js>` (started, not awaited, such as `'window.demo.start()'`) and `--at <s,...>` (seconds after it starts). Each time gets its own `-t<s>` file and JSON line.
 - It exits 1 if any shot fails (load, HTTP status of 400 or above, selector, measure, or capture), naming each on stderr and going on; that shot's JSON line has an `error` field, and `file` is null when no PNG was written. It exits 2 on bad arguments. `node scripts/shot.mjs --help` lists every option.
 
 ## Video
 
-To record or re-cut a video, read `references/video.md`: the workflow, the `script.json` format, the scene helpers, why frames carry a clock strip, and how to review a take without watching it.
+To record or re-cut a video, read `references/video.md`: the workflow, silent and live command-line videos, the `script.json` format, the scene helpers, why frames carry a clock strip, and how to review a take without watching it.
