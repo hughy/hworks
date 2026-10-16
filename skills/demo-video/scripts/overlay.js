@@ -39,7 +39,8 @@ function setup() {
   .ann-stamp.bad{color:var(--bad)}.ann-stamp.accent{color:var(--accent)}
   .ann-emo{position:fixed;font-size:34px;animation:ann-float 1.6s ease-out forwards}
   @keyframes ann-float{0%{transform:translate(0,0) scale(.4);opacity:0}15%{opacity:1;transform:translate(0,-10px) scale(1.1)}100%{transform:translate(var(--dx),-120px) scale(1);opacity:0}}
-  .ann-cursor{position:fixed;width:26px;height:26px;left:0;top:0;transition:transform .6s cubic-bezier(.5,0,.2,1);z-index:2}
+  .ann-cursor{position:fixed;width:26px;height:26px;left:0;top:0;opacity:0;transition:transform .6s cubic-bezier(.5,0,.2,1);z-index:2}
+  .ann-cursor.on{opacity:1}
   .ann-cursor.click::after{content:"";position:absolute;left:-14px;top:-14px;width:28px;height:28px;border-radius:50%;border:3px solid var(--accent);animation:ann-click .4s ease-out}
   @keyframes ann-click{from{transform:scale(.3);opacity:1}to{transform:scale(1.6);opacity:0}}
   `;
@@ -167,8 +168,10 @@ function setup() {
         }, i * 90),
       );
     },
+    // The cursor stays hidden until the first moveTo, so scenes that never click show no pointer.
     moveTo(sel) {
       const r = rect(sel);
+      cursor.classList.add("on");
       cx = r.left + r.width / 2 - 4;
       cy = r.top + r.height / 2 - 2;
       cursor.style.transform = `translate(${cx}px,${cy}px)`;

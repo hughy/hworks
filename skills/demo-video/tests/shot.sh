@@ -85,6 +85,33 @@ for s in shots:
     check("error" not in s, f"unexpected error {s.get('error')}")
 PY
 
+# --action starts a page script that outlives the shots; --at times each shot from the action start.
+mkdir -p "$site/timed"
+cat >"$site/timed/index.html" <<'EOF'
+<!doctype html><html><head><style>body{margin:0}</style></head><body><p>timed page</p><script>
+  window.start = async () => {
+    setTimeout(() => { const d = document.createElement("div"); d.style.cssText = "width:1600px;height:20px"; document.body.append(d); }, 700);
+    await new Promise((r) => setTimeout(r, 60000));
+  };
+</script></body></html>
+EOF
+node "$shot" "$base" --path /timed/ --viewports 800x600 --settle 0 --action 'start()' --at 0.2,1.5 --out "$work/timed" >"$work/timed.jsonl"
+python3 - "$work/timed" "$work/timed.jsonl" <<'PY'
+import json, os, sys
+out, log = sys.argv[1], sys.argv[2]
+shots = [json.loads(l) for l in open(log)]
+def check(cond, msg):
+    if not cond:
+        sys.exit(f"shot: {msg}\n{open(log).read()}")
+check(sorted(os.listdir(out)) == ["timed-800x600-t0.2.png", "timed-800x600-t1.5.png"], f"timed files {sorted(os.listdir(out))}")
+check([s["at"] for s in shots] == [0.2, 1.5], "want one JSON line per --at time, in order")
+check([s["overflowX"] for s in shots] == [False, True], f"the page should overflow only after 0.7 s, got {[s['overflowX'] for s in shots]}")
+check(all(s["file"] and os.path.exists(s["file"]) and "error" not in s for s in shots), "a timed shot failed")
+PY
+if node "$shot" "$base" --path /timed/ --at soon --out "$work/badat" >/dev/null 2>&1; then
+  echo "shot: a bad --at exited 0" >&2; exit 1
+fi
+
 if node "$shot" "$base" --path /narrow/ --path /missing/ --viewports 800x600 --settle 0 --out "$work/fail" >"$work/fail.jsonl" 2>"$work/fail.err"; then
   echo "shot: a missing page exited 0" >&2; exit 1
 fi

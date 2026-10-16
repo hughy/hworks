@@ -1,0 +1,23 @@
+{"t":0,"kind":"cmd","data":"./demo.sh"}
+{"t":20,"kind":"out","data":"release-demo   registry.example.test"}
+{"t":20,"kind":"out","data":"package        demo-cli 1.4.2"}
+{"t":533,"kind":"ev","data":{"event":"step","title":"resolve","note":"look up the release"}}
+{"t":642,"kind":"out","data":""}
+{"t":642,"kind":"out","data":"> resolve"}
+{"t":1153,"kind":"out","data":"  version      1.4.2  (latest)"}
+{"t":1153,"kind":"out","data":"  commit       3f9a2c1"}
+{"t":1661,"kind":"ev","data":{"event":"step","title":"build","note":"compile the artifacts"}}
+{"t":1771,"kind":"out","data":""}
+{"t":1772,"kind":"out","data":"> build"}
+{"t":2278,"kind":"out","data":"  target       linux-amd64"}
+{"t":2278,"kind":"out","data":"  target       darwin-arm64"}
+{"t":2787,"kind":"out","data":"  artifacts    2  (4.2 MB)"}
+{"t":3294,"kind":"ev","data":{"event":"step","title":"publish","note":"upload and verify"}}
+{"t":3406,"kind":"out","data":""}
+{"t":3406,"kind":"out","data":"> publish"}
+{"t":3924,"kind":"out","data":"  upload       demo-cli-1.4.2.tar.gz"}
+{"t":4437,"kind":"out","data":"  checksum     verified"}
+{"t":4437,"kind":"out","data":""}
+{"t":4437,"kind":"out","data":"published in 3.4s"}
+{"t":4438,"kind":"ev","data":{"event":"done"}}
+{"t":4642,"kind":"exit","data":{"code":0}}
