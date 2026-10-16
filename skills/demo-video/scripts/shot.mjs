@@ -2,7 +2,7 @@
 // Screenshots pages of a running web app at several viewports and reports page overflow, one JSON line per shot.
 // usage: PLAYWRIGHT_FROM=<project>/package.json node shot.mjs <base-url> [--path /a ...] [--viewports 1280x800,1920x1080]
 //        [--wait-for <selector>] [--settle <ms>] [--timeout <ms>] [--local-storage key=<value> ...] [--full-page]
-//        [--out <dir>] [--name <prefix>]
+//        [--action <js>] [--at <s,s,...>] [--out <dir>] [--name <prefix>]
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -20,6 +20,8 @@ const usage = `usage: node shot.mjs <base-url> [options]
   --timeout <ms>          limit for page load, --wait-for, the measurement, and the screenshot (default: 30000)
   --local-storage k=v     set localStorage k to the text v before the page's scripts run; repeatable
   --full-page             capture the whole scrollable page instead of the viewport
+  --action <js>           run this script in the page after load, --wait-for, and --settle, without waiting for it to finish
+  --at <s,s,...>          shoot at these seconds after the action starts (after --settle without --action); one file per time
   --out <dir>             output directory (default: a new temp dir)
   --name <prefix>         file name prefix (default: none)
 env: PLAYWRIGHT_FROM=<package.json whose project has playwright>, PLAYWRIGHT_CHANNEL=chrome|bundled (default: chrome)`;
@@ -61,6 +63,8 @@ function parse(argv) {
         timeout: { type: "string", default: "30000" },
         "local-storage": { type: "string", multiple: true },
         "full-page": { type: "boolean", default: false },
+        action: { type: "string" },
+        at: { type: "string" },
         out: { type: "string" },
         name: { type: "string", default: "" },
         help: { type: "boolean", short: "h", default: false },
@@ -87,6 +91,12 @@ function parse(argv) {
   } catch (e) {
     fail(e.message);
   }
+  let at = null;
+  if (o.at !== undefined) {
+    at = o.at.split(",").map((v) => (/^\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN));
+    if (at.some(Number.isNaN)) fail(`--at wants seconds such as 0.5,2,6, got ${o.at}`);
+    if (new Set(at).size !== at.length) fail(`--at lists a time twice: ${o.at}`);
+  }
   const storage = (o["local-storage"] || []).map((kv) => {
     const i = kv.indexOf("=");
     if (i <= 0) fail(`--local-storage wants key=value, got ${kv}`);
@@ -108,6 +118,8 @@ function parse(argv) {
     timeout: intArg("timeout", o.timeout),
     storage,
     fullPage: o["full-page"],
+    action: o.action,
+    at,
     out: path.resolve(o.out || fs.mkdtempSync(path.join(os.tmpdir(), "shot-"))),
     name: o.name,
   };
@@ -132,10 +144,11 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
 }
 
+// Returns one result per shot: one normally, one per --at time otherwise.
 async function shoot(browser, opts, target, viewport) {
   const size = `${viewport.width}x${viewport.height}`;
-  const file = path.join(opts.out, `${opts.name}${target.slug}-${size}.png`);
-  const result = { path: target.path, viewport: size, file: null, consoleErrors: [] };
+  const stem = `${opts.name}${target.slug}-${size}`;
+  const results = [];
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
   try {
     if (opts.storage.length) {
@@ -151,8 +164,9 @@ async function shoot(browser, opts, target, viewport) {
       );
     }
     const page = await context.newPage();
-    page.on("console", (m) => m.type() === "error" && result.consoleErrors.push(m.text()));
-    page.on("pageerror", (e) => result.consoleErrors.push(String(e.message || e)));
+    const consoleErrors = [];
+    page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
+    page.on("pageerror", (e) => consoleErrors.push(String(e.message || e)));
     const errors = [];
     let capture = true;
     let response;
@@ -173,24 +187,45 @@ async function shoot(browser, opts, target, viewport) {
       }
     }
     if (!errors.length && opts.settle) await page.waitForTimeout(opts.settle);
-    if (capture) {
+    let t0 = Date.now();
+    if (!errors.length && opts.action) {
       try {
-        // page.evaluate has no timeout of its own and never returns while the page's main thread is busy.
-        Object.assign(result, await withTimeout(page.evaluate(measure), opts.timeout));
-        result.overflowX = result.scrollWidth > result.innerWidth;
-        result.overflowY = result.scrollHeight > result.innerHeight;
+        // Deferred, so a long-running action does not hold up the first timed shot.
+        await withTimeout(page.evaluate((code) => void setTimeout(() => (0, eval)(code), 0), opts.action), opts.timeout);
+        t0 = Date.now();
       } catch (e) {
-        errors.push(`measure failed: ${firstLine(e)}`);
-      }
-      try {
-        await page.screenshot({ path: file, fullPage: opts.fullPage, timeout: opts.timeout });
-        result.file = file;
-      } catch (e) {
-        errors.push(`screenshot failed: ${firstLine(e)}`);
+        errors.push(`action failed: ${firstLine(e)}`);
       }
     }
-    if (errors.length) result.error = errors.join("; ");
-    return result;
+    const times = opts.at && !errors.length ? opts.at : [null];
+    for (const at of times) {
+      const result = { path: target.path, viewport: size, file: null, consoleErrors };
+      const errs = [...errors];
+      const file = path.join(opts.out, at === null ? `${stem}.png` : `${stem}-t${at}.png`);
+      if (at !== null) {
+        result.at = at;
+        await page.waitForTimeout(Math.max(0, at * 1000 - (Date.now() - t0)));
+      }
+      if (capture) {
+        try {
+          // page.evaluate has no timeout of its own and never returns while the page's main thread is busy.
+          Object.assign(result, await withTimeout(page.evaluate(measure), opts.timeout));
+          result.overflowX = result.scrollWidth > result.innerWidth;
+          result.overflowY = result.scrollHeight > result.innerHeight;
+        } catch (e) {
+          errs.push(`measure failed: ${firstLine(e)}`);
+        }
+        try {
+          await page.screenshot({ path: file, fullPage: opts.fullPage, timeout: opts.timeout });
+          result.file = file;
+        } catch (e) {
+          errs.push(`screenshot failed: ${firstLine(e)}`);
+        }
+      }
+      if (errs.length) result.error = errs.join("; ");
+      results.push(result);
+    }
+    return results;
   } finally {
     await context.close().catch(() => {});
   }
@@ -215,25 +250,28 @@ async function main() {
     process.exit(1);
   }
   const failures = [];
+  let shots = 0;
   try {
     for (const target of opts.targets) {
       for (const viewport of opts.viewports) {
-        const r = await shoot(browser, opts, target, viewport).catch((e) => ({
-          path: target.path,
-          viewport: `${viewport.width}x${viewport.height}`,
-          error: firstLine(e),
-        }));
-        const line = {};
-        for (const k of ["path", "viewport", "file", "scrollWidth", "innerWidth", "scrollHeight", "innerHeight", "overflowX", "overflowY", "consoleErrors"]) line[k] = r[k] ?? null;
-        if (r.error) line.error = r.error;
-        console.log(JSON.stringify(line));
-        if (r.error) failures.push(`${target.url} at ${r.viewport}: ${r.error}`);
+        const rs = await shoot(browser, opts, target, viewport).catch((e) => [
+          { path: target.path, viewport: `${viewport.width}x${viewport.height}`, error: firstLine(e) },
+        ]);
+        shots += rs.length;
+        for (const r of rs) {
+          const line = {};
+          for (const k of ["path", "viewport", "file", "scrollWidth", "innerWidth", "scrollHeight", "innerHeight", "overflowX", "overflowY", "consoleErrors"]) line[k] = r[k] ?? null;
+          if (r.at !== undefined) line.at = r.at;
+          if (r.error) line.error = r.error;
+          console.log(JSON.stringify(line));
+          if (r.error) failures.push(`${target.url} at ${r.viewport}${r.at === undefined ? "" : ` t=${r.at}`}: ${r.error}`);
+        }
       }
     }
   } finally {
     await browser.close();
   }
-  console.error(`shot: ${opts.targets.length * opts.viewports.length - failures.length} ok, ${failures.length} failed, files in ${opts.out}`);
+  console.error(`shot: ${shots - failures.length} ok, ${failures.length} failed, files in ${opts.out}`);
   for (const f of failures) console.error(`shot: FAILED ${f}`);
   process.exit(failures.length ? 1 : 0);
 }

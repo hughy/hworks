@@ -1,5 +1,6 @@
 // Records a live web page with annotations and a voice-cue log. A scene script calls record(opts, scenes).
-// Reads <dir>/script.json and <dir>/audio/durations.json (from tts.py); writes <dir>/frames/ and <dir>/timeline.json.
+// Reads <dir>/script.json and <dir>/audio/durations.json (from tts.py) when they exist; a silent video needs neither.
+// Writes <dir>/frames/ and <dir>/timeline.json.
 const { createRequire } = require("module");
 const fs = require("fs");
 const path = require("path");
@@ -38,8 +39,9 @@ async function record(opts, scenes) {
     quality = 88,
   } = opts;
   const dir = path.resolve(rawDir);
-  const script = JSON.parse(fs.readFileSync(path.join(dir, "script.json"), "utf8"));
-  const durations = JSON.parse(fs.readFileSync(path.join(dir, "audio/durations.json"), "utf8"));
+  const readJson = (file, none) => (fs.existsSync(path.join(dir, file)) ? JSON.parse(fs.readFileSync(path.join(dir, file), "utf8")) : none);
+  const script = readJson("script.json", { voices: {}, lines: {} });
+  const durations = readJson("audio/durations.json", {});
   for (const key of Object.keys(script.lines)) if (!(key in durations)) throw new Error(`recorder: no audio for ${key}; rerun tts.py`);
   const framesDir = path.join(dir, "frames");
   fs.rmSync(framesDir, { recursive: true, force: true });
@@ -125,7 +127,7 @@ async function record(opts, scenes) {
     await sleep(0.5);
     const timeline = { frames, cues, end, clock: { ...clock, base: clock.base / 1000 }, viewport, scale };
     fs.writeFileSync(path.join(dir, "timeline.json"), JSON.stringify(timeline, null, 1));
-    console.log(`recorder: ${frames.length} frames, ${(end - (cues[0]?.t ?? end)).toFixed(1)}s from first cue`);
+    console.log(cues.length ? `recorder: ${frames.length} frames, ${(end - cues[0].t).toFixed(1)}s from first cue` : `recorder: ${frames.length} frames, no cues`);
     return timeline;
   } finally {
     await browser.close();

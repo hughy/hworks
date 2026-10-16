@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>terminal demo</title>
+<style>
+:root { --accent: #2457d6; --ink: #0a0b0d; --gray: #5b616e; --soft: #8a919e; --rule: #dde3e9; --term: #f7f8f9; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #fff; color: var(--ink); font-family: ui-monospace, Menlo, Consolas, monospace; }
+body { padding: 48px 72px 40px; display: flex; flex-direction: column; overflow: hidden; }
+#head { height: 170px; flex: none; }
+#step { font-size: 60px; line-height: 1; font-weight: 600; color: var(--accent); white-space: nowrap; min-height: 60px; }
+#caret { display: inline-block; width: .55em; height: .9em; margin-left: .06em; vertical-align: -.08em; background: var(--accent); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+#note { margin-top: 20px; font-size: 22px; color: var(--gray); min-height: 28px; }
+#term { flex: 1; min-height: 0; border: 1px solid var(--rule); border-radius: 10px; background: var(--term); overflow: hidden; }
+#screen { height: 100%; overflow: hidden; padding: 18px 24px; font-size: 19px; line-height: 1.5; white-space: pre; }
+#lines div { min-height: 1.5em; animation: in .18s ease-out; }
+@keyframes in { from { opacity: 0; transform: translateY(4px); } }
+.prompt, .cmdline { color: var(--accent); font-weight: 600; }
+.key { color: var(--soft); }
+</style>
+</head>
+<body data-state="idle">
+<div id="head"><div id="step"></div><div id="note"></div></div>
+<div id="term"><div id="screen"><div id="lines"></div></div></div>
+<script>
+// Stream items play through one serial queue, in arrival order. A step item shows its label and then holds it for
+// ?hold=<ms> (default 2000): the items behind it wait, so a fast step stays readable while the lines keep their order.
+// ?replay=<file> plays a recording from the server's runs dir instead of running the command.
+const $ = (s) => document.querySelector(s);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const params = new URLSearchParams(location.search);
+const hold = Number(params.get("hold") || 2000);
+let holdUntil = 0;
+
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+function render(line) {
+  const div = document.createElement("div");
+  let html = esc(line);
+  if (/^&gt; /.test(html)) html = `<span class="cmdline">${html}</span>`;
+  else html = html.replace(/^(\s*)([a-z]+\s{2,})(.*)$/, '$1<span class="key">$2</span>$3');
+  div.innerHTML = html || "&nbsp;";
+  $("#lines").appendChild(div);
+  $("#screen").scrollTop = $("#screen").scrollHeight;
+}
+
+async function showStep({ title, note = "" }) {
+  await sleep(holdUntil - Date.now());
+  $("#note").textContent = "";
+  const el = $("#step");
+  while (el.textContent.length > 1) { el.textContent = el.textContent.slice(0, -1); await sleep(22); }
+  el.textContent = "";
+  for (const ch of title) { el.textContent += ch; await sleep(58); }
+  $("#note").textContent = note;
+  holdUntil = Date.now() + hold;
+}
+
+async function typeCommand(cmd) {
+  const div = document.createElement("div");
+  div.innerHTML = '<span class="prompt">$ </span><span id="cmd"></span>';
+  $("#lines").appendChild(div);
+  for (const ch of cmd) { $("#cmd").textContent += ch; await sleep(38); }
+  await sleep(500);
+}
+
+async function play(item) {
+  if (item.kind === "cmd") await typeCommand(item.data);
+  else if (item.kind === "out") render(item.data);
+  else if (item.kind === "ev" && item.data.event === "step") await showStep(item.data);
+}
+
+window.demo = {
+  start() {
+    document.body.dataset.state = "running";
+    const es = new EventSource(`/run${params.get("replay") ? `?replay=${encodeURIComponent(params.get("replay"))}` : ""}`);
+    let chain = Promise.resolve();
+    for (const kind of ["cmd", "out", "ev"]) es.addEventListener(kind, (e) => { chain = chain.then(() => play({ kind, data: JSON.parse(e.data) })); });
+    es.addEventListener("exit", (e) => {
+      es.close();
+      const { code } = JSON.parse(e.data);
+      chain = chain.then(async () => {
+        await sleep(Math.max(holdUntil - Date.now(), 1000));
+        document.body.dataset.state = code === 0 ? "done" : "failed";
+      });
+    });
+  },
+};
+document.body.dataset.ready = "1";
+</script>
+</body>
+</html>
