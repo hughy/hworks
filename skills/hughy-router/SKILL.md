@@ -45,7 +45,7 @@ A reported defect. If failing tests already pin the behavior, brief `coder` with
 
 ### Build
 
-New or changed behavior: `feature.md`. Behavior-preserving reshape: `refactoring.md` (pin the contract with a characterization test before moving anything). A design decision that an observation could settle: `prototype.md` instead of asking. Name the data shape and its organizing structure before delegating. Before delegating a change that adds a flag, config knob, request or response field, timer, guard, or tool, look for precedent (the repo's own patterns, sibling and in-flight changes, library or harness tools) and give the brief a Mechanisms list: for each, whether the issue or acceptance criteria require it or the design chose it, and for a chosen one, what breaks without it and the precedent checked. Drop a chosen mechanism with no reason.
+New or changed behavior: `feature.md`. Behavior-preserving reshape: `refactoring.md` (pin the contract with a characterization test before moving anything). A design decision that an observation could settle: `prototype.md` instead of asking. Name the data shape and its organizing structure before delegating. Before delegating a change that adds a flag, config knob, request or response field, timer, guard, or tool, look for precedent (the repo's own patterns, sibling and in-flight changes, library or harness tools) and give the brief a Mechanisms list: for each, whether the issue or acceptance criteria require it or the design chose it, and for a chosen one, what breaks without it and the precedent checked. Drop a chosen mechanism with no reason. The brief also decides one PR or a stack: keep one PR when production changes are small (roughly under 400 changed lines and 15 files, not counting tests, fixtures, generated files, lockfiles, or docs), when merging only part would leave trunk unsafe, incomplete, or failing, or when the user asked for one; otherwise plan 2 to 4 layers that each merge alone, in order, leaving trunk building and passing, with tests beside the code they cover and no logical change split across layers.
 
 ### Measure
 
@@ -53,7 +53,7 @@ A one-off slowness: `perf-issue.md`. Sustained improvement of one metric: `hillc
 
 ### Ship
 
-Open a PR: `opening-a-pr.md`. Drive a PR to merge-ready: `babysit.md`, with `../../pstack/skills/poteto-mode/references/bugbot-triage.md` for bot comments. Land a verified stack: `shipping.md`. Resume or hand off: `session-pickup.md`, `pause-safely.md`. Scope a task out of a long session for a new session to own: `../handoff/SKILL.md`.
+Open a PR: `opening-a-pr.md`. Drive a PR to merge-ready: `babysit.md`, with `../../pstack/skills/poteto-mode/references/bugbot-triage.md` for bot comments. Land a verified stack: `shipping.md`. Resume or hand off: `session-pickup.md`, `pause-safely.md`. Scope a task out of a long session for a new session to own: `../handoff/SKILL.md`. Split a reviewed branch that is still too large, or sync a branch with its base: `references/split-and-sync.md`.
 
 ### Long run
 
