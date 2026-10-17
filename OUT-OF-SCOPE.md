@@ -16,6 +16,10 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 | Positive phrasing for rule files | mattpocock/skills `writing-for-agents` (49dd158) | Rewrite prohibitions in `global/AGENTS.md` as target behavior, on the claim that a prohibition primes the banned behavior | A run of the rewritten rules shows fewer violations than the current text |
 | PR body Evidence and Merge Danger | mattpocock/skills `pr` (49dd158) | Before/after evidence and a one-way or two-way door call with blast radius in `skills/edit-prose/references/issues-prs.md` | Reviewers ask how a PR was verified or how risky it is, in 3 PRs |
 | Wizard scripts for human-only steps | mattpocock/skills `wizard` (49dd158) | An interactive bash script for the irreversible or outside-the-machine steps Autonomy skips | The same skipped step is a multi-step manual procedure in 2 runs |
+| Whole-change verdict | private skill collection (2026-10-17) | The reviewer ends with "worth it / questionable / not worth it" for the change as a whole | Agents keep adding unrequired mechanism after reviewer item 2 landed, in 3 sessions |
+| Per-repo lessons file | private skill collection (2026-10-17) | A lessons file per repo, kept outside the repo, fed to coder and reviewer briefs | The same class of reviewer-caught defect recurs in one repo across 3 sessions in `friction.md` |
+| Daily service health watch | private skill collection (2026-10-17) | A recurring check over the observability backend for a service's monitors | The operator owns a production service with monitors and asks for a recurring check |
+| Cleanup scan to tracker | private skill collection (2026-10-17) | A cleanup scan files one tracker issue with subissues instead of opening PRs | The operator asks for it twice |
 
 ## Declined
 
@@ -41,3 +45,17 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 | `codebase-design`, `improve-codebase-architecture` | `correct` (architecture first) and `how` cover the survey; the deep-module vocabulary is pretrained |
 | `chief-of-staff`, `claude-handoff`, `loop-me`, `setup-ts-deep-modules`, `writing-beats`, `writing-fragments`, `writing-shape` | Unshipped upstream (`in-progress/`); covered by `orchestrate` or personal workflows outside hworks' scope |
 | `git-guardrails-claude-code`, `migrate-to-shoehorn`, `scaffold-exercises`, `setup-pre-commit` | Frozen upstream (`misc/`). `extensions/autonomy.ts` covers the git guard on pi; the rest are project-specific setup |
+
+### private skill collection (2026-10-17)
+
+The split-and-sync procedure in `skills/hughy-router/references/split-and-sync.md` and reviewer items 1, 4, and 8 were adopted from it. The ideas in Watching above are not repeated here.
+
+| idea | reason |
+|---|---|
+| PR orchestrator with a decision-queue coordinator and tracker intake | Covered by `orchestrate` and PR tracking; the decision queue conflicts with Autonomy |
+| Per-run cost script | Covered by `kaizen-tokens.py` |
+| GraphQL budget tracker | No rate-limit failures observed |
+| Daily, weekly, and OKR recaps | Personal workflows outside hworks |
+| Anti-slop and technical-writing skills | Covered by `edit-prose` and `global/AGENTS.md` Prose |
+| Interview skill | Already declined |
+| Setup wizard with a profile file | Covered by `install.sh` and `adapters/local/` |
