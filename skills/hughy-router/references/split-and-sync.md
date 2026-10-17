@@ -13,7 +13,7 @@ Skip the split when the PR already has human review threads or someone else push
 3. Check that `git diff $ORIG <top layer>` is empty. The split moves code between commits and changes none of it.
 4. Publish through `gh stack`, following `global/AGENTS.md` Pull Requests.
 
-Do not rerun review on each layer: the content was reviewed as a whole at `ORIG`.
+Do not rerun review on each layer: the content was reviewed as a whole at `ORIG`, and step 3 proves the layers hold the same code. The layers are new commits the review ledger does not cover, so after step 3 record each one with `scripts/review-range.py record <layer task dir> <parent branch> <parent tip> <layer tip> split` before the pre-push review runs.
 
 ## Sync a branch with its base
 
