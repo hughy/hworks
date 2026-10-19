@@ -12,30 +12,98 @@ let bad=0;
 for (const c of block) { const r=classify(c); if(!r){bad++;console.log("MISSED  ",c);} }
 for (const c of allow) { const r=classify(c); if(r){bad++;console.log("FALSE+  ",c,"->",r);} }
 
-// Handler: blocks and logs asks and destructive commands, logs decision requests, ignores the rest.
-let handler: any;
-register({ registerCommand() {}, on(name: string, fn: any) { if (name === "tool_call") handler = fn; } });
-const ctx = { cwd: "/repo", sessionManager: { getSessionId: () => "s1" } };
-const cases: Array<[string, any, boolean]> = [
-  ["ask_user_question", { questions: [{ question: "Pick a color?" }] }, true],
-  ["bash", { command: "git branch -D old" }, true],
-  ["bash", { command: "git status" }, false],
-  ["contact_supervisor", { reason: "need_decision", message: "Which API?" }, false],
-  ["contact_supervisor", { reason: "progress_update", message: "half done" }, false],
-];
-for (const [toolName, input, shouldBlock] of cases) {
-  const r = handler({ toolName, input }, ctx);
-  if (!!r?.block !== shouldBlock) { bad++; console.log("HANDLER ", toolName, JSON.stringify(input), "->", r); }
+// Fake pi API: records every registered hook, tool, and command.
+function fakePi() {
+  const hooks: Record<string, any[]> = {};
+  const tools: Record<string, any> = {};
+  const commands: Record<string, any> = {};
+  return {
+    hooks, tools, commands,
+    registerCommand(name: string, def: any) { commands[name] = def; },
+    registerTool(def: any) { tools[def.name] = def; },
+    on(name: string, fn: any) { (hooks[name] ??= []).push(fn); },
+    emit(name: string, event: any = {}, c: any = ctx) { let r; for (const fn of hooks[name] ?? []) r = fn({ type: name, ...event }, c) ?? r; return r; },
+  };
 }
-const logged = existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
-const kinds = logged.map((r) => `${r.kind}:${r.rule}:${r.blocked}`).join(",");
-const want = "ask:ask_user_question:true,destructive:git branch -D:true,supervisor:need_decision:false";
-if (kinds !== want || logged.some((r) => r.session !== "s1" || r.cwd !== "/repo")) { bad++; console.log("LOG     ", kinds); }
+const ctx = { cwd: "/repo", sessionManager: { getSessionId: () => "s1" }, ui: { notify() {} } };
+const pi = fakePi();
+register(pi);
+const call = (toolName: string, input: any) => pi.emit("tool_call", { toolName, input });
+const setPhase = (phase: string) => pi.tools.autonomy_phase.execute("id", { phase }, undefined, undefined, ctx);
+const readLog = () => existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
+const check = (label: string, ok: boolean, info: unknown = "") => { if (!ok) { bad++; console.log("FAIL    ", label, info); } };
+const ask = { questions: [{ question: "Pick a color?" }] };
+const destructive = { command: "git branch -D old" };
+let checks = 0;
+const expectBlock = (label: string, toolName: string, input: any, shouldBlock: boolean) => {
+  checks++;
+  const r = call(toolName, input);
+  check(label, !!r?.block === shouldBlock, `${toolName} ${JSON.stringify(input)} -> ${JSON.stringify(r)}`);
+};
+
+// Work phase (default): blocks and logs asks and destructive commands, logs decision requests, ignores the rest.
+expectBlock("work ask", "ask_user_question", ask, true);
+expectBlock("work destructive", "bash", destructive, true);
+expectBlock("work status", "bash", { command: "git status" }, false);
+expectBlock("work supervisor", "contact_supervisor", { reason: "need_decision", message: "Which API?" }, false);
+expectBlock("work progress", "contact_supervisor", { reason: "progress_update", message: "half done" }, false);
+let logged = readLog();
+let kinds = logged.map((r) => `${r.kind}:${r.rule}:${r.blocked}`).join(",");
+check("work log", kinds === "ask:ask_user_question:true,destructive:git branch -D:true,supervisor:need_decision:false"
+  && logged.every((r) => r.session === "s1" && r.cwd === "/repo" && typeof r.ts === "string" && "detail" in r), kinds);
+
+// The tool schema is a plain JSON schema with exactly the two phases.
+const tool = pi.tools.autonomy_phase;
+check("tool schema", JSON.stringify(tool?.parameters?.properties?.phase?.enum) === '["work","cleanup"]' && tool.parameters.required?.[0] === "phase");
+let threw = false;
+try { await setPhase("done"); } catch { threw = true; }
+check("tool rejects unknown phase", threw);
+
+// Cleanup: asks and classified commands pass through to other guards, logged with blocked false.
+const res = await setPhase("cleanup");
+check("cleanup result text", /cleanup/.test(res?.content?.[0]?.text ?? ""), res);
+const before = readLog().length;
+expectBlock("cleanup ask", "ask_user_question", ask, false);
+expectBlock("cleanup destructive", "bash", destructive, false);
+pi.emit("turn_start"); pi.emit("turn_end");
+expectBlock("cleanup survives turn change", "bash", destructive, false);
+kinds = readLog().slice(before).map((r) => `${r.kind}:${r.rule}:${r.blocked}`).join(",");
+check("cleanup log", kinds === "ask:ask_user_question:false,destructive:git branch -D:false,destructive:git branch -D:false", kinds);
+
+// Re-entering work restores the blocks.
+await setPhase("work");
+expectBlock("work re-entry ask", "ask_user_question", ask, true);
+expectBlock("work re-entry destructive", "bash", destructive, true);
+
+// Every lifecycle reset returns cleanup to work.
+for (const [event, payload] of [["agent_start", {}], ["session_start", { reason: "new" }], ["session_start", { reason: "fork" }], ["session_start", { reason: "resume" }], ["session_tree", { newLeafId: "b", oldLeafId: "a" }]] as const) {
+  await setPhase("cleanup");
+  pi.emit(event, payload);
+  expectBlock(`${event} ${JSON.stringify(payload)} resets`, "bash", destructive, true);
+}
+
+// /autonomy off lets everything through without logging destructive calls; on restores blocking.
+await pi.commands.autonomy.handler("off", ctx);
+const offStart = readLog().length;
+expectBlock("off ask", "ask_user_question", ask, false);
+expectBlock("off destructive", "bash", destructive, false);
+const offLog = readLog().slice(offStart).map((r) => `${r.kind}:${r.blocked}`).join(",");
+check("off log", offLog === "ask:false", offLog);
+await pi.commands.autonomy.handler("on", ctx);
+expectBlock("on destructive", "bash", destructive, true);
 
 // The block reason names a task-dir.sh that exists, resolved through the extension's symlink.
-const askReason = handler({ toolName: "ask_user_question", input: {} }, ctx)?.reason ?? "";
+const askReason = call("ask_user_question", {})?.reason ?? "";
 const script = askReason.match(/`(\S+\/scripts\/task-dir\.sh) <task-slug>`/)?.[1];
-if (!script || !existsSync(script)) { bad++; console.log("TASKDIR ", script); }
+check("task-dir", !!script && existsSync(script), script);
+check("reason names autonomy_phase", askReason.includes("autonomy_phase"));
 
-console.log(bad?`${bad} failures`:`all ${block.length+allow.length+cases.length+2} pass`);
+// PI_AUTONOMY=0 registers nothing.
+process.env.PI_AUTONOMY = "0";
+const off = fakePi();
+register(off);
+check("PI_AUTONOMY=0", !Object.keys(off.hooks).length && !Object.keys(off.tools).length && !Object.keys(off.commands).length);
+delete process.env.PI_AUTONOMY;
+
+console.log(bad?`${bad} failures`:`all ${block.length+allow.length} classifier cases and ${checks} handler checks pass`);
 process.exit(bad ? 1 : 0);

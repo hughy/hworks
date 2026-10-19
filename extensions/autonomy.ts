@@ -1,8 +1,11 @@
 // Keeps the agent from stalling on mid-task questions or running commands git cannot undo.
 // The block reason is returned to the model as the tool result, so it doubles as the redirect.
 // `/autonomy off` relaxes both checks for the current session; `/autonomy on` restores them.
-// Every block, and every ask or supervisor decision request, is appended to a JSONL log for
-// scripts/blockers.sh. PI_AUTONOMY=0 disables the guard and the log.
+// The model can call autonomy_phase with phase "cleanup" once the work is done, so end-of-run asks and
+// classified commands pass on to the harness's own guards and approvals. The phase returns to "work" at
+// every agent_start, session_start, and session_tree.
+// Every block, every call let through in cleanup, and every ask or supervisor decision request is
+// appended to a JSONL log for scripts/blockers.sh. PI_AUTONOMY=0 disables the guard and the log.
 
 import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -26,19 +29,23 @@ const ENTRY_FORMAT =
   "`- [<category>] <question> | <choice> | <evidence> | <how to reverse> | deferred`, where category is one of " +
   "missing-info, permission, irreversible, tooling, ambiguous-brief, external-wait.";
 
+const CLEANUP_HINT =
+  " If the requested work, verification, and reviews are finished and this is end-of-run cleanup, call " +
+  "autonomy_phase with phase \"cleanup\" first.";
+
 const ASK_REASON =
   "Autonomy: do not ask mid-task. Settle the question from code, docs, git history, or a quick experiment, " +
   "pick the best-evidenced option, and record it as " + ENTRY_FORMAT + " Finish the task, then list only the " +
   "questions evidence could not settle at the end of your final reply, with options and a recommendation. " +
   "The one exception is the up-front round in the Autonomy section of global AGENTS.md (operator present, " +
   "large work, a product call no experiment can settle that changes most of the plan): ask it in your reply " +
-  "text, record each question with state `asked`, and end the turn.";
+  "text, record each question with state `asked`, and end the turn." + CLEANUP_HINT;
 
 const DESTRUCTIVE_REASON =
   "Autonomy: blocked a command git on the working branch cannot undo. Use a reversible alternative " +
   "(commit first, `git revert`, `git stash push`, move files to a backup path) or skip this step, finish the " +
   "rest, record it as an [irreversible] entry, " + ENTRY_FORMAT + " List the skipped step first in your final " +
-  "reply. Pattern: ";
+  "reply." + CLEANUP_HINT + " Pattern: ";
 
 const PATTERNS: Array<[string, RegExp]> = [
   ["git reset --hard", /\bgit\s+(?:-C\s+\S+\s+)?reset\b[^;&|]*--(?:hard|merge|keep)\b/],
@@ -93,6 +100,11 @@ function record(ctx: any, kind: string, rule: string, blocked: boolean, detail: 
 export default function (pi: any) {
   if (process.env.PI_AUTONOMY === "0") return;
   let enabled = true;
+  let phase: "work" | "cleanup" = "work";
+  const resetPhase = () => {
+    phase = "work";
+  };
+  for (const event of ["agent_start", "session_start", "session_tree"]) pi.on(event, resetPhase);
 
   pi.registerCommand("autonomy", {
     description: "on|off: block mid-task questions and irreversible commands (default on)",
@@ -104,12 +116,42 @@ export default function (pi: any) {
     },
   });
 
+  pi.registerTool({
+    name: "autonomy_phase",
+    label: "Autonomy phase",
+    description:
+      "Set the autonomy guard phase. Use \"cleanup\" only after the requested work, verification, and reviews " +
+      "are finished, to attempt end-of-run cleanup (stale branches, worktrees) that may ask the operator for " +
+      "approval. Cleanup lets ask_user_question and commands the guard classifies as irreversible pass to the " +
+      "harness's other guards and approvals; it authorizes no deletion and bypasses no other guard. Use \"work\" " +
+      "before resuming substantive work. Each new run starts in \"work\". Call this tool alone, not alongside " +
+      "the calls it should affect.",
+    parameters: {
+      type: "object",
+      properties: { phase: { type: "string", enum: ["work", "cleanup"] } },
+      required: ["phase"],
+      additionalProperties: false,
+    },
+    executionMode: "sequential",
+    async execute(_id: string, params: any) {
+      if (params?.phase !== "work" && params?.phase !== "cleanup") throw new Error('phase must be "work" or "cleanup"');
+      phase = params.phase;
+      const text =
+        phase === "cleanup"
+          ? "Autonomy phase: cleanup. Asks and classified commands now reach the harness's other guards and " +
+            "approvals, which still decide. Call autonomy_phase with phase \"work\" before any substantive work."
+          : "Autonomy phase: work. Mid-task asks and irreversible commands are blocked.";
+      return { content: [{ type: "text", text }], details: undefined };
+    },
+  });
+
   pi.on("tool_call", (event: any, ctx: any) => {
     const input = event.input ?? {};
     if (event.toolName === "ask_user_question") {
       const qs = Array.isArray(input.questions) ? input.questions.map((q: any) => q?.question).join(" / ") : "";
-      record(ctx, "ask", "ask_user_question", enabled, qs);
-      if (enabled) return { block: true, reason: ASK_REASON };
+      const block = enabled && phase === "work";
+      record(ctx, "ask", "ask_user_question", block, qs);
+      if (block) return { block: true, reason: ASK_REASON };
       return;
     }
     if (event.toolName === "contact_supervisor" && input.reason !== "progress_update") {
@@ -120,8 +162,9 @@ export default function (pi: any) {
       const command = String(input.command ?? "");
       const hit = classify(command);
       if (hit) {
-        record(ctx, "destructive", hit, true, command);
-        return { block: true, reason: DESTRUCTIVE_REASON + hit };
+        const block = phase === "work";
+        record(ctx, "destructive", hit, block, command);
+        if (block) return { block: true, reason: DESTRUCTIVE_REASON + hit };
       }
     }
   });
