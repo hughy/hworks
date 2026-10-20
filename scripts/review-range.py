@@ -207,11 +207,15 @@ def build_args(task_dir, trunk, effort, intent, cwd, label):
     scope = (f"Review only the commits after {base[:12]}: the commits before it, back to the merge-base "
              f"{mb[:12]}, already passed review." if base != mb else "Review the whole branch.")
     rubric = os.path.join(ROOT, "skills", "interrogate", "references")
+    pre_read = (f"Pre-read: run `python3 {os.path.join(ROOT, 'scripts', 'review-pre-read.py')} {base} {head}` in your cwd "
+                "and read its output before the diff. It is a map of the change: removed or renamed names with their "
+                "surviving references, related tests, and the diff. Verify a lead there from the code; do not report "
+                "it from the list.")
     if base != mb:
         print(f"skipping reviewed commits up to {base[:12]}", file=sys.stderr)
     args = {
         "task": f"Apply the rubric at {rubric}/rubric.md and {rubric}/code-quality-review.md.",
-        "targets": [{"key": "branch", "cwd": top, "base": base, "head": head, "task": intent.strip() + "\n\n" + scope}],
+        "targets": [{"key": "branch", "cwd": top, "base": base, "head": head, "task": pre_read + "\n\n" + intent.strip() + "\n\n" + scope}],
         "reviewers": reviewers,
         "label": label,
         "taskDir": os.path.abspath(task_dir),

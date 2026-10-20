@@ -121,6 +121,7 @@ The router names some capabilities generically, because harnesses differ. An ada
 |---|---|---|
 | "the closest available model", "an available model" | `adapters/pi.md`, the effort section of the router | How to list models and pick a replacement for an unavailable slot |
 | "a PR-tracking tool" | `adapters/pi.md`, the router's PR delta | A tool that watches CI and review threads |
+| "full review-thread bodies" | `adapters/pi.md`, the router's Ship route | A command that prints a PR's complete review-thread text, where the PR-tracking tool gives only excerpts |
 | "a background-process tool" | `adapters/pi.md` | A tool that runs and watches long commands |
 | "an issue-planning skill" | The router's Long run route and deltas | A skill that drafts issues for a multi-PR program |
 | "a multi-agent coordinator" | The router's Long run route | A coordinator with per-area threads and shared memory, if your harness has one |

@@ -9,6 +9,7 @@ if (typeof args.base !== "string" || !/^[0-9a-f]{7,40}$/i.test(args.base)) throw
 if (args.cwd !== undefined && (typeof args.cwd !== "string" || !args.cwd)) throw new Error("args.cwd must be a non-empty path");
 if (args.taskDir !== undefined && (typeof args.taskDir !== "string" || !/^(?:\/|[A-Za-z]:[\\/])/.test(args.taskDir))) throw new Error("args.taskDir must be an absolute path");
 if (args.coderModel !== undefined && (typeof args.coderModel !== "string" || !args.coderModel)) throw new Error("args.coderModel must be a non-empty model id");
+if (args.preRead !== undefined && (typeof args.preRead !== "string" || !args.preRead)) throw new Error("args.preRead must be a non-empty path to scripts/review-pre-read.py");
 const gateTimeoutMs = args.gateTimeoutMs === undefined ? 600000 : args.gateTimeoutMs;
 if (!Number.isInteger(gateTimeoutMs) || gateTimeoutMs < 1) throw new Error("args.gateTimeoutMs must be a positive integer (milliseconds)");
 const reviewerCount = args.reviewers === undefined ? 1 : args.reviewers;
@@ -88,7 +89,14 @@ function coderTask(round, findings, gateFailure) {
 }
 
 function reviewerTask(round, prior, priorHead, gateCheck) {
-  let task =
+  let task = "";
+  if (args.preRead) {
+    task +=
+      "Pre-read: run `python3 " + args.preRead + " " + args.base + " HEAD` in your cwd and read its output before the diff. " +
+      "It is a map of the change: removed or renamed names with their surviving references, related tests, and the diff. " +
+      "Verify a lead there from the code; do not report it from the list.\n\n";
+  }
+  task +=
     "Review the change on the current branch. Intent: read the brief at " + args.brief + ". " +
     "Diff: run `git diff " + args.base + "...HEAD` in your cwd and read the surrounding code, not only the diff. " +
     "Verify every claim against the code before reporting it. You are read-only: do not edit, commit, or stage anything. ";

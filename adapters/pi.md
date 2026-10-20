@@ -12,6 +12,7 @@ pstack was written for Cursor. When a skill under `pstack/skills/` names a Curso
 | `environment: "cloud"`, `cloud_base_branch` | run locally; use `worktree: true` for isolation |
 | `model: <Cursor slug>`, slug-fallback paragraphs, `pstack-models.mdc` role lines | ignore; `scripts/models.sh` sets each role's model. Override per call only with a slot from `scripts/models.sh show`, or an available model when no slot fits |
 | `AskQuestion`, "ask the user", "pause for approval" | record the question and your chosen default in `$TASK_DIR/open-questions.md`, keep going, and ask at the end of the final reply; large work with the operator present may get one up-front round in the reply text (`global/AGENTS.md`, Autonomy; `autonomy.ts` blocks `ask_user_question`) |
+| `pstack/skills/poteto-mode/scripts/watch-pr/watch-pr`, `origin pr view --checks`, `origin pr thread list`, `gh api graphql` for review threads | the PR-tracking tool for check state and thread excerpts; the adapter's reader for full review-thread bodies |
 | `/loop`, watcher heartbeat | `bg_wait`, or a background-process or PR-tracking tool when the harness has one |
 | `agent-transcripts/`, `~/.cursor/projects/*/` | not available; skills that mine transcripts (`recall`, `reflect`, `automate-me`) are not linked |
 | `/deslop`, `/no-comments`, `/unslop`, `/technical-writing`, `create-skill` | skip the step; the global `AGENTS.md` owns prose and comments |
