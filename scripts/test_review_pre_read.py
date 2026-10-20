@@ -91,6 +91,15 @@ class PreRead(unittest.TestCase):
         self.assertEqual(rep["removed_names"]["removed_cleanly"], ["old_helper"])
         self.assertIn("removed cleanly: old_helper", self.run_script("main", "HEAD").stdout)
 
+    def test_prose_files_contribute_no_names(self):
+        self.write("docs/guide.md", "Call old_helper before parse_thing. Run the checks.\n")
+        self.commit("doc")
+        self.write("docs/guide.md", "Call parse_thing.\n")
+        self.commit("shorten doc")
+        rep = self.run_script(self.git("rev-parse", "HEAD~1"), "HEAD", "--json")
+        self.assertEqual(rep.returncode, 0, rep.stderr)
+        self.assertEqual(json.loads(rep.stdout)["removed_names"], {"names": [], "removed_cleanly": [], "total": 0, "capped": False})
+
     def test_related_tests_by_stem_and_changed_tests(self):
         self.write("lib/util.py", "def parse_thing(x):\n    return x + 1\n")
         self.write("tests/test_util.py", "import util\nutil.parse_thing(1)\n")
