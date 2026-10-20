@@ -71,9 +71,9 @@ def changed_lines(diff):
         if line.startswith("diff --git "):
             in_hunk = prose = False
         elif not in_hunk and line.startswith("--- "):
-            # Removed lines come from the source file, so its path decides. core.quotePath wraps a
-            # non-ASCII path in double quotes; /dev/null (an added file) has no removed lines.
-            prose = os.path.splitext(line[4:].strip('"'))[1].lower() in PROSE
+            # Removed lines come from the source file, so its path decides. git wraps a non-ASCII path in
+            # double quotes and ends an unquoted path with spaces in a tab; /dev/null has no removed lines.
+            prose = os.path.splitext(line[4:].rstrip("\t").strip('"'))[1].lower() in PROSE
         elif line.startswith("@@"):
             in_hunk = True
         elif in_hunk and line.startswith("-"):

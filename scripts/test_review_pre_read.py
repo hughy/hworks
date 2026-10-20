@@ -102,16 +102,18 @@ class PreRead(unittest.TestCase):
         self.assertEqual([n["name"] for n in rn["names"]], ["old_helper"])
         self.assertEqual(rn["removed_cleanly"], [])
 
-    def test_prose_filter_applies_to_git_quoted_paths(self):
+    def test_prose_filter_applies_to_quoted_and_space_paths(self):
+        # git quotes a non-ASCII path and ends an unquoted path with spaces in a tab.
         words = " ".join(f"word{i}" for i in range(60))
-        self.write("docs/caf\u00e9.md", f"{words} and `old_helper`.\n")
-        self.commit("doc with a quoted path")
-        self.write("docs/caf\u00e9.md", "Short.\n")
-        self.commit("shorten it")
-        r = self.run_script(self.git("rev-parse", "HEAD~1"), "HEAD", "--json")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        rn = json.loads(r.stdout)["removed_names"]
-        self.assertEqual(([n["name"] for n in rn["names"]], rn["total"]), (["old_helper"], 1))
+        for path in ("docs/caf\u00e9.md", "docs/guide with spaces.md"):
+            self.write(path, f"{words} and `old_helper`.\n")
+            self.commit("doc")
+            self.write(path, "Short.\n")
+            self.commit("shorten it")
+            r = self.run_script(self.git("rev-parse", "HEAD~1"), "HEAD", "--json")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            rn = json.loads(r.stdout)["removed_names"]
+            self.assertEqual(([n["name"] for n in rn["names"]], rn["total"]), (["old_helper"], 1), path)
 
     def test_rename_classifies_removed_lines_by_the_source_file(self):
         # Code renamed to prose: the removed def is code, so its surviving caller is listed.
