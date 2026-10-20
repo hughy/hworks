@@ -11,7 +11,8 @@ Commands: the four reporters from skills/kaizen/SKILL.md with --since and --min-
 in, output files dated today.
 Carry-over: --previous FILE, else the newest findings-*.md in --task-dir (default: the output of
 scripts/task-dir.sh kaizen run from the hworks root). Every line starting with "- [" is a finding
-in the skill's Output format (six "|"-separated fields, or two for a drop, none empty); one that
+in the skill's Output format (six "|"-separated fields, or two for a drop, none empty; the state
+may carry a note after the state word, as in `implemented (merged, effect not yet seen)`); one that
 does not parse is listed, never skipped. Findings with an
 id whose state is not `effective` are listed by state; drops and `effective` rows are counted.
 --previous naming a missing file exits 2.
@@ -70,10 +71,11 @@ def parse_line(line):
     if outcome == "drop":
         return {"outcome": "drop", "group": fields[0]}
     head = fields[0].split(None, 1)
-    if len(head) < 2 or fields[5] not in STATES:
+    state = fields[5].split(None, 1)[0]
+    if len(head) < 2 or state not in STATES:
         return None
     return {"outcome": outcome, "id": head[0], "group": head[1], "deliverable": fields[3],
-            "artifact": fields[4], "state": fields[5]}
+            "artifact": fields[4], "state": state}
 
 
 def carry_over(path):

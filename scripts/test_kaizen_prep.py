@@ -19,7 +19,7 @@ Window 14 days; thresholds 5/3/10.
 
 - [1] K1 retry-helper | 12 sessions, 3 samples | coder | build tool, tests pass | units.json K1 | open
 - [4] K2 pi-cache | 40k token-turns | user | raise cache bug | upstream:pi | awaiting-user
-- [5] K3 task-dir guidance | 4 sessions | coder | AGENTS.md line | abc123 | implemented
+- [5] K3 task-dir guidance | 4 sessions | coder | AGENTS.md line | abc123 | implemented (merged, effect not yet seen)
 - [2] K4 ignored-script | 6 sessions | coder | router line | def456 | effective
 - [3] K5 bad-artifact | 3 sessions | /skill:correct | lint | ghi789 | unproven
 - [investigate] K6 slow-review | rounds | reviewer | does round 3 find blockers? | none | pending
@@ -63,6 +63,7 @@ class CarryOver(unittest.TestCase):
         self.assertEqual(by_state["open"][0], {"outcome": "1", "id": "K1", "group": "retry-helper",
                                                "deliverable": "build tool, tests pass",
                                                "artifact": "units.json K1"})
+        self.assertEqual(by_state["implemented"][0]["id"], "K3")
         self.assertEqual(counts, {"carry_over": 6, "drop": 2, "effective": 1, "unparsed": 4})
         self.assertEqual([u["text"].split()[2] for u in unparsed], ["K8", "K9", "K10", "missing-reason"])
 
