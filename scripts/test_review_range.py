@@ -257,6 +257,9 @@ class Args(Fixture):
         self.assertEqual((t["key"], t["base"], t["head"], t["cwd"]),
                          ("branch", self.c[2], self.c[4], os.path.realpath(self.repo)))
         self.assertIn("Add retries to the client.", t["task"])
+        pre = os.path.join(self.root, "scripts", "review-pre-read.py")
+        self.assertTrue(t["task"].startswith(f"Pre-read: run `python3 {pre} {self.c[2]} {self.c[4]}` in your cwd"),
+                        t["task"])
         self.assertIn(f"Review only the commits after {self.c[2][:12]}", t["task"])
         self.assertEqual(a["reviewers"], [{"agent": "reviewer", "label": "reviewer"}])
         self.assertIn(os.path.join(self.root, "skills", "interrogate", "references", "rubric.md"), a["task"])

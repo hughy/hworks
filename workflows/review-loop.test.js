@@ -340,9 +340,21 @@ test("cwd goes to every child when set", async () => {
   for (const c of calls) assert.equal(c.cwd, "/work/tree", c.key);
 });
 
-test("a non-string cwd or coderModel is rejected", async () => {
+test("a non-string cwd, coderModel, or preRead is rejected", async () => {
   await assert.rejects(run({}, { cwd: 3 }), /args\.cwd/);
   await assert.rejects(run({}, { coderModel: "" }), /args\.coderModel/);
+  await assert.rejects(run({}, { preRead: "" }), /args\.preRead/);
+  await assert.rejects(run({}, { preRead: 7 }), /args\.preRead/);
+});
+
+test("preRead opens the reviewer task with the pre-read command, before the diff", async () => {
+  const { calls } = await run({ "code-1": coded("a1"), "review-1-1": clean }, { preRead: "/h/scripts/review-pre-read.py" });
+  const task = calls[1].task;
+  assert.ok(task.startsWith("Pre-read: run `python3 /h/scripts/review-pre-read.py 0123abc HEAD` in your cwd"), task);
+  assert.ok(task.indexOf("git diff 0123abc...HEAD") > task.indexOf("review-pre-read.py"));
+  assert.doesNotMatch(calls[0].task, /review-pre-read/);
+  const { calls: without } = await run({ "code-1": coded("a1"), "review-1-1": clean });
+  assert.ok(without[1].task.startsWith("Review the change"), without[1].task);
 });
 
 test("two gate failures in a row stop with gate-failed", async () => {

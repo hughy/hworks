@@ -99,12 +99,12 @@ if [ "$reviewers" -eq 2 ]; then
 fi
 
 node -e '
-  const [brief, gate, base, reviewers, review2, coderModel, cwd, rubricDir, taskDir, gateTimeout] = process.argv.slice(1);
-  const args = { brief, gate, base, reviewers: Number(reviewers), rubricDir };
+  const [brief, gate, base, reviewers, review2, coderModel, cwd, rubricDir, taskDir, gateTimeout, preRead] = process.argv.slice(1);
+  const args = { brief, gate, base, reviewers: Number(reviewers), rubricDir, preRead };
   if (review2) args.review2Model = review2;
   if (coderModel) args.coderModel = coderModel;
   if (cwd) args.cwd = cwd;
   if (taskDir) args.taskDir = taskDir;
   if (gateTimeout) args.gateTimeoutMs = Number(gateTimeout);
   process.stdout.write(JSON.stringify(args) + "\n");
-' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/skills/interrogate/references" "$task_dir" "$gate_timeout"
+' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/skills/interrogate/references" "$task_dir" "$gate_timeout" "$root/scripts/review-pre-read.py"

@@ -64,6 +64,13 @@ test("without a worktree argument the base resolves in the current directory and
   assert.equal("cwd" in r.json, false);
 });
 
+test("preRead is the absolute path of review-pre-read.py beside the script", () => {
+  const fx = fixture();
+  const r = runArgs(fx, [fx.brief, "true", "main", "standard", fx.repo], { models: pinned, cwd: os.tmpdir() });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.json.preRead, path.join(fx.root, "scripts", "review-pre-read.py"));
+});
+
 test("a review ledger in the task dir moves the base to the furthest covered commit", () => {
   const fx = fixture();
   const task = path.join(path.dirname(fx.repo), "task");
