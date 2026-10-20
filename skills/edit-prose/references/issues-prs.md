@@ -13,7 +13,7 @@ Brief and factual. These are read later by people without the conversation's con
 - Short. Lead with why the change is needed, then what it does.
 - List mechanical changes as bullets when there are several.
 - State constraints the reviewer must know: "Callers must not skip a block; the event loop enforces this."
-- Follow the repo's PR template when one exists.
+- Follow the repo's PR template when one exists. Find it with `scripts/pr-template.sh`.
 
 Examples of the length and level of detail:
 

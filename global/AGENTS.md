@@ -64,6 +64,7 @@ Review the branch's changeset and what it breaks. Do not expand to unrelated cod
 
 - Do not open PRs unless explicitly asked.
 - When opening a PR, always open it as a draft (`gh pr create --draft`).
+- Find the repo's PR template with `~/dev/hworks/scripts/pr-template.sh`, which matches any letter case and the `docs/`, `.github/`, and `PULL_REQUEST_TEMPLATE/` locations. Never guess the filename. Fill in the template it prints; with none, say so in the reply.
 - Before creating a PR or pushing to a branch with an open PR, run the repo's checks on the head you will push and review the unpushed diff. For every name the diff deletes or renames, `git grep` the old name and fix each hit. The review covers what the diff breaks outside itself, not only the diff.
 - Stack dependent PRs with `gh stack` (the `github/gh-stack` extension). PRs are dependent when one needs the other's code, when both touch the same file (tests included), or when one changes behavior the other's tests assert. Before opening sibling PRs off trunk, compare their `git diff --name-only trunk...<branch>` lists and stack any overlap:
   - Always pass `--base <trunk>` to `gh stack init`. Without it, `gh stack` uses the repo's GitHub default branch, which can differ from trunk.

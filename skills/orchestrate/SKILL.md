@@ -82,7 +82,7 @@ Ship one clean unit:
 1. Confirm the `Authority granted` line in `$S/standing.md`.
 2. Run `status` and require the unit still `clean`.
 3. Check the remote for the branch and for an existing PR; never repeat an external action that already happened.
-4. From the unit worktree: `git push -u origin <branch>`, then `gh pr create --draft --base <trunk> --head <branch>` with the unit's title and a body per the repo template.
+4. From the unit worktree: `git push -u origin <branch>`, then `gh pr create --draft --base <trunk> --head <branch>` with the unit's title and a body per the repo template. Find the template with `scripts/pr-template.sh` run in the worktree; never guess its filename, which may be lowercase or live in `docs/` or a `PULL_REQUEST_TEMPLATE/` directory. Pass the body with `--body-file`.
 5. Track the PR with the harness PR tracker if there is one. `set <id> pr-open --reason <url>` and write the URL to `progress.md`.
 
 The coordinator never edits a unit's code or reviews it in place of the workflow. Reading a worktree, a run, or a diff to decide what to do is fine.
