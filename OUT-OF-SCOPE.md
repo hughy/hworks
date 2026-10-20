@@ -20,6 +20,7 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 | Per-repo lessons file | private skill collection (2026-10-17) | A lessons file per repo, kept outside the repo, fed to coder and reviewer briefs | The same class of reviewer-caught defect recurs in one repo across 3 sessions in `friction.md` |
 | Daily service health watch | private skill collection (2026-10-17) | A recurring check over the observability backend for a service's monitors | The operator owns a production service with monitors and asks for a recurring check |
 | Cleanup scan to tracker | private skill collection (2026-10-17) | A cleanup scan files one tracker issue with subissues instead of opening PRs | The operator asks for it twice |
+| Shortcut debt ledger | dietrichgebert/ponytail `ponytail-debt` (09c434a) | A `shortcut: <limit>, <when to upgrade>` comment for a deliberate shortcut, and a grep that lists them with a `no-trigger` flag | A deferred limit is found shipped and forgotten, in 2 sessions in `friction.md` |
 
 ## Declined
 
@@ -59,3 +60,14 @@ The split-and-sync procedure in `skills/hughy-router/references/split-and-sync.m
 | Anti-slop and technical-writing skills | Covered by `edit-prose` and `global/AGENTS.md` Prose |
 | Interview skill | Already declined |
 | Setup wizard with a profile file | Covered by `install.sh` and `adapters/local/` |
+
+### dietrichgebert/ponytail (09c434a, evaluated 2026-10-20)
+
+The smallest-complete-change ladder and the never-cut floor were adopted into `agents/coder.md`, with the dependency and floor checks in reviewer item 2. The four-part finding shape went to a private review skill. The debt ledger is in Watching above.
+
+| idea | reason |
+|---|---|
+| Install the plugin as-is | Its always-on prompt duplicates the coder ladder, its reply ending competes with the hughy-router Reply, and its `shortcut:` comments conflict with the `global/AGENTS.md` comment default. Its benchmark measures a bare agent with Bash off, so it says nothing about the gain over hworks |
+| `/ponytail` mode extension and lite/full/ultra levels | Same mechanism as `extensions/hughy-mode.ts`; hughy-router effort levels and `principle-attack-the-premise` cover the levels |
+| `ponytail-review`, `ponytail-audit` | The `reviewer` agent, `review-fanout`, and `correct` cover them; reviewer item 4 traces call frequency more strictly than its scale check |
+| Band, board, and `ponytail-gain` | Covered by `kaizen-tokens.py`; the gain page restates the benchmark |

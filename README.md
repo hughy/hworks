@@ -65,7 +65,7 @@ git clone https://github.com/hughy/hworks ~/dev/hworks
 
 `global/AGENTS.md` refers to `~/dev/hworks`, so clone there or link that path to your clone. `install.sh` refuses to replace a real file that differs from what it would link, such as an existing `~/.claude/CLAUDE.md`; compare the two, move yours aside, and rerun. It removes a `global/AGENTS.md` that links to `global/AGENTS.md`, because pi reads `AGENTS.md` from every ancestor of the working directory as well as its agent dir, and would load the guidance twice under `~`. Install an overlay repo after hworks if you use one (see [Local overlays](#local-overlays)).
 
-Then `/reload` and start a task with `/skill:hughy-router <task>`. The skills root follows symlinks, and `skillPath: ../skills` in each agent file resolves the same links.
+Then `/reload` and start a task with `/skill:hughy-router <task>`. The skills root follows symlinks. Agent prompts name the skills they use by `~/dev/hworks/skills/...` path, which resolves the same links.
 
 pi-subagents resolves one model per launch and fails when it is unavailable. When a provider is down, apply another profile, for example `scripts/models.sh inherit`, then `/reload`.
 

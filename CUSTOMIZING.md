@@ -50,7 +50,7 @@ cursor/plugins/pstack            upstream, written for Cursor
 1. Fork the repo and clone it. Edit `global/AGENTS.md` (or replace its `~/dev/hworks` paths with your clone's), then run `scripts/install.sh`.
 2. Rename the router. Rename `skills/hughy-router/` and change the `name:` in its frontmatter to match the new directory name. Then run `git grep -n hughy-router -- ':!pstack'` and update each hit. The hits are in `README.md`, `CUSTOMIZING.md`, `DIVERGENCE.md`, `adapters/pi.md`, `agents/coder.md`, `models.conf`, and `scripts/models.sh`. Start a task with `/skill:<new-name> <task>`.
 3. Rename the plugin. Set `name` in `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`, and set `author` in both `plugin.json` files. Add your copyright line to `LICENSE`. Keep `pstack/LICENSE`, because pstack's MIT license requires its notice in copies.
-4. Choose the allowlist. `scripts/skill.sh list` shows which pstack skills are linked. `scripts/skill.sh enable <name>` links a skill and deletes its `DIVERGENCE.md` row. `scripts/skill.sh disable <name> "<reason>"` unlinks a skill and adds a row with the reason and the current mirror commit. pstack skills set `disable-model-invocation: true`, so the model never sees them in its catalog. You invoke one with `/skill:<name>`, the router reads one by path, or an agent loads one through its `skills:` line.
+4. Choose the allowlist. `scripts/skill.sh list` shows which pstack skills are linked. `scripts/skill.sh enable <name>` links a skill and deletes its `DIVERGENCE.md` row. `scripts/skill.sh disable <name> "<reason>"` unlinks a skill and adds a row with the reason and the current mirror commit. pstack skills set `disable-model-invocation: true`, so the model never sees them in its catalog. You invoke one with `/skill:<name>`, or the router or an agent prompt reads one by path.
 5. Rewrite the router. Its effort table, routes, and deltas are opinions. Keep the brief format (goal, effort, verify) if it suits you. Playbooks under `pstack/skills/poteto-mode/playbooks/` need no enabling, because the router reads them by path.
 6. Set your models. See [Models](#models).
 7. Point resyncs at the mirror you follow. See [Resync pstack](#resync-pstack).
@@ -83,7 +83,7 @@ An agent file is markdown with frontmatter. The body is the system prompt. hwork
 | `tools` | No `edit` or `write` on read-only roles | `adapters/pi.md` maps pstack's `readonly: true` to those roles |
 | `systemPromptMode` | `replace` | The body replaces pi's base prompt instead of being appended to it |
 | `inheritProjectContext`, `inheritGlobalContext` | `true` | The child loads the project's `AGENTS.md` and the global one, `~/.pi/agent/AGENTS.md` |
-| `inheritSkills`, `skills`, `skillPath` | `false`, a list, `../skills` | The child loads only the listed skills, found in `skills/` relative to the agent file |
+| `inheritSkills` | `false` | The child gets no skill catalog. pi-subagents drops hidden skills (`disable-model-invocation: true`) from a `skills:` list without a warning, and every skill an hworks agent uses is hidden, so each agent prompt names its skills by absolute path and when to read them. `scripts/test_agents.py` fails if an agent lists a hidden skill |
 | `aliases` | For example, `poteto-agent` | pstack's agent names resolve to the hworks role |
 | `acceptanceRole` | `writer` or `read-only` | Declares whether the role writes, for pi-subagents' acceptance checks |
 | `defaultContext` | `fresh` | Children start without the parent's transcript |

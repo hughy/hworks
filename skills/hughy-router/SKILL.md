@@ -9,7 +9,7 @@ On pi, read `../../adapters/pi.md` once per session before following any playboo
 
 Skills named below live at `../<name>/SKILL.md`; read them by path, since the commands among them (`orchestrate`, `handoff`) are hidden from the catalog. Playbooks live under `../../pstack/skills/poteto-mode/playbooks/`. Playbooks are references, not scripts. Read the matched one when a run stalls, the change is high-stakes, or it runs unattended, and apply the deltas below where they conflict. Do not copy its steps into a todo list.
 
-All pstack principles are available at `../principle-<name>/SKILL.md`. Read a principle's leaf file in full only when a selected skill or playbook relies on it or the user names it; linking adds no automatic triggers. A reference that omits `principle-` uses the same path. If a child must apply one outside its configured skills, include the absolute leaf path and the applicable hworks overrides in its brief.
+All pstack principles are available at `../principle-<name>/SKILL.md`. Read a principle's leaf file in full only when a selected skill or playbook relies on it or the user names it; linking adds no automatic triggers. A reference that omits `principle-` uses the same path. If a child must apply one its agent prompt does not name, include the absolute leaf path and the applicable hworks overrides in its brief.
 
 ## Brief and effort
 
