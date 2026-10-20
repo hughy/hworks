@@ -28,6 +28,8 @@ Window 14 days; thresholds 5/3/10.
 - [drop] gate runs | tool used as intended
 - [5] K8 broken | only three | fields
 - [5] K9 bad-state | ev | coder | edit | abc | done
+- [1] K10 extra-pipe | ev | coder | run check | head -20 | abc | open
+- [drop] missing-reason
 """
 
 
@@ -61,8 +63,8 @@ class CarryOver(unittest.TestCase):
         self.assertEqual(by_state["open"][0], {"outcome": "1", "id": "K1", "group": "retry-helper",
                                                "deliverable": "build tool, tests pass",
                                                "artifact": "units.json K1"})
-        self.assertEqual(counts, {"carry_over": 6, "drop": 2, "effective": 1, "unparsed": 2})
-        self.assertEqual([u["text"].split()[2] for u in unparsed], ["K8", "K9"])
+        self.assertEqual(counts, {"carry_over": 6, "drop": 2, "effective": 1, "unparsed": 4})
+        self.assertEqual([u["text"].split()[2] for u in unparsed], ["K8", "K9", "K10", "missing-reason"])
 
     def test_json_round_trips_and_default_discovery(self):
         older = os.path.join(self.d, "findings-2025-12-01.md")
@@ -75,7 +77,7 @@ class CarryOver(unittest.TestCase):
         self.assertEqual(out["thresholds"]["group"], 10)
         self.assertEqual(out["previous_file"], self.path)
         self.assertEqual(out["counts"]["drop"], 2)
-        self.assertEqual(len(out["unparsed"]), 2)
+        self.assertEqual(len(out["unparsed"]), 4)
         self.assertEqual(len(out["commands"]), 4)
         self.assertIn("--min-sessions 10", out["commands"][0])
         self.assertEqual(json.loads(json.dumps(out)), out)
