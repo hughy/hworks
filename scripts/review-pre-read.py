@@ -63,7 +63,7 @@ def is_test(path):
 def changed_lines(diff):
     removed, added = [], []
     in_hunk = False
-    for line in diff.splitlines():
+    for line in diff.split("\n"):
         if line.startswith("diff --git "):
             in_hunk = False
         elif line.startswith("@@"):
@@ -97,7 +97,7 @@ def removed_names(cwd, head, diff):
 
 def related_tests(cwd, head, changed):
     by_file = {}
-    for _, path in changed:
+    for _, _, path in changed:
         if is_test(path):
             continue
         stem = os.path.basename(path).split(".")[0]
@@ -108,7 +108,7 @@ def related_tests(cwd, head, changed):
         tests = [t for t in tests if is_test(t) and t != path]
         if tests:
             by_file[path] = tests
-    return {"by_file": by_file, "changed_tests": [p for s, p in changed if is_test(p) and not s.startswith("D")]}
+    return {"by_file": by_file, "changed_tests": [p for s, _, p in changed if is_test(p) and not s.startswith("D")]}
 
 
 def build(cwd, base, head):
@@ -118,14 +118,19 @@ def build(cwd, base, head):
             raise Bad(f"cannot resolve {ref} in {cwd}")
     rng = f"{base}...{head}"
     _, status = git(cwd, *DIFF, "--name-status", rng, "--")
-    changed = [(p[0], p[-1]) for p in (line.split("\t") for line in status.splitlines()) if len(p) >= 2]
+    rows = [line.split("\t") for line in status.split("\n") if line]
+    changed = [(p[0], p[1] if len(p) == 3 else None, p[-1]) for p in rows if len(p) >= 2]
     _, diff = git(cwd, *DIFF, rng, "--")
-    lines = diff.splitlines()
+    # Split on LF only so CR and Unicode line separators in the diff stay verbatim.
+    lines = diff.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    text = diff if len(lines) <= MAX_DIFF_LINES else "\n".join(lines[:MAX_DIFF_LINES]) + "\n"
     return {
-        "changed_files": [{"status": s, "path": p} for s, p in changed],
+        "changed_files": [{"status": s, "path": p, **({"old_path": o} if o else {})} for s, o, p in changed],
         "removed_names": removed_names(cwd, head, diff),
         "related_tests": related_tests(cwd, head, changed),
-        "diff": {"text": "\n".join(lines[:MAX_DIFF_LINES]), "lines": len(lines),
+        "diff": {"text": text, "lines": len(lines),
                  "cut": max(0, len(lines) - MAX_DIFF_LINES),
                  "rest": f"git diff {rng} | tail -n +{MAX_DIFF_LINES + 1}"},
     }
@@ -133,7 +138,8 @@ def build(cwd, base, head):
 
 def render(r):
     out = ["## Changed files", ""]
-    out += [f"{c['status']}\t{c['path']}" for c in r["changed_files"]] or ["(none)"]
+    out += ["\t".join([c["status"]] + ([c["old_path"]] if "old_path" in c else []) + [c["path"]])
+            for c in r["changed_files"]] or ["(none)"]
     rn = r["removed_names"]
     out += ["", "## Removed or renamed names", "",
             "Heuristic: identifiers on removed lines that appear on no added line. "
@@ -156,7 +162,7 @@ def render(r):
         out.append(f"{path}: " + ", ".join(tests))
     out.append("changed tests: " + (", ".join(rt["changed_tests"]) or "(none)"))
     d = r["diff"]
-    out += ["", "## Diff", "", d["text"]]
+    out += ["", "## Diff", "", d["text"].removesuffix("\n")]
     if d["cut"]:
         out.append(f"... {d['cut']} of {d['lines']} diff lines cut; see the rest: {d['rest']}")
     return "\n".join(out) + "\n"

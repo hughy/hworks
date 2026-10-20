@@ -101,6 +101,23 @@ class PreRead(unittest.TestCase):
         self.assertEqual(rep["changed_files"], [{"status": "M", "path": "lib/util.py"},
                                                 {"status": "M", "path": "tests/test_util.py"}])
 
+    def test_rename_keeps_old_and_new_paths(self):
+        self.git("mv", "lib/util.py", "lib/helpers.py")
+        self.commit("rename util")
+        rep = self.report()
+        self.assertEqual(rep["changed_files"], [{"status": "R100", "old_path": "lib/util.py", "path": "lib/helpers.py"}])
+        self.assertIn("## Changed files\n\nR100\tlib/util.py\tlib/helpers.py\n", self.run_script("main", "HEAD").stdout)
+
+    def test_diff_text_is_verbatim_with_crlf_and_unicode_separators(self):
+        with open(os.path.join(self.repo, "crlf.txt"), "wb") as f:
+            f.write("one\r\ntwo\u2028three\r\n".encode())
+        self.commit("crlf")
+        r = subprocess.run(["git", "-C", self.repo, "diff", "--no-color", "main...HEAD", "--"], capture_output=True)
+        rep = self.report()
+        self.assertEqual(rep["diff"]["text"].encode(), r.stdout)
+        self.assertIn("+one\r\n+two\u2028three\r\n", rep["diff"]["text"])
+        self.assertEqual(rep["diff"]["lines"], 8)
+
     def test_bad_ref_exits_2_with_no_report(self):
         r = self.run_script("no-such-ref", "HEAD")
         self.assertEqual((r.returncode, r.stdout), (2, ""))
