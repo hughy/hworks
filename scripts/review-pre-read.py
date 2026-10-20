@@ -25,8 +25,6 @@ MAX_HITS = 5
 MAX_DIFF_LINES = 4000
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 DIFF = ["-c", "core.quotePath=true", "diff", "--no-color", "--no-ext-diff"]
-# Removed lines in prose files hold words, not identifiers, so they contribute no names.
-PROSE = {".md", ".markdown", ".txt", ".rst", ".adoc"}
 STOP = set("""
 and any are assert async await break case catch class const continue def del elif else except exec
 false finally for from global import lambda nonlocal not pass print raise return true try while with
@@ -63,18 +61,15 @@ def is_test(path):
 
 
 def changed_lines(diff):
-    """(removed lines outside prose files, added lines from every file)."""
     removed, added = [], []
-    in_hunk = prose = False
+    in_hunk = False
     for line in diff.split("\n"):
         if line.startswith("diff --git "):
             in_hunk = False
-            prose = os.path.splitext(line.rsplit(" b/", 1)[-1])[1].lower() in PROSE
         elif line.startswith("@@"):
             in_hunk = True
         elif in_hunk and line.startswith("-"):
-            if not prose:
-                removed.append(line[1:])
+            removed.append(line[1:])
         elif in_hunk and line.startswith("+"):
             added.append(line[1:])
     return removed, added
