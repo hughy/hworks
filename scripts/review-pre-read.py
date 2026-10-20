@@ -70,7 +70,8 @@ def changed_lines(diff):
     for line in diff.split("\n"):
         if line.startswith("diff --git "):
             in_hunk = False
-            prose = os.path.splitext(line.rsplit(" b/", 1)[-1])[1].lower() in PROSE
+            # core.quotePath wraps a non-ASCII path in double quotes, so the header can end in '.md"'.
+            prose = os.path.splitext(line.rsplit(" b/", 1)[-1].rstrip('"'))[1].lower() in PROSE
         elif line.startswith("@@"):
             in_hunk = True
         elif in_hunk and line.startswith("-"):

@@ -102,6 +102,17 @@ class PreRead(unittest.TestCase):
         self.assertEqual([n["name"] for n in rn["names"]], ["old_helper"])
         self.assertEqual(rn["removed_cleanly"], [])
 
+    def test_prose_filter_applies_to_git_quoted_paths(self):
+        words = " ".join(f"word{i}" for i in range(60))
+        self.write("docs/caf\u00e9.md", f"{words} and `old_helper`.\n")
+        self.commit("doc with a quoted path")
+        self.write("docs/caf\u00e9.md", "Short.\n")
+        self.commit("shorten it")
+        r = self.run_script(self.git("rev-parse", "HEAD~1"), "HEAD", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rn = json.loads(r.stdout)["removed_names"]
+        self.assertEqual(([n["name"] for n in rn["names"]], rn["total"]), (["old_helper"], 1))
+
     def test_related_tests_by_stem_and_changed_tests(self):
         self.write("lib/util.py", "def parse_thing(x):\n    return x + 1\n")
         self.write("tests/test_util.py", "import util\nutil.parse_thing(1)\n")
