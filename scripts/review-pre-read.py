@@ -25,6 +25,9 @@ MAX_HITS = 5
 MAX_DIFF_LINES = 4000
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 DIFF = ["-c", "core.quotePath=true", "diff", "--no-color", "--no-ext-diff"]
+# A removed line in a prose file is mostly words; only its backticked spans name code.
+PROSE = {".md", ".markdown", ".txt", ".rst", ".adoc"}
+CODE_SPAN = re.compile(r"`([^`]+)`")
 STOP = set("""
 and any are assert async await break case catch class const continue def del elif else except exec
 false finally for from global import lambda nonlocal not pass print raise return true try while with
@@ -61,15 +64,17 @@ def is_test(path):
 
 
 def changed_lines(diff):
+    """(removed lines, with prose lines cut to their backticked spans; added lines from every file)."""
     removed, added = [], []
-    in_hunk = False
+    in_hunk = prose = False
     for line in diff.split("\n"):
         if line.startswith("diff --git "):
             in_hunk = False
+            prose = os.path.splitext(line.rsplit(" b/", 1)[-1])[1].lower() in PROSE
         elif line.startswith("@@"):
             in_hunk = True
         elif in_hunk and line.startswith("-"):
-            removed.append(line[1:])
+            removed.append(" ".join(CODE_SPAN.findall(line)) if prose else line[1:])
         elif in_hunk and line.startswith("+"):
             added.append(line[1:])
     return removed, added
