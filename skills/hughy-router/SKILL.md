@@ -37,7 +37,7 @@ Slots are per-call model overrides from the active profile. `scripts/models.sh s
 
 ### Investigate
 
-A read-only question. Narrow (one module, one function): read the code yourself and answer with citations. Subsystem or history: plan the slices with `how` and `why`, spawn 2-4 `explorer` runs, one slice or evidence source each, then one `synthesizer` over their outputs. The children do not load `how` or `why`, so each brief carries its slice and the absolute paths of the reference files it needs: `how/references/explorer-prompt.md` or `why/references/sources/<source>.md` for an explorer, `why/references/epistemics.md` for the synthesizer. "What could this break": the `blast-radius` skill. Playbook: `investigation.md`. No code change. If one follows, re-route.
+A read-only question. Narrow (one module, one function): read the code yourself and answer with citations. Subsystem or history: plan the slices with `how` and `why`, spawn 2-4 `explorer` runs, one slice or evidence source each, then one `synthesizer` over their outputs. The children do not load `how` or `why`, so each brief carries its slice and the absolute paths of the reference files it needs: `how/references/explorer-prompt.md` or `why/references/sources/<source>.md` for an explorer, `why/references/epistemics.md` for the synthesizer. "What could this break": the `blast-radius` skill. Playbook: `investigation.md`. Read a repository that is not checked out from a clone (shallow is fine) in a `mktemp -d` dir under `$TMPDIR`, never page it through the forge's contents API. No code change. If one follows, re-route.
 
 ### Fix
 
@@ -53,7 +53,7 @@ A one-off slowness: `perf-issue.md`. Sustained improvement of one metric: `hillc
 
 ### Ship
 
-Open a PR: `opening-a-pr.md`. Drive a PR to merge-ready: `babysit.md`, with `../../pstack/skills/poteto-mode/references/bugbot-triage.md` for bot comments. Land a verified stack: `shipping.md`. Resume or hand off: `session-pickup.md`, `pause-safely.md`. Scope a task out of a long session for a new session to own: `../handoff/SKILL.md`. Split a reviewed branch that is still too large, or sync a branch with its base: `references/split-and-sync.md`.
+Open a PR: `opening-a-pr.md`. Drive a PR to merge-ready: `babysit.md`, with `../../pstack/skills/poteto-mode/references/bugbot-triage.md` for bot comments. Read PR check state from the PR-tracking tool and review threads from it plus the adapter's reader for full review-thread bodies; use raw `gh api` only for data they lack (job logs, review decision, head metadata). Land a verified stack: `shipping.md`. Resume or hand off: `session-pickup.md`, `pause-safely.md`. Scope a task out of a long session for a new session to own: `../handoff/SKILL.md`. Split a reviewed branch that is still too large, or sync a branch with its base: `references/split-and-sync.md`.
 
 ### Long run
 
