@@ -30,7 +30,7 @@ pi lists every skill's name and description in the system prompt unless the fron
 
 - Make a skill model-invoked when the agent must reach it on its own. Write its description as a pointer with trigger branches.
 - Make it a command (`disable-model-invocation: true`) when only the operator starts it. Its description is one human-facing line with no trigger list.
-- Have another skill read it by path when a router or workflow needs it: hughy-router reads skills as `../<name>/SKILL.md`, which works for both kinds. Subagents load only the skills their agent file lists (`skills:` in `agents/*.md`), so a brief that needs another file names its absolute path.
+- Have another skill read it by path when a router or workflow needs it: hughy-router reads skills as `../<name>/SKILL.md`, which works for both kinds. Subagents see only the skills their agent file lists (`skills:` in `agents/*.md`), and pi-subagents drops hidden skills from that list, so an agent prompt or brief that needs a hidden skill names its absolute path and when to read it.
 
 An agent prompt in `agents/*.md` loads into every run of that role. Treat each line as context load for every child.
 
