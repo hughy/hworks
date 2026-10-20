@@ -113,6 +113,30 @@ class PreRead(unittest.TestCase):
         rn = json.loads(r.stdout)["removed_names"]
         self.assertEqual(([n["name"] for n in rn["names"]], rn["total"]), (["old_helper"], 1))
 
+    def test_rename_classifies_removed_lines_by_the_source_file(self):
+        # Code renamed to prose: the removed def is code, so its surviving caller is listed.
+        body = "\n".join(f"keep_{i} = {i}" for i in range(30))
+        self.write("lib/notes.py", f"{body}\n\n\ndef vanished_name():\n    return 1\n")
+        self.write("app/main.py", "from util import parse_thing, old_helper\nimport notes; notes.vanished_name()\n")
+        self.commit("add notes")
+        self.git("mv", "lib/notes.py", "lib/notes.md")
+        self.write("lib/notes.md", f"{body}\n")
+        self.commit("code to prose")
+        r = self.run_script(self.git("rev-parse", "HEAD~1"), "HEAD", "--json")
+        rep = json.loads(r.stdout)
+        self.assertEqual([c["status"][0] for c in rep["changed_files"]], ["R"])
+        self.assertEqual([n["name"] for n in rep["removed_names"]["names"]], ["vanished_name"])
+        # Prose renamed to code: the removed words are prose, so none of them is a name.
+        self.git("mv", "lib/notes.md", "lib/notes.txt")
+        self.write("lib/notes.txt", f"{body}\n")
+        self.commit("prose to prose")
+        self.git("mv", "lib/notes.txt", "lib/notes2.py")
+        self.write("lib/notes2.py", "\n".join(f"keep_{i} = {i}" for i in range(29)) + "\n")
+        self.commit("prose to code")
+        r = self.run_script(self.git("rev-parse", "HEAD~1"), "HEAD", "--json")
+        rn = json.loads(r.stdout)["removed_names"]
+        self.assertEqual((rn["names"], rn["removed_cleanly"]), ([], []))
+
     def test_related_tests_by_stem_and_changed_tests(self):
         self.write("lib/util.py", "def parse_thing(x):\n    return x + 1\n")
         self.write("tests/test_util.py", "import util\nutil.parse_thing(1)\n")

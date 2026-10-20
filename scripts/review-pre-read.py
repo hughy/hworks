@@ -69,9 +69,11 @@ def changed_lines(diff):
     in_hunk = prose = False
     for line in diff.split("\n"):
         if line.startswith("diff --git "):
-            in_hunk = False
-            # core.quotePath wraps a non-ASCII path in double quotes, so the header can end in '.md"'.
-            prose = os.path.splitext(line.rsplit(" b/", 1)[-1].rstrip('"'))[1].lower() in PROSE
+            in_hunk = prose = False
+        elif not in_hunk and line.startswith("--- "):
+            # Removed lines come from the source file, so its path decides. core.quotePath wraps a
+            # non-ASCII path in double quotes; /dev/null (an added file) has no removed lines.
+            prose = os.path.splitext(line[4:].strip('"'))[1].lower() in PROSE
         elif line.startswith("@@"):
             in_hunk = True
         elif in_hunk and line.startswith("-"):
