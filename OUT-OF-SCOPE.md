@@ -21,6 +21,7 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 | Daily service health watch | private skill collection (2026-10-17) | A recurring check over the observability backend for a service's monitors | The operator owns a production service with monitors and asks for a recurring check |
 | Cleanup scan to tracker | private skill collection (2026-10-17) | A cleanup scan files one tracker issue with subissues instead of opening PRs | The operator asks for it twice |
 | Shortcut debt ledger | dietrichgebert/ponytail `ponytail-debt` (09c434a) | A `shortcut: <limit>, <when to upgrade>` comment for a deliberate shortcut, and a grep that lists them with a `no-trigger` flag | A deferred limit is found shipped and forgotten, in 2 sessions in `friction.md` |
+| Extend an existing test before adding a new one | pasted agent-audit prompt (2026-10-21) | A line in `agents/coder.md` to extend an existing test before writing a new one | `low-value-test` friction entries or confirmed `kaizen-prs.py` test leads recur in 3 sessions |
 
 ## Declined
 
@@ -71,3 +72,11 @@ The smallest-complete-change ladder and the never-cut floor were adopted into `a
 | `/ponytail` mode extension and lite/full/ultra levels | Same mechanism as `extensions/hughy-mode.ts`; hughy-router effort levels and `principle-attack-the-premise` cover the levels |
 | `ponytail-review`, `ponytail-audit` | The `reviewer` agent, `review-fanout`, and `correct` cover them; reviewer item 4 traces call frequency more strictly than its scale check |
 | Band, board, and `ponytail-gain` | Covered by `kaizen-tokens.py`; the gain page restates the benchmark |
+
+### pasted agent-audit prompt (2026-10-21)
+
+`scripts/kaizen-prs.py` (PR outcomes, test share, time split), the `kaizen-prep.py` source preflight, kaizen verification lanes, and sampled scorecards were adopted from it. The idea in Watching above is not repeated here.
+
+| idea | reason |
+|---|---|
+| Score every session on a fixed rubric | kaizen triages groups that recur across sessions and verifies them; scoring every session costs a judgment per session and is unverifiable at that scale, so a sample is scored instead (`skills/kaizen/references/scorecard.md`) |

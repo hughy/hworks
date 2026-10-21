@@ -25,7 +25,7 @@
 ## Friction
 
 - When the operator corrects your work, a reviewer, test, or CI catches a defect in it, or you redo work because an assumption was wrong, add one line to `$TASK_DIR/friction.md` at that moment: `- <YYYY-MM-DD> [<category>] <what happened> | <caught by> | <cost> | <what would have helped>`.
-- Caught by is one of `operator`, `reviewer`, `test`, `ci`, `self`. Category is one of `missed-defect`, `wrong-assumption`, `test-gap`, `toolchain`, `environment`, `spec-gap`, `missing-tool`; add a new one only when none fits. Cost is what you observed (review rounds, reverted commits, reruns), not a time estimate. What would have helped names a tool, doc, check, or brief line, or is `-`.
+- Caught by is one of `operator`, `reviewer`, `test`, `ci`, `self`. Category is one of `missed-defect`, `wrong-assumption`, `test-gap`, `toolchain`, `environment`, `spec-gap`, `missing-tool`, `low-value-test` (a test that duplicates existing coverage or cannot fail); add a new one only when none fits. Cost is what you observed (review rounds, reverted commits, reruns), not a time estimate. What would have helped names a tool, doc, check, or brief line, or is `-`.
 - `hworks/scripts/blockers.sh` groups these lines, and retrospectives read them to learn what agents missed.
 
 ## Prose

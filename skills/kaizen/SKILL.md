@@ -26,19 +26,23 @@ Transcripts hold private content: code, ticket text, tokens, names from every re
 python3 <hworks>/scripts/kaizen-prep.py --since <window> > "$TASK_DIR/prep-<date>.txt"
 python3 <hworks>/scripts/kaizen-sessions.py --since <window> --min-sessions <group threshold> --top 1000 > "$TASK_DIR/sessions-<date>.txt"
 python3 <hworks>/scripts/kaizen-tokens.py --since <window> --min-sessions <group threshold> --top 40 > "$TASK_DIR/tokens-<date>.txt"
+python3 <hworks>/scripts/kaizen-prs.py --since <window> --top 40 > "$TASK_DIR/prs-<date>.txt"
 <hworks>/scripts/blockers.sh --since <window> > "$TASK_DIR/blockers-<date>.txt"
 python3 <hworks>/scripts/kaizen-setup.py --since <window> > "$TASK_DIR/setup-<date>.txt"
 <hworks>/scripts/task-prune.sh > "$TASK_DIR/prune-<date>.txt"
 ```
 
+Read the Sources block at the top of the prep output first. A source with no sessions in the window, or a `gh` host that failed, goes at the top of the findings file as a data limitation.
+
 `task-prune.sh` is a dry run: it lists bulk (clones, dependency installs, caches, large files) in task dirs idle for 14 days. Report its reclaimable total in the findings. Never pass `--apply`: deletion cannot be undone, so list `<hworks>/scripts/task-prune.sh --apply` for the user to run.
 
-`kaizen-sessions.py` keeps only its top 15 groups per section by default; `--min-sessions <group threshold> --top 1000` prints exactly the groups Triage covers (if a section prints 1000, rerun with a larger `--top`). All four reporters take `--since YYYY-MM-DD|Nd` and `--json`, read `adapters/local/*.env` for their sources, and label their sections. A missing source is reported in the output, not fatal; name missing sources in the findings file.
+`kaizen-sessions.py` keeps only its top 15 groups per section by default; `--min-sessions <group threshold> --top 1000` prints exactly the groups Triage covers (if a section prints 1000, rerun with a larger `--top`). All five reporters take `--since YYYY-MM-DD|Nd` and `--json`, read `adapters/local/*.env` for their sources, and label their sections. A missing source is reported in the output, not fatal; name missing sources in the findings file.
 
 What the output does not explain:
 
 - `[exists: <name>]` in `kaizen-sessions.py` means the shape names a script or skill in hworks or in `HWORKS_TOOL_DIRS`. Set that to the companion repo's tool dirs, or tools there go unflagged. Example session paths are relative to the pi sessions dir.
 - Every `kaizen-tokens.py` and `kaizen-setup.py` row names an owner: `hworks`, `local` (the operator's files outside hworks, such as the companion repo or a project's `AGENTS.md`), or `upstream:<name>`. Set `HWORKS_OWNER_MAP` to name the harness's own sections and tools, or they show as `upstream:unattributed`. Token-turns are a part's size times the turns that carried it, which is what it costs in cache reads.
+- `kaizen-prs.py` links a session to a PR only through a `gh pr create` result, a `gh pr` command naming the URL, or a tool in `HWORKS_PR_TOOLS`; PRs opened any other way are missing, and the push-without-link count in `coverage` sizes the gap. Its transcript `time` measures when entries were written, not wall-clock work.
 - `kaizen-setup.py --cwd <project>` adds a project's `.pi/` and `.agents/` dirs.
 
 ## Accuracy contract
@@ -51,11 +55,23 @@ Both reporters are heuristics. A group is a lead, not a fact. Before acting on o
 
 `kaizen-setup.py` reads files, not behaviour. An overlap score is shared words, a lead to open both parts and compare, never proof that one replaces the other. A stale-reference hit can be an intentional example or a gitignored path (`adapters/local/`) that exists only in the main checkout. "may be a builtin" can be fine. The overlap section sees only harness parts that appeared in session baselines in the window.
 
+`kaizen-prs.py`: the final check rollup shows only the last CI run, not earlier failures. Rework counts every commit after the PR opened, including ones the operator pushed. A test-ratio lead counts only after you read the diff.
+
+## Verification lanes
+
+After the reporters run, the parent may spawn up to three `explorer` runs at once, one per report group: sessions and tokens; blockers and setup; PRs. Each verifies its groups against two or three example sessions or PRs per the accuracy contract and returns the confirmed groups with their evidence. The parent triages and routes; explorers do not route.
+
+## Sampled scorecards
+
+After the reporters and before triage, score a sample of sessions per `references/scorecard.md`.
+
 ## Triage
 
 Triage every group in at least 5 sessions, every blocker class in at least 3 (thresholds here are for 14 days; see the window rule above), every token row above the cut (`--top 40`), and every setup row; expect over a hundred groups in a 14-day window, most of them quick drops. Each lands in exactly one outcome. When a finding seems to fit two: an ignored tool (2) beats a new tool (1); a cause in a dependency (4) beats a check in this repo (3), which would only work around it; and a mistake a check can catch (3) beats a guidance edit (5).
 
 Order verified findings by observed impact as well as distinct-session recurrence. Read the raw `cost` field of the related `friction.md` entries (review rounds, reverted commits, reruns) and cite it; do not combine unlike units into a score, and record a missing cost as unknown, not zero. A verified finding with high impact may be triaged below the frequency thresholds, with its impact evidence cited in its line.
+
+A PR outcome from `kaizen-prs.py` is impact evidence cited the same way: commits after creation, changes requested, failing checks, closed unmerged. Never sum them into a score. Human and tool wait from its `time` section are the impact for a finding about stalls. A test-ratio lead confirmed in at least 3 PRs (the diff shows new tests that duplicate existing coverage or cannot fail) is a repeated mistake (outcome 3) for `/skill:correct`, not a guidance edit.
 
 `blockers.sh` ends with decision outcomes: `deferred` entries the agent decided and `asked` entries from the up-front round, each `open`, `kept`, or `reversed` by the operator. A category whose deferred decisions are reversed in at least a third of at least 3 judged entries is a guidance gap (outcome 5) in the Autonomy section of `global/AGENTS.md` or the skill that made the call. Asked questions kept at the recommendation in at least two thirds of at least 3 judged entries mean the up-front round asks what the agent could decide; tighten its conditions (outcome 5). Entries without a state predate the field and do not count.
 
@@ -88,9 +104,9 @@ After picking the outcome, add a companion Detect or Mitigate action only when t
 
 `$TASK_DIR/findings-<date>.md`, one line per finding:
 
-`- [<outcome 1-5, investigate, or drop>] <id> <group or class> | <evidence: sessions, samples checked, existing tool, cost> | <next actor> | <deliverable and its completion check> | <artifact> | <state>`
+`- [<outcome 1-5, investigate, or drop>] <id> <group or class> | <evidence: sessions, samples checked, existing tool, cost> | <next actor> | <deliverable, effort S/M/L, and its completion check> | <artifact> | <state>`
 
-The id is stable: reuse it in every run while the finding stays open, and give a companion the primary's id as its link. The next actor is an agent role, a skill such as `/skill:correct`, or "user". The artifact points at the branch, commit, or `units.json` entry, or is `upstream:<owner>` for a flag. The state is one of `open`, `awaiting-user`, `implemented` (landed, effect not yet seen), `effective`, `unproven`, or `pending` (window too short to judge). A drop keeps only its group and one-line reason, with no id. For `investigate`, the deliverable is the question and evidence step.
+The id is stable: reuse it in every run while the finding stays open, and give a companion the primary's id as its link. The next actor is an agent role, a skill such as `/skill:correct`, or "user". The artifact points at the branch, commit, or `units.json` entry, or is `upstream:<owner>` for a flag. The state is one of `open`, `awaiting-user`, `implemented` (landed, effect not yet seen), `effective`, `unproven`, or `pending` (window too short to judge). A drop keeps only its group and one-line reason, with no id. For `investigate`, the deliverable is the question and evidence step. Effort goes inside the deliverable field, never as a seventh field: `kaizen-prep.py` parses exactly six.
 
 Then act on each outcome:
 
