@@ -33,7 +33,7 @@ Model names live only in `models.conf`, `models.d/*.conf`, and the pi settings o
 
 ## Verification
 
-Give every `coder` run a `gate` (the test command, typecheck, or the repo's verify skill). The gate result is the verification. The agent's summary is a report. A gate that did not run is not a pass. Where a pstack skill or playbook asks for a failing-test commit before the fix, the child instead shows the test failing with the fix reverted; every commit passes the gate.
+Give every `coder` run a `gate` (the test command, typecheck, or the repo's verify skill). The gate result is the verification. The agent's summary is a report. A gate that did not run is not a pass, and tests it skipped for a missing build tag or env var did not run. Where a pstack skill or playbook asks for a failing-test commit before the fix, the child instead shows the test failing with the fix reverted; every commit passes the gate.
 
 ## Long commands
 
