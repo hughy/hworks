@@ -581,6 +581,24 @@ class OrchestrateTest(unittest.TestCase):
                 self.g("set", "A", "queued", "--reason", "rebriefed")
                 self.assertEqual(self.next(), ["A"])
 
+    def test_coder_timeout_and_failure_park_at_the_attempt_cap(self):
+        for ws in ("coder-timeout", "coder-failed"):
+            with self.subTest(ws):
+                self.setUp()
+                self.init("--max-attempts", "1")
+                self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+                self.started("A")
+                head = self.commit("A")
+
+                def fail(v):
+                    v.update(state=ws, head="0" * 40, gateBy=None,
+                             failure={"key": "code-1", "runId": "child-1", "error": "boom"})
+                self.g("record", "A", "1", self.workflow("unresolved", "wf-1", head, fail))
+                r = self.rows()["A"]
+                self.assertEqual(r["state"], "parked")
+                self.assertIn("%s at attempt 1 of 1" % ws, r["reason"])
+                self.assertEqual(self.next(), [])
+
     def test_reconcile_waits_and_never_relaunches_beside_a_live_child(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])

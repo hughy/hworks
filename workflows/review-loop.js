@@ -64,7 +64,7 @@ const gateUnreported = (r) => !r.ok && (RUNNER_EXIT.test(failureText(r)) || GATE
 const failureText = (r) => String((r && (r.error || r.output)) || "unknown failure");
 // The run hit its own deadline, so its work may be partial; a retry with the same brief would hit it again.
 const RUN_TIMEOUT = /Subagent timed out after \d+ms\./;
-const runTimedOut = (r) => !r.ok && (r.timedOut === true || RUN_TIMEOUT.test(String(r.error || "") + "\n" + String(r.output || "")));
+const runTimedOut = (r) => !r.ok && (r.timedOut === true || RUN_TIMEOUT.test(failureText(r)));
 const GATE_FAILED = /Acceptance verification 'gate' failed/;
 
 const commitRules =

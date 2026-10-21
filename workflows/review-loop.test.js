@@ -397,6 +397,16 @@ test("a run timeout is recognized with prefix text, in output only, or as timedO
   }
 });
 
+test("a host gate timeout still goes to reviewers when the coder output mentions a run timeout", async () => {
+  const { out, calls } = await run({
+    "code-1": { ok: false, error: "Acceptance verification 'gate' timed-out.", output: "Fixed detection of " + runTimeout },
+    "review-1-1": { ok: true, structuredOutput: { verdict: "ok", findings: [], gate: "passed", head: "a1" } },
+  });
+  assert.equal(out.gateBy, "reviewers");
+  assert.equal(out.failure, null);
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1"]);
+});
+
 test("a retry timeout after a real gate failure is coder-timeout, not gate-failed", async () => {
   const { out, calls } = await run({ "code-1": realGateFailure, "code-1-retry": { ok: false, error: runTimeout } });
   assert.equal(out.state, "coder-timeout");

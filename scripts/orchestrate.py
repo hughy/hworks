@@ -682,7 +682,7 @@ def cmd_record(store, a):
                     reason = freshness(cfg, row, head)
                 if reason:
                     state = "stale"
-        if state in RETRYABLE and row["attempt"] >= cfg["max_attempts"]:
+        if (state in RETRYABLE or state in CODER_FAILED) and row["attempt"] >= cfg["max_attempts"]:
             reason = "%s at attempt %d of %d: %s" % (state, row["attempt"], cfg["max_attempts"], reason)
             state = "parked"
         receipt.update(file=spath, unit_state=state, reason=reason,
