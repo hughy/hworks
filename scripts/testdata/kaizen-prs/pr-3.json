@@ -1,0 +1,9 @@
+{"number": 3, "title": "Big feature", "state": "OPEN", "isDraft": true,
+ "createdAt": "2026-10-04T10:00:00Z", "mergedAt": null, "closedAt": null,
+ "additions": 130, "deletions": 0, "author": {"login": "bot"},
+ "files": [{"path": "app/feature.ts", "additions": 100, "deletions": 0},
+           {"path": "app/feature.test.ts", "additions": 30, "deletions": 0}],
+ "commits": [{"committedDate": "2026-10-04T09:00:00Z"}, {"committedDate": "2026-10-04T11:00:00Z"}],
+ "reviews": [], "comments": [],
+ "statusCheckRollup": [{"__typename": "CheckRun", "name": "build", "status": "IN_PROGRESS", "conclusion": "",
+    "startedAt": "2026-10-04T11:00:00Z", "completedAt": null}]}

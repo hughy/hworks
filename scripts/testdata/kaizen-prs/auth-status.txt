@@ -1,0 +1,10 @@
+github.com
+  ✓ Logged in to github.com account octo (keyring)
+  - Active account: true
+  - Git operations protocol: https
+  - Token: gho_************************************
+
+git.example.com
+  X Failed to log in to git.example.com account octo (GH_TOKEN)
+  - Active account: true
+  - The token in GH_TOKEN is invalid.
