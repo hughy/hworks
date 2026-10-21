@@ -5,10 +5,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "kaizen-prep.py")
+FAKE_GH = os.path.join(HERE, "testdata", "kaizen-prs", "fake-gh.sh")
 
 spec = importlib.util.spec_from_file_location("kaizen_prep", SCRIPT)
 kp = importlib.util.module_from_spec(spec)
@@ -33,8 +36,9 @@ Window 14 days; thresholds 5/3/10.
 """
 
 
-def run(*args):
-    return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True)
+def run(*args, **env):
+    env = {**os.environ, "HWORKS_GH": FAKE_GH, "HWORKS_PI_SESSIONS": os.devnull, **env}
+    return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True, env=env)
 
 
 class Thresholds(unittest.TestCase):
@@ -79,8 +83,9 @@ class CarryOver(unittest.TestCase):
         self.assertEqual(out["previous_file"], self.path)
         self.assertEqual(out["counts"]["drop"], 2)
         self.assertEqual(len(out["unparsed"]), 4)
-        self.assertEqual(len(out["commands"]), 4)
+        self.assertEqual(len(out["commands"]), 5)
         self.assertIn("--min-sessions 10", out["commands"][0])
+        self.assertIn('kaizen-prs.py --since 28d --top 40 > "$TASK_DIR/prs-', out["commands"][2])
         self.assertEqual(json.loads(json.dumps(out)), out)
 
     def test_text_lists_unparsed(self):
@@ -101,6 +106,55 @@ class CarryOver(unittest.TestCase):
         p = run("--task-dir", empty)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("Previous findings: none", p.stdout)
+
+
+class Sources(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d)
+
+    def touch(self, rel, days_ago):
+        path = os.path.join(self.d, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+        t = time.time() - days_ago * 86400
+        os.utime(path, (t, t))
+        return datetime.fromtimestamp(t, timezone.utc).date().isoformat()
+
+    def test_session_counts_in_window(self):
+        newest = self.touch("p/a.jsonl", 1)
+        oldest = self.touch("p/b.jsonl", 5)
+        self.touch("p/b/0b8e3c2a-1111-2222-3333-444455556666/run-0/session.jsonl", 2)
+        self.touch("p/old.jsonl", 30)
+        self.touch("subagent-artifacts/x.jsonl", 1)
+        got = kp.session_files(self.d, kp.ks.parse_since("14d"))
+        self.assertEqual(got, {"main": 2, "child": 1, "oldest": oldest, "newest": newest})
+
+    def test_gh_auth_parse(self):
+        with open(os.path.join(HERE, "testdata", "kaizen-prs", "auth-status.txt")) as f:
+            hosts = kp.parse_gh_auth(f.read())
+        self.assertEqual(hosts, {"github.com": "logged in",
+                                 "git.example.com": "failed: The token in GH_TOKEN is invalid."})
+
+    def test_text_sources_block(self):
+        self.touch("p/a.jsonl", 1)
+        p = run("--since", "14d", "--task-dir", self.d, HWORKS_PI_SESSIONS=self.d,
+                HWORKS_HARNESS_AUDIT_LOG=os.path.join(self.d, "audit.log"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn(f"  sessions: found ({self.d})\n    jsonl modified in window: 1 main, 0 child", p.stdout)
+        self.assertIn("  harness audit log: MISSING", p.stdout)
+        self.assertIn("  gh git.example.com: failed: The token in GH_TOKEN is invalid.", p.stdout)
+        self.assertIn("name it at the top of the findings file", p.stdout)
+        self.assertLess(p.stdout.index("Sources:"), p.stdout.index("Reporters"))
+
+    def test_no_gh_and_missing_gh(self):
+        p = run("--task-dir", self.d, "--no-gh", "--json", HWORKS_GH="/nonexistent/gh")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(p.stdout)["sources"]["gh"], {"checked": False})
+        self.assertIn("gh: not checked (--no-gh)", run("--task-dir", self.d, "--no-gh").stdout)
+        p = run("--task-dir", self.d, "--json", HWORKS_GH="/nonexistent/gh")
+        self.assertEqual(json.loads(p.stdout)["sources"]["gh"],
+                         {"checked": True, "hosts": {}, "not_configured": "/nonexistent/gh: not found"})
 
 
 if __name__ == "__main__":
