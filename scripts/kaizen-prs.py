@@ -93,6 +93,7 @@ GH_PR = re.compile(r"\bgh\s+pr\s+[a-z]")
 GIT_PUSH = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?push\b([^;&|\n]*)")
 REF_UPDATE = re.compile(r"^\s*[+*]?\s*(?:[0-9a-f]+\.\.\.?[0-9a-f]+|\[new branch\])\s+\S+\s+->\s+(\S+)", re.M)
 DEFAULT_BRANCHES = {"main", "master", "trunk"}
+PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 FIELDS = ("number,title,state,isDraft,createdAt,mergedAt,closedAt,additions,deletions,files,commits,"
           "reviews,comments,statusCheckRollup,author")
 GH_TIMEOUT = 60
@@ -122,8 +123,13 @@ def text_of(content):
 
 def push_branches(args):
     """Branches named by the refspecs in the text after `git push`: the destination of each
-    refspec after the remote, with HEAD and options dropped."""
-    words = [w for w in args.split() if not w.startswith("-")]
+    refspec after the remote, with HEAD and options (and their separate values) dropped."""
+    words, it = [], iter(args.split())
+    for w in it:
+        if w in PUSH_VALUE_OPTS:
+            next(it, None)
+        elif not w.startswith("-"):
+            words.append(w)
     out = []
     for w in words[1:]:
         dst = w.lstrip("+").split(":")[-1].removeprefix("refs/heads/")

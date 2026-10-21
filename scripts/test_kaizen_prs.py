@@ -169,7 +169,9 @@ class KaizenPrs(unittest.TestCase):
             pushed("git push origin HEAD:refs/heads/trunk", "Everything up-to-date"),
             pushed("git push origin HEAD:topic && echo ok", "error: failed to push some refs"),
             pushed("git -C repo push", "fatal: no upstream"),
-        ], [False, True, True, False, True, True])
+            pushed("git push -q -o ci.skip origin main", ""),
+            pushed("git push --push-option ci.skip origin feat", ""),
+        ], [False, True, True, False, True, True, False, True])
 
     def test_closed_draft_is_not_draft(self):
         gh_dir = os.path.join(self.d, "gh")
