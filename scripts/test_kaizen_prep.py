@@ -143,6 +143,7 @@ class Sources(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn(f"  sessions: found ({self.d})\n    jsonl modified in window: 1 main, 0 child", p.stdout)
         self.assertIn("  harness audit log: MISSING", p.stdout)
+        self.assertIn("  gh github.com: logged in\n", p.stdout)
         self.assertIn("  gh git.example.com: failed: The token in GH_TOKEN is invalid.", p.stdout)
         self.assertIn("name it at the top of the findings file", p.stdout)
         self.assertLess(p.stdout.index("Sources:"), p.stdout.index("Reporters"))

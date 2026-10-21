@@ -8,7 +8,7 @@ Window: --since as the other kaizen reporters take it (default 14d), printed in 
 Sources: whether the sessions dir and tasks dir (as kaizen-sessions.py resolves them) and
 HWORKS_HARNESS_AUDIT_LOG (when set) exist; for the sessions dir, the *.jsonl files modified in
 the window, main and child, with the oldest and newest modification dates. Then each host in
-`gh auth status` (binary from HWORKS_GH, timeout GH_TIMEOUT seconds) as logged in, failed with
+`gh auth status --active` (binary from HWORKS_GH, timeout GH_TIMEOUT seconds) as logged in, failed with
 its reason, or gh as not configured. --no-gh skips the gh check. adapters/local/*.env is read
 first; values already in the environment win.
 Thresholds: group 5, blocker class / mistake / guidance gap 3, new tool 10, each set for 14 days,
@@ -84,7 +84,7 @@ def session_files(root, since):
 
 
 def parse_gh_auth(text):
-    """{host: "logged in" | "failed: <reason>"} from `gh auth status` output."""
+    """{host: "logged in" | "failed: <reason>"} from `gh auth status --active` output."""
     hosts, host, failed = {}, None, False
     for line in text.splitlines():
         if line.strip() and not line[0].isspace():
@@ -107,11 +107,11 @@ def parse_gh_auth(text):
 def gh_hosts():
     gh = os.environ.get("HWORKS_GH") or "gh"
     try:
-        p = subprocess.run([gh, "auth", "status"], capture_output=True, text=True, timeout=GH_TIMEOUT)
+        p = subprocess.run([gh, "auth", "status", "--active"], capture_output=True, text=True, timeout=GH_TIMEOUT)
     except FileNotFoundError:
         return {}, f"{gh}: not found"
     except subprocess.TimeoutExpired:
-        return {}, f"{gh} auth status: timed out after {GH_TIMEOUT}s"
+        return {}, f"{gh} auth status --active: timed out after {GH_TIMEOUT}s"
     out = p.stdout + p.stderr
     hosts = parse_gh_auth(out)
     first = next((x.strip() for x in out.splitlines() if x.strip()), f"exit {p.returncode}")

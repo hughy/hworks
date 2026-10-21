@@ -3,7 +3,7 @@
 dir=$(dirname "$0")
 case "$1 $2" in
 "auth status")
-  cat "$dir/auth-status.txt"
+  if [ "$3" = --active ]; then cat "$dir/auth-status.txt"; else cat "$dir/auth-status-all.txt"; fi
   exit 1
   ;;
 "pr view")
