@@ -42,7 +42,7 @@ What the output does not explain:
 
 - `[exists: <name>]` in `kaizen-sessions.py` means the shape names a script or skill in hworks or in `HWORKS_TOOL_DIRS`. Set that to the companion repo's tool dirs, or tools there go unflagged. Example session paths are relative to the pi sessions dir.
 - Every `kaizen-tokens.py` and `kaizen-setup.py` row names an owner: `hworks`, `local` (the operator's files outside hworks, such as the companion repo or a project's `AGENTS.md`), or `upstream:<name>`. Set `HWORKS_OWNER_MAP` to name the harness's own sections and tools, or they show as `upstream:unattributed`. Token-turns are a part's size times the turns that carried it, which is what it costs in cache reads.
-- `kaizen-prs.py` links a session to a PR only through a `gh pr create` result, a `gh pr` command naming the URL, or a tool in `HWORKS_PR_TOOLS`; PRs opened any other way are missing, and the push-without-link count in `coverage` sizes the gap. Its transcript `time` measures when entries were written, not wall-clock work.
+- `kaizen-prs.py` links a session to a PR only through a `gh pr create` result, a `gh pr` command naming the URL, or a tool in `HWORKS_PR_TOOLS`; PRs opened any other way are missing, and the `coverage` count of sessions that pushed a branch other than `main`, `master`, or `trunk` with no link sizes the gap. Its transcript `time` measures when entries were written, not wall-clock work.
 - `kaizen-setup.py --cwd <project>` adds a project's `.pi/` and `.agents/` dirs.
 
 ## Accuracy contract

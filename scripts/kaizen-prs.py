@@ -20,8 +20,12 @@ skips gh and reports links only.
 
 Sections:
   coverage  sessions scanned (main, child), sessions with a link, links by role, PRs found,
-            PRs fetched and failed per host with the error, sessions that ran `git push` with
-            no link (a gap in PR linking, not a finding), and every missing source.
+            PRs fetched and failed per host with the error, sessions with no link that pushed
+            a branch other than main, master, or trunk (a gap in PR linking, not a finding),
+            and every missing source. A push's branches are the destinations in its result's
+            ref update lines (`<old>..<new>  <src> -> <dst>`, `* [new branch]  <src> -> <dst>`);
+            with no such line, the refspecs in its command; a push naming no branch either
+            counts.
   outcomes  merged, closed unmerged, open, and draft (a subset of open) counts. One row per
             PR, worst rework first, cut by --top: state, opening session, other linking
             sessions, commits after the PR was created, changes-requested reviews, non-empty
@@ -41,6 +45,10 @@ Sections:
             ends it: model (an assistant message), tool by tool name (a tool result), human
             (a user message the operator typed), harness (a user message matching
             HWORKS_OPERATOR_SKIP, or any other role). A gap over IDLE_MINUTES is idle instead.
+            These buckets sum to the session's wall time. Per-tool latency (count, total,
+            median seconds) pairs each tool result with its call by toolCallId and runs from
+            the call's assistant message to the result. Latencies of batched or parallel calls
+            overlap, so they do not sum to wall time.
             From gh: median hours from creation to first review, creation to merge, last
             commit to merge, and the final CI run's span (latest completedAt minus earliest
             startedAt in the rollup).
@@ -82,7 +90,9 @@ kt = _load("kaizen_tokens", "kaizen-tokens.py")
 
 PR_URL = re.compile(r"https://([\w.-]+)/([\w.-]+)/([\w.-]+)/pull/(\d+)")
 GH_PR = re.compile(r"\bgh\s+pr\s+[a-z]")
-GIT_PUSH = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?push\b")
+GIT_PUSH = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?push\b([^;&|\n]*)")
+REF_UPDATE = re.compile(r"^\s*[+*]?\s*(?:[0-9a-f]+\.\.\.?[0-9a-f]+|\[new branch\])\s+\S+\s+->\s+(\S+)", re.M)
+DEFAULT_BRANCHES = {"main", "master", "trunk"}
 FIELDS = ("number,title,state,isDraft,createdAt,mergedAt,closedAt,additions,deletions,files,commits,"
           "reviews,comments,statusCheckRollup,author")
 GH_TIMEOUT = 60
@@ -110,11 +120,30 @@ def text_of(content):
     return ""
 
 
+def push_branches(args):
+    """Branches named by the refspecs in the text after `git push`: the destination of each
+    refspec after the remote, with HEAD and options dropped."""
+    words = [w for w in args.split() if not w.startswith("-")]
+    out = []
+    for w in words[1:]:
+        dst = w.lstrip("+").split(":")[-1].removeprefix("refs/heads/")
+        if dst and dst != "HEAD" and not dst.startswith("refs/"):
+            out.append(dst)
+    return out
+
+
+def pushed_branch(args, result):
+    """Whether one push updated, or names, a branch other than a default one (see coverage)."""
+    branches = [b.removeprefix("refs/heads/") for b in REF_UPDATE.findall(result)] or push_branches(args)
+    return not branches or any(b not in DEFAULT_BRANCHES for b in branches)
+
+
 def read_session(path, since, pr_tools, notes):
-    """The session's cwd, its messages in the window (ts, role, tool name, operator flag set later),
-    its links as {(url, role): ts}, and whether it ran git push."""
+    """The session's cwd, its messages in the window (ts, role, tool name, latency for a tool
+    result, operator text), its links as {(url, role): ts}, and whether it pushed a non-default
+    branch."""
     s = {"cwd": None, "messages": [], "links": {}, "pushed": False}
-    creates = {}
+    creates, calls, pushes = {}, {}, {}
     bad = 0
     try:
         f = open(path, errors="replace")
@@ -153,11 +182,16 @@ def read_session(path, since, pr_tools, notes):
                     args = c.get("arguments") if isinstance(c.get("arguments"), dict) else {}
                     name = c.get("name")
                     cmd = args.get("command") if isinstance(args.get("command"), str) else ""
+                    if c.get("id"):
+                        calls[c["id"]] = ts
                     if name == "bash":
                         if "gh pr create" in cmd and c.get("id"):
                             creates[c["id"]] = True
-                        if GIT_PUSH.search(cmd):
-                            s["pushed"] = True
+                        push_args = GIT_PUSH.findall(cmd)
+                        if push_args and c.get("id"):
+                            pushes[c["id"]] = push_args
+                        elif push_args:
+                            s["pushed"] |= any(pushed_branch(a, "") for a in push_args)
                         if GH_PR.search(cmd):
                             for u in pr_urls(cmd):
                                 link(u, "touched")
@@ -165,12 +199,19 @@ def read_session(path, since, pr_tools, notes):
                         for u in pr_urls(json.dumps(args)):
                             link(u, "touched")
             elif role == "toolResult":
-                if creates.pop(m.get("toolCallId"), False):
+                cid = m.get("toolCallId")
+                if cid in calls:
+                    msg["latency"] = (ts - calls.pop(cid)).total_seconds()
+                if cid in pushes:
+                    text = text_of(m.get("content"))
+                    s["pushed"] |= any(pushed_branch(a, text) for a in pushes.pop(cid))
+                if creates.pop(cid, False):
                     urls = pr_urls(text_of(m.get("content")))
                     if urls:
                         link(urls[0], "opened")
             elif role == "user":
                 msg["text"] = text_of(m.get("content"))
+    s["pushed"] |= any(pushed_branch(a, "") for ps in pushes.values() for a in ps)
     if bad:
         notes.append(f"{path}: skipped {bad} malformed line(s)")
     return s
@@ -180,6 +221,10 @@ def time_split(messages, skip):
     """Seconds by bucket for one session's messages (see the time section in the docstring)."""
     out = Counter()
     tools = Counter()
+    latency = defaultdict(list)
+    for m in messages:
+        if "latency" in m:
+            latency[m["tool"]].append(m["latency"])
     for prev, cur in zip(messages, messages[1:]):
         gap = (cur["ts"] - prev["ts"]).total_seconds()
         if gap <= 0:
@@ -196,7 +241,7 @@ def time_split(messages, skip):
         else:
             out["harness"] += gap
     return {"model": out["model"], "tool": out["tool"], "tools": dict(tools), "human": out["human"],
-            "harness": out["harness"], "idle": out["idle"]}
+            "harness": out["harness"], "idle": out["idle"], "latency": dict(latency)}
 
 
 def add_split(a, b):
@@ -205,7 +250,18 @@ def add_split(a, b):
     tools = a.setdefault("tools", {})
     for k, v in b["tools"].items():
         tools[k] = tools.get(k, 0) + v
+    lat = a.setdefault("latency", {})
+    for k, v in b["latency"].items():
+        lat[k] = lat.get(k, []) + v
     return a
+
+
+def summarize_latency(sp):
+    """Replace a split's raw per-tool latencies with count, total, and median seconds."""
+    if sp:
+        sp["latency"] = {k: {"count": len(v), "total": sum(v), "median": median(v)}
+                         for k, v in sorted(sp["latency"].items())}
+    return sp
 
 
 def fetch(url, gh):
@@ -375,7 +431,8 @@ def analyze(src, since, top=15, cwd_match=(), fetch_prs=True, gh="gh", pr_tools=
     unfetched.sort(key=lambda r: r["url"])
     states = Counter(r["state"] for r in rows)
     outcomes = {"merged": states["MERGED"], "closed_unmerged": states["CLOSED"], "open": states["OPEN"],
-                "draft": sum(1 for r in rows if r["draft"]), "rows": rows[:top], "unfetched": unfetched[:top]}
+                "draft": sum(1 for r in rows if r["draft"] and r["state"] == "OPEN"),
+                "rows": rows[:top], "unfetched": unfetched[:top]}
 
     tests = [{"url": url, **test_share(d.get("files"))} for url, d in data.items()]
     tests.sort(key=lambda r: (-len(r["leads"]), -r["test_add"], r["url"]))
@@ -385,9 +442,11 @@ def analyze(src, since, top=15, cwd_match=(), fetch_prs=True, gh="gh", pr_tools=
         sp = time_split(s["messages"], skip)
         if s["kind"] == "main":
             add_split(total_main, sp)
-            per_session.append({"session": rel, **sp})
+            per_session.append({"session": rel, **summarize_latency(dict(sp))})
         else:
             add_split(total_child, sp)
+    summarize_latency(total_main)
+    summarize_latency(total_child)
     per_session.sort(key=lambda r: (-(r["model"] + r["tool"] + r["human"] + r["harness"]), r["session"]))
     time = {
         "transcripts": {"main_total": total_main, "child_total": total_child, "sessions": per_session[:top]},
@@ -424,7 +483,8 @@ def print_text(r, since):
     for host, f in c["fetch"].items() if isinstance(c["fetch"], dict) else ():
         err = f"  error: {f['error']}" if f["error"] else ""
         print(f"  {host}: {f['fetched']} fetched, {f['failed']} failed{err}")
-    print(f"  ran git push with no PR link (a linking gap, not a finding): {len(c['pushed_without_link'])}")
+    print("  pushed a branch other than main/master/trunk with no PR link (a linking gap, not a finding): "
+          f"{len(c['pushed_without_link'])}")
     for s in c["pushed_without_link"]:
         print(f"    {s}")
 
@@ -463,6 +523,9 @@ def print_text(r, since):
         tools = ", ".join(f"{k} {h(v)}" for k, v in sorted(sp["tools"].items(), key=lambda kv: -kv[1]))
         print(f"  {label}: model {h(sp['model'])}, tool {h(sp['tool'])}, human {h(sp['human'])}, "
               f"harness {h(sp['harness'])}, idle {h(sp['idle'])}" + (f"  [{tools}]" if tools else ""))
+        if sp["latency"]:
+            print("    tool latency (overlaps for batched calls): " + ", ".join(
+                f"{k} {v['count']}x total {h(v['total'])} median {v['median']}s" for k, v in sp["latency"].items()))
 
     line("main total", tm["transcripts"]["main_total"])
     line("child total", tm["transcripts"]["child_total"])

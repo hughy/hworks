@@ -61,8 +61,8 @@ SESSIONS = {
         result("10:00:25", "k2", "track_pr"),
     ],
     "p1.jsonl": [
-        call("10:00:00", "c1", "bash", {"command": "git push origin main"}),
-        result("10:00:03", "c1", "bash"),
+        call("10:00:00", "c1", "bash", {"command": "git push origin feat"}),
+        result("10:00:03", "c1", "bash", " * [new branch]      feat -> feat"),
     ],
     "s1.jsonl": [
         call("10:00:00", "c1", "bash", {"command": "gh pr create --fill"}),
@@ -128,13 +128,60 @@ class KaizenPrs(unittest.TestCase):
         t = self.analyze()["time"]
         main = t["transcripts"]["main_total"]
         self.assertEqual(main, {"model": 80, "tool": 83, "tools": {"bash": 78, "read": 5}, "human": 660,
-                                "harness": 300, "idle": 2865})
+                                "harness": 300, "idle": 2865,
+                                "latency": {"bash": {"count": 4, "total": 78, "median": 7.5},
+                                            "read": {"count": 1, "total": 5, "median": 5}}})
         self.assertEqual(t["transcripts"]["child_total"],
                          {"model": 0, "tool": 25, "tools": {"bash": 20, "track_pr": 5}, "human": 0,
-                          "harness": 0, "idle": 0})
+                          "harness": 0, "idle": 0,
+                          "latency": {"bash": {"count": 1, "total": 20, "median": 20},
+                                      "track_pr": {"count": 1, "total": 5, "median": 5}}})
         self.assertEqual(t["gh"], {"median_hours_to_first_review": 1.5, "median_hours_to_close": 13.0,
                                    "median_hours_last_commit_to_merge": 2.5, "median_ci_span_hours": 0.75,
                                    "prs": 3})
+
+    def write(self, rel, entries):
+        path = os.path.join(self.d, rel)
+        with open(path, "w") as f:
+            f.write("".join(json.dumps(e) + "\n" for e in entries))
+        return kp.read_session(path, SINCE, set(), [])
+
+    def test_batched_calls_latency(self):
+        batch = {"type": "message", "timestamp": "2026-10-01T10:00:00Z",
+                 "message": {"role": "assistant", "content": [
+                     {"type": "toolCall", "id": "a", "name": "read", "arguments": {"path": "x"}},
+                     {"type": "toolCall", "id": "b", "name": "bash", "arguments": {"command": "make"}}]}}
+        s = self.write("batch.jsonl", [batch, result("10:00:10", "a", "read"), result("10:00:30", "b", "bash")])
+        sp = kp.summarize_latency(kp.time_split(s["messages"], None))
+        self.assertEqual(sp["latency"], {"bash": {"count": 1, "total": 30, "median": 30},
+                                         "read": {"count": 1, "total": 10, "median": 10}})
+        self.assertEqual(sp["tools"], {"read": 10, "bash": 20})
+        self.assertEqual(sum(sp[k] for k in ("model", "tool", "human", "harness", "idle")), 30)
+
+    def test_push_to_default_branch_is_not_a_gap(self):
+        def pushed(cmd, out):
+            return self.write("push.jsonl", [call("10:00:00", "p", "bash", {"command": cmd}),
+                                             result("10:00:01", "p", "bash", out)])["pushed"]
+        self.assertEqual([
+            pushed("git push", "To github.com:a/b.git\n   1a2b3c4..5d6e7f8  main -> main"),
+            pushed("git push", "To github.com:a/b.git\n   1a2b3c4..5d6e7f8  feat -> feat"),
+            pushed("git push -u origin x", "To github.com:a/b.git\n * [new branch]      x -> x"),
+            pushed("git push origin HEAD:refs/heads/trunk", "Everything up-to-date"),
+            pushed("git push origin HEAD:topic && echo ok", "error: failed to push some refs"),
+            pushed("git -C repo push", "fatal: no upstream"),
+        ], [False, True, True, False, True, True])
+
+    def test_closed_draft_is_not_draft(self):
+        gh_dir = os.path.join(self.d, "gh")
+        shutil.copytree(os.path.dirname(FAKE_GH), gh_dir)
+        with open(os.path.join(gh_dir, "pr-2.json")) as f:
+            pr2 = json.load(f)
+        with open(os.path.join(gh_dir, "pr-2.json"), "w") as f:
+            json.dump({**pr2, "state": "CLOSED", "isDraft": True}, f)
+        report, _ = kp.analyze({"sessions": self.d}, SINCE, gh=os.path.join(gh_dir, "fake-gh.sh"),
+                               pr_tools={"track_pr"})
+        o = report["outcomes"]
+        self.assertEqual((o["merged"], o["closed_unmerged"], o["open"], o["draft"]), (1, 1, 1, 1))
 
     def test_cli_no_fetch(self):
         env = {**os.environ, "HWORKS_PI_SESSIONS": self.d, "HWORKS_GH": "/nonexistent/gh",
@@ -154,6 +201,8 @@ class KaizenPrs(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("git.example.com: 0 fetched, 1 failed  error: error connecting to git.example.com", p.stdout)
         self.assertIn(f"{PR1}  [MERGED] rework 4", p.stdout)
+        self.assertIn("    tool latency (overlaps for batched calls): bash 4x total 0.0h median 7.5s, "
+                      "read 1x total 0.0h median 5.0s\n", p.stdout)
         env["HWORKS_PI_SESSIONS"] = os.path.join(self.d, "nope")
         p = subprocess.run([sys.executable, SCRIPT], capture_output=True, text=True, env=env)
         self.assertEqual(p.returncode, 0, p.stderr)
