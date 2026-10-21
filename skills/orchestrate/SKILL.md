@@ -122,7 +122,7 @@ When the predicate holds, or nothing is launchable:
 6. If any unit is `pr-open`, keep tracking the PRs here and print this line in the report for the user to run, so each later CI or review wake reads a short summary instead of every unit's history:
 
    ```text
-   /compact Keep only what the open PRs need: each PR's number, URL, branch, base, worktree, and gate, the gh stack number, the orchestrate store path, and open review threads and failing checks. Drop unit histories.
+   /compact Keep only what the open PRs need: each PR's number, URL, branch, base, worktree, and gate, the orchestrate store path, and open review threads and failing checks. Drop unit histories.
    ```
 7. Questions evidence could not settle go last, with options and a recommendation.
 

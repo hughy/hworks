@@ -18,7 +18,7 @@ Review runs once per commit. A clean review-loop with at least one reviewer, a p
 3. Fix verified defects through review-loop, which reviews and records the fix. A fix committed any other way needs another `args` pass.
 4. Once nothing the review raised is open, run the `record` command `args` printed on stderr. It records the head the reviewers read, so commits that fix findings stay uncovered until a review reads them.
 
-A rebase keeps coverage only when it replays a byte-identical diff, as after `gh stack rebase` onto a squash-merged parent. Any trunk change to a file the branch touches sends the branch back to review. `skills/hughy-router/SKILL.md` owns when this runs.
+A rebase or base merge keeps coverage only when it replays a byte-identical diff, as after merging trunk once a squash-merged parent has landed. Any trunk change to a file the branch touches sends the branch back to review. `skills/hughy-router/SKILL.md` owns when this runs.
 
 ## Steps
 

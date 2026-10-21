@@ -22,9 +22,9 @@ args    prints the args JSON for workflows/review-fanout.js over the uncovered c
         record command on stderr. Exit 3 when there is nothing to review: quick effort, or HEAD
         covered.
 
-The diff hash includes full blob ids, so a rebase keeps coverage only when every file the
-branch touches is byte-identical before and after its change, as after `gh stack rebase` onto a
-squash-merged parent. Any trunk change to a touched file sends the branch back to review. For a
+The diff hash includes full blob ids, so a rebase or merge of the base keeps coverage only when every file the
+branch touches is byte-identical before and after its change, as after merging trunk once a squash-merged
+parent lands. Any trunk change to a touched file sends the branch back to review. For a
 stacked PR, pass the PR's base branch as <trunk>: each branch has its own task dir and ledger.
 Every git failure is an error (exit 2), never coverage.
 """

@@ -66,12 +66,12 @@ Review the branch's changeset and what it breaks. Do not expand to unrelated cod
 - When opening a PR, always open it as a draft (`gh pr create --draft`).
 - Find the repo's PR template with `~/dev/hworks/scripts/pr-template.sh`, which matches any letter case and the `docs/`, `.github/`, and `PULL_REQUEST_TEMPLATE/` locations. Never guess the filename. Fill in the template it prints; with none, say so in the reply.
 - Before creating a PR or pushing to a branch with an open PR, run the repo's checks on the head you will push and review the unpushed diff. For every name the diff deletes or renames, `git grep` the old name and fix each hit. The review covers what the diff breaks outside itself, not only the diff.
-- Stack dependent PRs with `gh stack` (the `github/gh-stack` extension). PRs are dependent when one needs the other's code, when both touch the same file (tests included), or when one changes behavior the other's tests assert. Before opening sibling PRs off trunk, compare their `git diff --name-only trunk...<branch>` lists and stack any overlap:
-  - Always pass `--base <trunk>` to `gh stack init`. Without it, `gh stack` uses the repo's GitHub default branch, which can differ from trunk.
-  - Create each PR with `gh pr create --draft --base <parent branch>`, then join them with `gh stack link <bottom branch> ... <top branch>`. `gh stack submit` cannot set PR bodies non-interactively.
-  - After `gh stack link`, check each PR's base with `gh pr view <n> --json baseRefName` and fix mismatches with `gh pr edit <n> --base <branch>`. `gh stack link` retargets the bottom PR to the repo default branch.
-  - Record the stack number that `gh stack link` prints. It is not stored locally, so removing the stack on GitHub needs `gh stack unstack <number>`.
-  - Rewrite stacked branches only through `gh stack rebase`, `gh stack sync`, and `gh stack push`, and only on your own stack branches. Never run raw `git rebase` or `git push --force` on them. Never run `gh stack merge`; the user lands the stack.
+- Stack dependent PRs with plain git and `gh pr create`, not `gh stack`: `gh stack` links PRs into one stack that PR-count metrics can count as a single PR. PRs are dependent when one needs the other's code, when both touch the same file (tests included), or when one changes behavior the other's tests assert. Before opening sibling PRs off trunk, compare their `git diff --name-only trunk...<branch>` lists and stack any overlap:
+  - Branch each PR from its parent's branch, and the bottom one from trunk.
+  - Create each PR with `gh pr create --draft --base <parent branch>`, the bottom one with `--base <trunk>`. Each PR is its own PR with its own description. Say in each body which PR it builds on.
+  - Check each PR's base with `gh pr view <n> --json baseRefName`, and fix a mismatch with `gh pr edit <n> --base <branch>`.
+  - Keep a stacked branch current by merging its parent into it (`git fetch`, then `git merge origin/<parent>`) and pushing without force. Never rebase or force-push a branch with an open PR, and never run `gh stack`. The user lands the stack.
+  - After a parent PR merges, retarget its child with `gh pr edit <n> --base <trunk>`, then merge `origin/<trunk>` into the child.
 
 ## Accuracy & Grounding
 
