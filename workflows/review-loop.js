@@ -62,6 +62,10 @@ const RUNNER_EXIT = /exited with code 0 before writing a result/;
 const GATE_TIMEOUT = /Acceptance verification 'gate' timed-out\./;
 const gateUnreported = (r) => !r.ok && (RUNNER_EXIT.test(failureText(r)) || GATE_TIMEOUT.test(failureText(r)));
 const failureText = (r) => String((r && (r.error || r.output)) || "unknown failure");
+// The run hit its own deadline, so its work may be partial; a retry with the same brief would hit it again.
+const RUN_TIMEOUT = /Subagent timed out after \d+ms\./;
+const runTimedOut = (r) => !r.ok && (r.timedOut === true || RUN_TIMEOUT.test(String(r.error || "") + "\n" + String(r.output || "")));
+const GATE_FAILED = /Acceptance verification 'gate' failed/;
 
 const commitRules =
   "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. " +
@@ -176,18 +180,25 @@ let blocking = [];
 let nonBlocking = [];
 let rounds = 0;
 let gateBy = null;
+let failure = null;
 
 function record(key, result) {
   runLog.push({ key, runId: result && result.runId ? result.runId : null, ok: !!(result && result.ok) });
 }
 
 function finish(finalState) {
-  return { state: finalState, rounds, head, gateBy, blocking, nonBlocking, runs: runLog };
+  return { state: finalState, rounds, head, gateBy, blocking, nonBlocking, runs: runLog, failure };
 }
 
 function progress(phase) {
   if (!hasState) return Promise.resolve();
-  return state.set(stateKey, { phase, rounds, head, gateBy, blocking: blocking.length, nonBlocking: nonBlocking.length, runs: runLog });
+  return state.set(stateKey, { phase, rounds, head, gateBy, blocking: blocking.length, nonBlocking: nonBlocking.length, runs: runLog, failure });
+}
+
+function coderFailed(finalState, key, result) {
+  failure = { key, runId: result.runId || null, error: failureText(result) };
+  gateBy = null;
+  return finalState;
 }
 
 let outcome = null;
@@ -198,16 +209,22 @@ while (outcome === null) {
   let [coded] = await launchCoder(coderKey, rounds, blocking, null);
   record(coderKey, coded);
   let gateCheck = false;
-  if (gateUnreported(coded)) {
+  if (runTimedOut(coded)) {
+    outcome = coderFailed("coder-timeout", coderKey, coded);
+    break;
+  } else if (gateUnreported(coded)) {
     gateCheck = true;
   } else if (!coded.ok) {
     const retryKey = coderKey + "-retry";
     [coded] = await launchCoder(retryKey, rounds, blocking, failureText(coded));
     record(retryKey, coded);
-    if (gateUnreported(coded)) {
+    if (runTimedOut(coded)) {
+      outcome = coderFailed("coder-timeout", retryKey, coded);
+      break;
+    } else if (gateUnreported(coded)) {
       gateCheck = true;
     } else if (!coded.ok) {
-      outcome = "gate-failed";
+      outcome = coderFailed(GATE_FAILED.test(failureText(coded)) ? "gate-failed" : "coder-failed", retryKey, coded);
       break;
     }
   }

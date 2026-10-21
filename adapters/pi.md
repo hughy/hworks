@@ -35,6 +35,10 @@ Model names live only in `models.conf`, `models.d/*.conf`, and the pi settings o
 
 Give every `coder` run a `gate` (the test command, typecheck, or the repo's verify skill). The gate result is the verification. The agent's summary is a report. A gate that did not run is not a pass. Where a pstack skill or playbook asks for a failing-test commit before the fix, the child instead shows the test failing with the fix reverted; every commit passes the gate.
 
+## Long commands
+
+A child whose tools include both `bash` and `subagent_command` can monitor a long command: `bash({ command, yieldTimeMs: 30000 })` returns a handle with its `toolCallId`, then `subagent_command({ action: "status", toolCallId: "<that exact id>", waitMs: 30000 })` reports running or the terminal state, exit, and output tail. A yielded handle is not a successful exit. The command stays owned by the child: it counts against the run's deadline, and the run fails if it ends with the command unfinished. A local adapter may name a different monitor.
+
 ## Workflow scripts
 
 `subagent({ workflow: true })` runs the one fenced block tagged exactly `js workflow` in the same reply; to run a file, such as `workflows/review-loop.js`, pass its absolute path as `workflow`. `extensions/workflow-fence.ts` runs a reply's single untagged `js` block from a temp file and blocks other untagged shapes with this redirect.

@@ -263,7 +263,7 @@ test("a gate failure that is not a timeout still retries", async () => {
     "code-1": { ok: false, error: "Acceptance verification 'gate' failed." },
     "code-1-retry": { ok: false, error: "Acceptance verification 'lint' timed-out." },
   });
-  assert.equal(out.state, "gate-failed");
+  assert.equal(out.state, "coder-failed");
   assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry"]);
 });
 
@@ -359,15 +359,68 @@ test("preRead opens the reviewer task with the pre-read command, before the diff
 
 test("two gate failures in a row stop with gate-failed", async () => {
   const { out, calls } = await run({
-    "code-1": { ok: false, error: "gate failed: 2 tests" },
-    "code-1-retry": { ok: false, error: "gate failed again" },
+    "code-1": { ok: false, error: "Acceptance verification 'gate' failed: 2 tests" },
+    "code-1-retry": { ok: false, error: "Acceptance verification 'gate' failed." },
   });
   assert.equal(out.state, "gate-failed");
+  assert.deepEqual(out.failure, { key: "code-1-retry", runId: "run-code-1-retry", error: "Acceptance verification 'gate' failed." });
   assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry"]);
-  assert.match(calls[1].task, /gate failed: 2 tests/);
+  assert.match(calls[1].task, /'gate' failed: 2 tests/);
   assert.match(calls[1].task, /git log 0123abc\.\.HEAD/);
   assert.match(calls[1].task, /make no new commit/);
   assert.deepEqual(out.runs.map((r) => r.ok), [false, false]);
+});
+
+const runTimeout = "Subagent timed out after 1800000ms.";
+const realGateFailure = { ok: false, error: "Acceptance verification 'gate' failed." };
+
+test("a coder run timeout stops with coder-timeout, without a retry or reviewers", async () => {
+  const state = fakeState();
+  const { out, calls } = await run({ "code-1": { ok: false, error: runTimeout } }, {}, state);
+  assert.equal(out.state, "coder-timeout");
+  assert.deepEqual(out.failure, { key: "code-1", runId: "run-code-1", error: runTimeout });
+  assert.equal(out.gateBy, null);
+  assert.deepEqual(calls.map((c) => c.key), ["code-1"]);
+  assert.equal(state.sets.at(-1).value.phase, "coder-timeout");
+  assert.deepEqual(state.sets.at(-1).value.failure, out.failure);
+});
+
+test("a run timeout is recognized with prefix text, in output only, or as timedOut", async () => {
+  for (const result of [
+    { ok: false, error: "Child coder failed: " + runTimeout + " (exit 1)" },
+    { ok: false, output: "partial work\n" + runTimeout },
+    { ok: false, error: "aborted", timedOut: true },
+  ]) {
+    const { out, calls } = await run({ "code-1": result });
+    assert.equal(out.state, "coder-timeout", JSON.stringify(result));
+    assert.deepEqual(calls.map((c) => c.key), ["code-1"]);
+  }
+});
+
+test("a retry timeout after a real gate failure is coder-timeout, not gate-failed", async () => {
+  const { out, calls } = await run({ "code-1": realGateFailure, "code-1-retry": { ok: false, error: runTimeout } });
+  assert.equal(out.state, "coder-timeout");
+  assert.deepEqual(out.failure, { key: "code-1-retry", runId: "run-code-1-retry", error: runTimeout });
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry"]);
+});
+
+test("a fix-round timeout stops with coder-timeout and clears the earlier gateBy", async () => {
+  const { out, calls } = await run({ "code-1": coded("a1"), "review-1-1": blocked, "fix-2": { ok: false, error: runTimeout } });
+  assert.equal(out.state, "coder-timeout");
+  assert.equal(out.gateBy, null);
+  assert.equal(out.failure.key, "fix-2");
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1", "fix-2"]);
+});
+
+test("two ordinary failures in a row stop with coder-failed", async () => {
+  const { out, calls } = await run({
+    "code-1": { ok: false, error: "model provider returned 529" },
+    "code-1-retry": { ok: false, output: "child exited with code 1" },
+  });
+  assert.equal(out.state, "coder-failed");
+  assert.equal(out.gateBy, null);
+  assert.deepEqual(out.failure, { key: "code-1-retry", runId: "run-code-1-retry", error: "child exited with code 1" });
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "code-1-retry"]);
 });
 
 test("one gate failure is retried and the loop continues", async () => {

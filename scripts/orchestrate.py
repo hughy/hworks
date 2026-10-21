@@ -31,7 +31,10 @@ DEFAULT_WORKFLOW = os.path.normpath(os.path.join(HERE, "..", "workflows", "revie
 COLUMNS = ["id", "state", "deps", "paths", "branch", "worktree", "effort", "attempt", "run",
            "start_head", "head", "claim", "reason", "reserved", "created"]
 LIVE = {"launching", "running"}
-WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "blocked"}
+WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "blocked", "coder-timeout", "coder-failed"}
+# The coder run hit its deadline or failed without a proven gate failure: retrying the same brief would likely
+# fail the same way, so these wait for an inspect, rebrief, and set queued instead of joining RETRYABLE.
+CODER_FAILED = {"coder-timeout": "timed out", "coder-failed": "failed"}
 # run-failed: the workflow ended without a return value (stopped, failed, cancelled) and no writer is left.
 RETRYABLE = {"unresolved", "gate-failed", "review-failed", "run-failed"}
 ACCEPTED_UNMERGED = {"clean", "stale", "pr-open"}
@@ -610,6 +613,7 @@ def build_receipt(cfg, row, status, args):
         "non_blocking": len(non_blocking),
         "downgraded": sum(1 for f in non_blocking if isinstance(f, dict) and f.get("downgraded")),
         "gate": args.get("gate"),
+        "failure": value.get("failure") if isinstance(value.get("failure"), dict) else None,
     }
 
 
@@ -657,12 +661,17 @@ def cmd_record(store, a):
         if ws is None:
             state, reason = "run-failed", "workflow %s without a return value" % status.get("state")
             head = branch_head(cfg, row["branch"])
+        elif ws in CODER_FAILED:
+            state, head = ws, branch_head(cfg, row["branch"])
+            f = receipt["failure"] or {}
+            reason = "coder %s (run %s) %s: %s; unreviewed head %s; inspect the run, rebrief, then set queued" % (
+                f.get("key"), f.get("runId"), CODER_FAILED[ws], f.get("error"), head[:12] or "unknown")
         else:
             state, head = ws, receipt["reviewed_head"] or ""
             reason = {
                 "clean": "",
                 "unresolved": "%d blocking findings after %d rounds" % (receipt["blocking"], receipt["rounds"]),
-                "gate-failed": "two coder runs in a row failed",
+                "gate-failed": "two coder runs in a row failed, the last by its gate",
                 "review-failed": "a reviewer failed or returned no structured findings",
                 "blocked": "the coder needs a decision; read its summary",
             }[ws]

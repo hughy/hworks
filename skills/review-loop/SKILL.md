@@ -21,7 +21,9 @@ Paths below are relative to this file: the workflow is `../../workflows/review-l
    - `clean`: the gate passed and the last review had no blocking findings. Weigh `nonBlocking`, then, when the run had at least one reviewer, record the reviewed range so later reviews skip it: `scripts/review-range.py record "$TASK_DIR" <base ref> <args base> <result head> review-loop --cwd <worktree>`, with the same `<base ref>` given to the args script. A run with 0 reviewers (quick) records nothing: the gate is not a review. Continue to the next step of the route.
    - `unresolved`: `maxRounds` review rounds (the first review counts as one) left `blocking` open. Read each finding, then fix, dismiss with a reason, or re-brief.
    - `blocked`: the coder needs a decision. Read its summary in the run output.
-   - `gate-failed`: two coder runs in a row failed, by a failing gate or a run that ended without finishing. A gate timeout or a runner exit without a result does not count; those go to the reviewers. Check `git log` for work the failed runs committed, then read the error before re-briefing.
+   - `gate-failed`: two coder runs in a row failed, the second by a failing host gate (`Acceptance verification 'gate' failed`). A gate timeout or a runner exit without a result does not count; those go to the reviewers. Check `git log` for work the failed runs committed, then read the error before re-briefing.
+   - `coder-timeout`: a coder run hit its run deadline (`Subagent timed out after <ms>ms.`). The loop stops at once, with no retry and no review, so the branch may hold partial or uncommitted work and no gate result. Inspect the run in `failure.runId` for the stalled tool, read `git status` and `git log`, then re-brief.
+   - `coder-failed`: two coder runs in a row failed and the second failure was neither a gate failure nor a timeout. Read `failure.error` and the run before re-briefing.
    - `gate-unverified`: the host gate did not report, because the coder runner exited without a result (a runtime defect with host gates longer than about five seconds) or the gate ran past `gateTimeoutMs`, and there were no reviewers to run the gate. Run the gate yourself.
    - `review-failed`: a reviewer failed or returned no structured findings. Rerun the review by hand.
 
@@ -31,4 +33,4 @@ Keep process instructions (commit counts, pacing) out of the brief's acceptance 
 
 When a coder runner exits without a result after finishing (a known runtime defect with slow host gates), or the host gate times out after `gateTimeoutMs`, the loop skips the retry and each reviewer runs the gate and reports it; `gateBy` in the result says whether the host or the reviewers ran the last gate.
 
-The result also carries `rounds`, `head` (the coder's last reported commit), and `runs` (key, runId, ok) for inspecting any child. With mission state, each round writes a progress record under the key `review-loop` or `review-loop.<label>`.
+The result also carries `rounds`, `head` (the coder's last reported commit), `runs` (key, runId, ok) for inspecting any child, and `failure` (key, runId, exact error of the coder run that ended the loop, else null; `gateBy` is then null). With mission state, each round writes a progress record under the key `review-loop` or `review-loop.<label>`.

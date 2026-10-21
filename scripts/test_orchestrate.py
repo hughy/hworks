@@ -556,6 +556,31 @@ class OrchestrateTest(unittest.TestCase):
         self.assertIn("attempt 2 of 2", r["reason"])
         self.assertEqual(self.next(), [])
 
+    def test_coder_timeout_and_failure_record_the_failed_run_and_wait_for_an_explicit_requeue(self):
+        for ws, error, why in (("coder-timeout", "Subagent timed out after 1800000ms.", "timed out"),
+                               ("coder-failed", "child exited with code 1", "failed")):
+            with self.subTest(ws):
+                self.setUp()
+                self.init()
+                self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+                self.started("A")
+                head = self.commit("A")
+
+                def fail(v):
+                    v.update(state=ws, head="0" * 40, gateBy=None,
+                             failure={"key": "fix-2", "runId": "child-9", "error": error})
+                self.g("record", "A", "1", self.workflow("unresolved", "wf-1", head, fail))
+                r = self.rows()["A"]
+                self.assertEqual(r["state"], ws)
+                self.assertEqual(r["head"], head)
+                self.assertIn("coder fix-2 (run child-9) %s: %s" % (why, error), r["reason"])
+                self.assertIn("unreviewed head %s" % head[:12], r["reason"])
+                with open(os.path.join(self.store, "receipts", "A-1.json")) as f:
+                    self.assertEqual(json.load(f)["failure"]["runId"], "child-9")
+                self.assertEqual(self.next(), [])
+                self.g("set", "A", "queued", "--reason", "rebriefed")
+                self.assertEqual(self.next(), ["A"])
+
     def test_reconcile_waits_and_never_relaunches_beside_a_live_child(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
