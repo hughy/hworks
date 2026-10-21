@@ -979,6 +979,52 @@ def cmd_set(store, a):
     print("%s: %s" % (a.id, a.state))
 
 
+# ---------- advance ----------
+
+def cmd_advance(store, a):
+    task_dir = os.path.abspath(a.task_dir)
+    with locked(store):
+        cfg = load_config(store)
+        rows = read_rows(store)
+        row = find_row(rows, a.id)
+        if row["state"] not in ("clean", "pr-open"):
+            raise Refused("%s is %s; only a clean or pr-open unit can advance" % (a.id, row["state"]))
+        dirty = tree_dirty(row["worktree"])
+        if dirty:
+            raise Refused(dirty)
+        live = branch_head(cfg, row["branch"])
+        rc, wt_head, err = git(row["worktree"], "rev-parse", "HEAD")
+        if rc != 0 or not live or wt_head != live:
+            raise Refused("worktree %s is at %s, not the head %s of branch %s"
+                          % (row["worktree"], wt_head[:12] or err, live[:12] or "(missing)", row["branch"]))
+        old = row["head"]
+        if live == old:
+            print("%s already at %s; nothing changed" % (a.id, old[:12]))
+            return 0
+        if not old or not is_ancestor(cfg, old, live):
+            raise Refused("stored head %s is not an ancestor of %s (rebase or reset); relaunch or re-review the unit"
+                          % (old[:12] or "(none)", live[:12]))
+        p = subprocess.run([sys.executable, os.path.join(HERE, "review-range.py"), "base", task_dir, old,
+                            "--cwd", row["worktree"]], capture_output=True, text=True)
+        if p.returncode == 0:
+            _, after, _ = git(row["worktree"], "rev-list", "--reverse", "--first-parent", "--ancestry-path",
+                              "%s..%s" % (p.stdout.strip(), live))
+            raise Refused("the review ledger in %s does not cover %s..%s; first uncovered commit: %s"
+                          % (task_dir, old[:12], live[:12], (after.split() or ["?"])[0][:12]))
+        if p.returncode != 3:
+            raise BadInput("review-range.py base exited %d: %s" % (p.returncode, p.stderr.strip()))
+        rpath = os.path.join(store, "receipts", "%s-%d.json" % (row["id"], row["attempt"]))
+        receipt = read_json(rpath, {})
+        receipt.setdefault("advances", []).append({
+            "from": old, "to": live, "task_dir": task_dir, "reason": a.reason,
+            "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")})
+        write_json(rpath, receipt)
+        row.update(head=live, reason=a.reason)
+        write_rows(store, rows)
+    print("%s: %s advanced %s -> %s" % (a.id, row["state"], old[:12], live[:12]))
+    return 0
+
+
 # ---------- main ----------
 
 def parser():
@@ -1035,11 +1081,18 @@ def parser():
     s.add_argument("state")
     s.add_argument("--reason", required=True)
     s.add_argument("--runs-dir", help="run dirs to check before releasing a parked attempt's reservation")
+
+    s = sub.add_parser("advance", parents=[common],
+                       help="move a clean or pr-open unit's head to its branch head when the review ledger covers the new commits")
+    s.add_argument("id")
+    s.add_argument("--task-dir", required=True, help="task dir holding the review-range.py ledger (reviewed.tsv)")
+    s.add_argument("--reason", required=True)
     return p
 
 
 COMMANDS = {"init": cmd_init, "import": cmd_import, "next": cmd_next, "launch": cmd_launch, "bind": cmd_bind,
-            "record": cmd_record, "status": cmd_status, "reconcile": cmd_reconcile, "set": cmd_set}
+            "record": cmd_record, "status": cmd_status, "reconcile": cmd_reconcile, "set": cmd_set,
+            "advance": cmd_advance}
 
 
 def main(argv=None):

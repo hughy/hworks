@@ -357,6 +357,86 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(st["state"], "stale")
         self.assertIn("uncommitted", st["reason"])
 
+    def clean_unit(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A")
+        head = self.commit("A")
+        self.g("record", "A", "1", self.workflow("clean", "wf-1", head))
+        return head
+
+    def ledger(self, base, head):
+        task = os.path.join(self.tmp, "task")
+        subprocess.run([sys.executable, os.path.join(HERE, "review-range.py"), "record", task, "main", base, head,
+                        "pre-push", "--cwd", self.wt("A")], check=True, capture_output=True)
+        return task
+
+    def store_bytes(self):
+        with open(os.path.join(self.store, "units.tsv"), "rb") as f:
+            tsv = f.read()
+        with open(os.path.join(self.store, "receipts", "A-1.json"), "rb") as f:
+            return tsv, f.read()
+
+    def assert_advanced(self, state, old, new, task):
+        st = json.loads(self.g("status", "--json"))[0]
+        self.assertEqual((st["state"], st["head"], st["reason"]), (state, new, "pre-push fix"))
+        with open(os.path.join(self.store, "receipts", "A-1.json")) as f:
+            receipt = json.load(f)
+        self.assertEqual(receipt["reviewed_head"], old)
+        [adv] = receipt["advances"]
+        self.assertEqual((adv["from"], adv["to"], adv["task_dir"], adv["reason"]), (old, new, task, "pre-push fix"))
+
+    def test_advance_refuses_uncovered_commits_and_keeps_the_store(self):
+        old = self.clean_unit()
+        mid = self.commit("A", "fix1.txt")
+        task = self.ledger(old, mid)
+        new = self.commit("A", "fix2.txt")
+        before = self.store_bytes()
+        out = self.cli("advance", "A", "--task-dir", task, "--reason", "pre-push fix")
+        self.assertEqual(out.returncode, 3, out.stderr)
+        self.assertIn("first uncovered commit: " + new[:12], out.stderr)
+        self.assertEqual(self.store_bytes(), before)
+        self.assertEqual(json.loads(self.g("status", "--json"))[0]["state"], "stale")
+
+    def test_advance_moves_a_clean_unit_to_a_covered_head(self):
+        old = self.clean_unit()
+        new = self.commit("A", "fix.txt")
+        task = self.ledger(old, new)
+        self.assertIn("advanced", self.g("advance", "A", "--task-dir", task, "--reason", "pre-push fix"))
+        self.assert_advanced("clean", old, new, task)
+        self.assertIn("nothing changed", self.g("advance", "A", "--task-dir", task, "--reason", "again"))
+
+    def test_advance_keeps_a_pr_open_unit_pr_open(self):
+        old = self.clean_unit()
+        self.g("set", "A", "pr-open", "--reason", "draft PR")
+        new = self.commit("A", "fix.txt")
+        task = self.ledger(sh(self.repo, "rev-parse", "main"), new)
+        self.g("advance", "A", "--task-dir", task, "--reason", "pre-push fix")
+        self.assert_advanced("pr-open", old, new, task)
+
+    def test_advance_refuses_dirty_tree_rewritten_branch_and_unaccepted_unit(self):
+        old = self.clean_unit()
+        new = self.commit("A", "fix.txt")
+        task = self.ledger(old, new)
+        with open(os.path.join(self.wt("A"), "stray.txt"), "w") as f:
+            f.write("x")
+        before = self.store_bytes()
+        out = self.cli("advance", "A", "--task-dir", task, "--reason", "r")
+        self.assertEqual(out.returncode, 3)
+        self.assertIn("uncommitted", out.stderr)
+        os.remove(os.path.join(self.wt("A"), "stray.txt"))
+        sh(self.wt("A"), "reset", "-q", "--hard", "HEAD~2")
+        rewritten = self.commit("A", "other.txt")
+        out = self.cli("advance", "A", "--task-dir", self.ledger(sh(self.repo, "rev-parse", "main"), rewritten),
+                       "--reason", "r")
+        self.assertEqual(out.returncode, 3)
+        self.assertIn("not an ancestor", out.stderr)
+        self.assertEqual(self.store_bytes(), before)
+        self.g("set", "A", "parked", "--reason", "hold")
+        out = self.cli("advance", "A", "--task-dir", task, "--reason", "r")
+        self.assertEqual(out.returncode, 3)
+        self.assertIn("only a clean or pr-open unit can advance", out.stderr)
+
     def test_reviewer_without_structured_output_prevents_clean(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
