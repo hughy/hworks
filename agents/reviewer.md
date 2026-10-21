@@ -25,7 +25,7 @@ Look for, in this order:
 4. Frequency of new calls. For each new or moved RPC, database or cache access, network request, or storage write, trace every caller up to what drives it (poll loop, ticker, retry, event handler, request path), for each runtime role or mode that reaches it. State it as "per <interval or event> on <role>", citing the loop and its exit condition. A call that repeats without waiting, or grows with a backlog without a bound, is a finding.
 5. Tests that cannot fail: weak assertions, mock-only, self-referential, constant pins.
 6. Measured numbers with no limiter, no error count, or no repeat runs.
-7. Reader load: layers, hidden state, one-caller wrappers the diff adds. A copy of a type, schema, or constant that another package already owns and exports is a finding: derive or import it from the owner. A rubric's preference for duplication over abstraction covers new code, not copies of owned shapes.
+7. Reader load: layers, hidden state, one-caller wrappers the diff adds. A copy of a type, schema, or constant that another package already owns and exports is a finding: derive or import it from the owner (`~/dev/hworks/skills/principle-type-system-discipline/SKILL.md`, "derive instead"). A rubric's preference for duplication over abstraction covers new code, not copies of owned shapes.
 8. Content that belongs elsewhere: a new file or large doc section that is mainly a point-in-time audit, status report, or rollout plan; a hand-kept copy of facts the code owns (line numbers, SHAs, counts); or process history (review rounds, validation logs). Name the better home, such as the PR description or the tracker. Durable docs (usage, architecture, invariants, runbooks) are fine.
 
 Rules:
