@@ -26,8 +26,9 @@ const coderSchema = {
     status: { enum: ["done", "blocked"] },
     head: { type: "string", description: "git rev-parse HEAD after your last commit" },
     summary: { type: "string" },
+    risks: { type: "array", items: { type: "string" }, description: "each open risk from your final response, [] when none" },
   },
-  required: ["status", "head", "summary"],
+  required: ["status", "head", "summary", "risks"],
 };
 
 const reviewSchema = {
@@ -49,10 +50,18 @@ const reviewSchema = {
         required: ["severity", "file", "claim", "evidence"],
       },
     },
+    checked: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { claim: { type: "string" }, evidence: { type: "string" } },
+        required: ["claim", "evidence"],
+      },
+    },
     gate: { enum: ["passed", "failed"] },
     head: { type: "string" },
   },
-  required: ["verdict", "findings"],
+  required: ["verdict", "findings", "checked"],
 };
 
 // A known runtime defect: a host gate that runs past about five seconds can outlive the async runner,
@@ -66,6 +75,8 @@ const failureText = (r) => String((r && (r.error || r.output)) || "unknown failu
 const RUN_TIMEOUT = /Subagent timed out after \d+ms\./;
 const runTimedOut = (r) => !r.ok && (r.timedOut === true || RUN_TIMEOUT.test(failureText(r)));
 const GATE_FAILED = /Acceptance verification 'gate' failed/;
+const nonEmpty = (v) => typeof v === "string" && v.trim() !== "";
+const hasEvidence = (out) => Array.isArray(out.checked) && out.checked.some((c) => c && nonEmpty(c.claim) && nonEmpty(c.evidence));
 
 const commitRules =
   "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. " +
@@ -110,7 +121,16 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
   task +=
     "Mark a finding blocking only when it is a verified defect, a gap against the brief, a broken gate, " +
     "or an added flag, knob, field, timer, guard, or tool that the brief did not require and nothing in the diff or brief justifies. " +
-    "Return verdict `blocked` if any finding is blocking, else `ok`.";
+    "Return verdict `blocked` if any finding is blocking, else `ok`. " +
+    "In `checked`, list each property of the change you verified, with `evidence`: the file:line and the test or command that proves it. " +
+    "Cover the behavior the brief asks for, the fact the change is safe because of, and each coder risk listed below. " +
+    "An `ok` verdict with an empty `checked` is not accepted.";
+  const openRisks = [...new Set(riskLog.map((r) => r.risk))];
+  if (openRisks.length) {
+    task +=
+      "\n\nThe coder reported these open risks. Verify each one: when it holds, report it as a finding (blocking only under the rule above); " +
+      "otherwise put it in `checked` with the evidence that it does not hold.\n" + JSON.stringify(openRisks, null, 2);
+  }
   if (round > 1) {
     task +=
       "\n\nThis is review round " + round + ", after a fix. Set `origin` on every finding. " +
@@ -157,27 +177,37 @@ function launchCoder(key, round, findings, gateFailure) {
   return runs.all([item]);
 }
 
+function reviewItem(round, i, task, suffix) {
+  const item = placed({
+    key: "review-" + round + "-" + i + suffix,
+    label: label + ": review " + round + "." + i + suffix,
+    agent: "reviewer",
+    task,
+    outputSchema: reviewSchema,
+  });
+  withOutput(item, "r" + round + "-reviewer-" + i + suffix);
+  if (i === 2 && typeof args.review2Model === "string" && args.review2Model) item.model = args.review2Model;
+  return item;
+}
+
 function launchReview(round, prior, priorHead, gateCheck) {
   const items = [];
-  for (let i = 1; i <= reviewerCount; i++) {
-    const item = placed({
-      key: "review-" + round + "-" + i,
-      label: label + ": review " + round + "." + i,
-      agent: "reviewer",
-      task: reviewerTask(round, prior, priorHead, gateCheck),
-      outputSchema: reviewSchema,
-    });
-    withOutput(item, "r" + round + "-reviewer-" + i);
-    if (i === 2 && typeof args.review2Model === "string" && args.review2Model) item.model = args.review2Model;
-    items.push(item);
-  }
+  for (let i = 1; i <= reviewerCount; i++) items.push(reviewItem(round, i, reviewerTask(round, prior, priorHead, gateCheck), ""));
   return runs.all(items);
+}
+
+function launchReask(round, i, prior, priorHead, gateCheck) {
+  const task =
+    reviewerTask(round, prior, priorHead, gateCheck) +
+    "\n\nThe previous reviewer for this slot returned ok without evidence in `checked`, so its review was not accepted.";
+  return runs.all([reviewItem(round, i, task, "-reask")]);
 }
 
 const runLog = [];
 let head = null;
 let blocking = [];
 let nonBlocking = [];
+const riskLog = [];
 let rounds = 0;
 let gateBy = null;
 let failure = null;
@@ -186,13 +216,18 @@ function record(key, result) {
   runLog.push({ key, runId: result && result.runId ? result.runId : null, ok: !!(result && result.ok) });
 }
 
+function noteRisks(result) {
+  const out = result && result.structuredOutput;
+  if (out && Array.isArray(out.risks)) out.risks.filter(nonEmpty).forEach((risk) => riskLog.push({ round: rounds, risk }));
+}
+
 function finish(finalState) {
-  return { state: finalState, rounds, head, gateBy, blocking, nonBlocking, runs: runLog, failure };
+  return { state: finalState, rounds, head, gateBy, blocking, nonBlocking, risks: riskLog, runs: runLog, failure };
 }
 
 function progress(phase) {
   if (!hasState) return Promise.resolve();
-  return state.set(stateKey, { phase, rounds, head, gateBy, blocking: blocking.length, nonBlocking: nonBlocking.length, runs: runLog, failure });
+  return state.set(stateKey, { phase, rounds, head, gateBy, blocking: blocking.length, nonBlocking: nonBlocking.length, risks: riskLog.length, runs: runLog, failure });
 }
 
 function coderFailed(finalState, key, result) {
@@ -208,6 +243,7 @@ while (outcome === null) {
   const coderKey = rounds === 1 ? "code-1" : "fix-" + rounds;
   let [coded] = await launchCoder(coderKey, rounds, blocking, null);
   record(coderKey, coded);
+  noteRisks(coded);
   let gateCheck = false;
   if (runTimedOut(coded)) {
     outcome = coderFailed("coder-timeout", coderKey, coded);
@@ -218,6 +254,7 @@ while (outcome === null) {
     const retryKey = coderKey + "-retry";
     [coded] = await launchCoder(retryKey, rounds, blocking, failureText(coded));
     record(retryKey, coded);
+    noteRisks(coded);
     if (runTimedOut(coded)) {
       outcome = coderFailed("coder-timeout", retryKey, coded);
       break;
@@ -242,17 +279,26 @@ while (outcome === null) {
     break;
   }
 
-  const reviews = await launchReview(rounds, blocking, priorHead, gateCheck);
+  const prior = blocking;
+  const reviews = await launchReview(rounds, prior, priorHead, gateCheck);
   blocking = [];
   nonBlocking = [];
   let reviewFailed = false;
-  reviews.forEach((review, i) => {
-    const reviewer = "review-" + rounds + "-" + (i + 1);
+  for (let i = 0; i < reviews.length; i++) {
+    let review = reviews[i];
+    let reviewer = "review-" + rounds + "-" + (i + 1);
     record(reviewer, review);
-    const out = review.ok ? review.structuredOutput : null;
+    let out = review.ok ? review.structuredOutput : null;
+    if (out && Array.isArray(out.findings) && out.verdict === "ok" && !hasEvidence(out)) {
+      reviewer += "-reask";
+      [review] = await launchReask(rounds, i + 1, prior, priorHead, gateCheck);
+      record(reviewer, review);
+      out = review.ok ? review.structuredOutput : null;
+      if (out && out.verdict === "ok" && !hasEvidence(out)) out = null;
+    }
     if (!out || !Array.isArray(out.findings)) {
       reviewFailed = true;
-      return;
+      continue;
     }
     const mine = out.findings.map((f) => Object.assign({ reviewer }, f));
     let hard = mine.filter((f) => f.severity === "blocking");
@@ -264,7 +310,7 @@ while (outcome === null) {
         hard.push({ reviewer, severity: "blocking", origin: "regression", file: "", claim: "The gate fails: " + args.gate, evidence: "Reported by the reviewer that ran it." });
       } else if (out.gate !== "passed") {
         reviewFailed = true;
-        return;
+        continue;
       }
       if (typeof out.head === "string" && out.head) head = out.head;
     }
@@ -277,7 +323,7 @@ while (outcome === null) {
     }
     blocking.push(...hard);
     nonBlocking.push(...soft);
-  });
+  }
   await progress("reviewed");
 
   if (reviewFailed) outcome = "review-failed";

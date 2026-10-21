@@ -595,6 +595,7 @@ def build_receipt(cfg, row, status, args):
     missing = [k for k in ("review-%d-%d" % (rounds, i) for i in range(1, required + 1)) if not last.get(k)]
     non_blocking = value.get("nonBlocking") if isinstance(value.get("nonBlocking"), list) else []
     blocking = value.get("blocking") if isinstance(value.get("blocking"), list) else []
+    risks = value.get("risks") if isinstance(value.get("risks"), list) else []
     return {
         "version": 1,
         "unit": row["id"],
@@ -612,6 +613,7 @@ def build_receipt(cfg, row, status, args):
         "blocking": len(blocking),
         "non_blocking": len(non_blocking),
         "downgraded": sum(1 for f in non_blocking if isinstance(f, dict) and f.get("downgraded")),
+        "risks": len(risks),
         "gate": args.get("gate"),
         "failure": value.get("failure") if isinstance(value.get("failure"), dict) else None,
     }

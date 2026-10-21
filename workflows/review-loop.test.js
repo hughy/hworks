@@ -52,7 +52,8 @@ function fakeState() {
 
 const baseArgs = { brief: "/tmp/brief.md", gate: "npm test", base: "0123abc", reviewers: 1, rubricDir: "/r" };
 const coded = (head) => ({ ok: true, output: "", structuredOutput: { status: "done", head, summary: "s" } });
-const clean = { ok: true, output: "", structuredOutput: { verdict: "ok", findings: [] } };
+const checked = [{ claim: "loop ends clean", evidence: "a.js:9, review-loop.test.js" }];
+const clean = { ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked } };
 const finding = { severity: "blocking", file: "a.js", line: 3, claim: "off by one", evidence: "a.js:3" };
 const note = { severity: "non-blocking", file: "b.js", line: 1, claim: "naming", evidence: "b.js:1" };
 const blocked = { ok: true, output: "", structuredOutput: { verdict: "blocked", findings: [finding, note] } };
@@ -169,7 +170,7 @@ test("round 1 blocks on any blocking finding, whatever its origin", async () => 
 });
 
 const runnerExit = { ok: false, error: "Async runner process 1 exited with code 0 before writing a result. Marked run failed by stale-run reconciliation." };
-const gated = (gate, head) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], gate, head } });
+const gated = (gate, head) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, gate, head } });
 
 test("a runner exit skips the retry and reviewers run the gate", async () => {
   const { out, calls } = await run({ "code-1": runnerExit, "review-1-1": gated("passed", "h1") });
@@ -400,7 +401,7 @@ test("a run timeout is recognized with prefix text, in output only, or as timedO
 test("a host gate timeout still goes to reviewers when the coder output mentions a run timeout", async () => {
   const { out, calls } = await run({
     "code-1": { ok: false, error: "Acceptance verification 'gate' timed-out.", output: "Fixed detection of " + runTimeout },
-    "review-1-1": { ok: true, structuredOutput: { verdict: "ok", findings: [], gate: "passed", head: "a1" } },
+    "review-1-1": { ok: true, structuredOutput: { verdict: "ok", findings: [], checked, gate: "passed", head: "a1" } },
   });
   assert.equal(out.gateBy, "reviewers");
   assert.equal(out.failure, null);
@@ -503,4 +504,66 @@ test("without taskDir no child gets an output field", async () => {
 test("a relative or empty taskDir is rejected", async () => {
   await assert.rejects(run({}, { taskDir: "task" }), /args.taskDir must be an absolute path/);
   await assert.rejects(run({}, { taskDir: "" }), /args.taskDir must be an absolute path/);
+});
+
+const unproven = (extra) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], ...extra } });
+
+test("an ok verdict without evidence is re-asked once and ends clean when the re-ask has evidence", async () => {
+  for (const extra of [{}, { checked: [] }, { checked: [{ claim: "fine", evidence: " " }] }]) {
+    const { out, calls } = await run(
+      { "code-1": coded("a1"), "review-1-1": clean, "review-1-2": unproven(extra), "review-1-2-reask": clean },
+      { reviewers: 2, review2Model: "prov/model-b", taskDir: "/tmp/task", label: "u" },
+    );
+    assert.equal(out.state, "clean", JSON.stringify(extra));
+    assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1", "review-1-2", "review-1-2-reask"]);
+    const reask = calls[3];
+    assert.equal(reask.agent, "reviewer");
+    assert.equal(reask.model, "prov/model-b");
+    assert.equal(reask.output, "/tmp/task/u-r1-reviewer-2-reask.md");
+    assert.ok(reask.task.startsWith(calls[2].task), reask.task);
+    assert.match(reask.task, /returned ok without evidence/);
+    assert.deepEqual(out.runs.map((r) => r.key), ["code-1", "review-1-1", "review-1-2", "review-1-2-reask"]);
+  }
+});
+
+test("a re-ask that returns ok without evidence again, or fails, ends review-failed", async () => {
+  for (const second of [unproven({ checked: [] }), { ok: false, error: "reviewer crashed" }]) {
+    const { out, calls } = await run({ "code-1": coded("a1"), "review-1-1": unproven({}), "review-1-1-reask": second });
+    assert.equal(out.state, "review-failed");
+    assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1", "review-1-1-reask"]);
+  }
+});
+
+test("a blocked verdict needs no checked entries and is not re-asked", async () => {
+  const { out, calls } = await run({ "code-1": coded("a1"), "review-1-1": blocked }, { maxRounds: 1 });
+  assert.equal(out.state, "unresolved");
+  assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1"]);
+});
+
+test("coder risks reach every later reviewer task and the result with their round", async () => {
+  const risky = (head, risks) => ({ ok: true, output: "", structuredOutput: { status: "done", head, summary: "s", risks } });
+  const state = fakeState();
+  const { out, calls } = await run(
+    { "code-1": risky("a1", ["duplicated Foo type"]), "review-1-1": blocked, "fix-2": risky("a2", ["duplicated Foo type", "slow path"]), "review-2-1": clean },
+    {},
+    state,
+  );
+  assert.equal(out.state, "clean");
+  assert.deepEqual(out.risks, [
+    { round: 1, risk: "duplicated Foo type" },
+    { round: 2, risk: "duplicated Foo type" },
+    { round: 2, risk: "slow path" },
+  ]);
+  assert.match(calls[1].task, /duplicated Foo type/);
+  const review2 = calls.find((c) => c.key === "review-2-1").task;
+  assert.equal(review2.split("duplicated Foo type").length, 2, review2);
+  assert.match(review2, /slow path/);
+  assert.equal(state.sets.at(-1).value.risks, 3);
+});
+
+test("a coder output without risks counts as none", async () => {
+  const { out, calls } = await run({ "code-1": coded("a1"), "review-1-1": clean });
+  assert.equal(out.state, "clean");
+  assert.deepEqual(out.risks, []);
+  assert.doesNotMatch(calls[1].task, /open risks/);
 });

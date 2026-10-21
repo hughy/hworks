@@ -272,6 +272,16 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(r["state"], "unresolved")
         self.assertIn("1 blocking findings after 3 rounds", r["reason"])
 
+    def test_receipt_counts_coder_risks(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A")
+        head = self.commit("A")
+        risks = [{"round": 1, "risk": "duplicated type"}, {"round": 2, "risk": "slow path"}]
+        self.g("record", "A", "1", self.workflow("clean", "wf-1", head, lambda v: v.update(risks=risks)))
+        with open(os.path.join(self.store, "receipts", "A-1.json")) as f:
+            self.assertEqual(json.load(f)["risks"], 2)
+
     def test_late_record_for_superseded_attempt_changes_nothing(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
