@@ -28,7 +28,9 @@ const coderSchema = {
     summary: { type: "string" },
     risks: { type: "array", items: { type: "string" }, description: "each open risk from your final response, [] when none" },
   },
-  required: ["status", "head", "summary", "risks"],
+  // risks and checked stay optional: the runtime rejects output missing a required field before the loop
+  // can apply its fallbacks (no risks; re-ask an ok review).
+  required: ["status", "head", "summary"],
 };
 
 const reviewSchema = {
@@ -61,7 +63,7 @@ const reviewSchema = {
     gate: { enum: ["passed", "failed"] },
     head: { type: "string" },
   },
-  required: ["verdict", "findings", "checked"],
+  required: ["verdict", "findings"],
 };
 
 // A known runtime defect: a host gate that runs past about five seconds can outlive the async runner,

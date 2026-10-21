@@ -21,7 +21,12 @@ function fakeRuns(results) {
   function resolve(key, params) {
     calls.push({ key, ...params });
     if (!(key in results)) throw new Error("unexpected child " + key);
-    return { runId: "run-" + key, ...results[key] };
+    const result = results[key];
+    // The runtime rejects a structured output that lacks a required field before the workflow sees it.
+    const out = result.ok && result.structuredOutput;
+    const missing = out && ((params.outputSchema && params.outputSchema.required) || []).find((f) => !(f in out));
+    if (missing) return { runId: "run-" + key, ok: false, output: "", error: "Structured output validation failed: " + missing + ": is required" };
+    return { runId: "run-" + key, ...result };
   }
   return {
     calls,
