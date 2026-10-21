@@ -84,7 +84,8 @@ Ship one clean unit:
 2. Run `status` and require the unit still `clean`.
 3. Check the remote for the branch and for an existing PR; never repeat an external action that already happened.
 4. From the unit worktree: `git push -u origin <branch>`, then `gh pr create --draft --base <trunk> --head <branch>` with the unit's title and a body per the repo template. Find the template with `scripts/pr-template.sh` run in the worktree; never guess its filename, which may be lowercase or live in `docs/` or a `PULL_REQUEST_TEMPLATE/` directory. Pass the body with `--body-file`.
-5. Track the PR with the harness PR tracker if there is one. `set <id> pr-open --reason <url>` and write the URL to `progress.md`.
+5. Run `gh pr checks <n>` once, without `--watch`. A pending or failing policy check whose description names missing PR-body fields means fix the body now; a tracker may show only that a policy gate blocks.
+6. Track the PR with the harness PR tracker if there is one. `set <id> pr-open --reason <url>` and write the URL to `progress.md`.
 
 The coordinator never edits a unit's code or reviews it in place of the workflow. Reading a worktree, a run, or a diff to decide what to do is fine.
 
@@ -131,7 +132,7 @@ Stopping early: launch nothing new and drain. Never kill a child to stop; a park
 
 - One writer per worktree. orchestrate.py refuses the unsafe launches it can see; it cannot see a writer outside its store, which is why worktrees start fresh.
 - No merges, no pushes to trunk, no history rewrites, no deleting worktrees or branches. Ship only under the grant.
-- Cost is bounded by count, not tokens. With `--max-attempts 2` and review-loop's default three rounds, a unit runs at most 18 children at standard effort and 24 at exhaustive, plus any requeued attempts. Keep the selection small until the pilot measured real cost.
+- Cost is bounded by count, not tokens. With `--max-attempts 2` and review-loop's default three rounds, a unit runs at most 24 children at standard effort and 36 at exhaustive (a coder retry and a reviewer re-ask in every round), plus any requeued attempts. Keep the selection small until the pilot measured real cost.
 
 ## Known runtime defects
 
