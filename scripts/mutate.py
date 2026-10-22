@@ -601,8 +601,6 @@ def main(argv=None):
         print("mutate: %s" % e, file=sys.stderr)
         return 2
 
-    # Taken before --out is created, since a new scratch dir inside the repo would read as dirty.
-    state = tree_state(cwd)
     with contextlib.ExitStack() as stack:
         if args.out:
             os.makedirs(args.out, exist_ok=True)
@@ -613,18 +611,24 @@ def main(argv=None):
                                           "another run using --out " + scratch))
         else:
             scratch = tempfile.mkdtemp(prefix="mutate-")
-        return run_all(args, cwd, mutants, scratch, state)
+        return run_all(args, cwd, mutants, scratch)
 
 
-def tree_state(cwd):
+def tree_state(cwd, scratch):
     head = git(cwd, "rev-parse", "HEAD")
-    status = git(cwd, "status", "--porcelain")
-    if head.returncode or status.returncode:
+    top = git(cwd, "rev-parse", "--show-toplevel")
+    if head.returncode or top.returncode:
+        return {"head": None, "dirty": None}
+    rel = os.path.relpath(os.path.realpath(scratch), os.path.realpath(top.stdout.decode().strip()))
+    # The scratch dir is mutate's own, so a --out inside the repo does not make the tree dirty.
+    exclude = [] if rel in (os.curdir, os.pardir) or rel.startswith(os.pardir + os.sep) else [":(top,exclude)" + rel]
+    status = git(cwd, "status", "--porcelain", "--", ":(top)", *exclude)
+    if status.returncode:
         return {"head": None, "dirty": None}
     return {"head": head.stdout.decode().strip(), "dirty": bool(status.stdout.strip())}
 
 
-def run_all(args, cwd, mutants, scratch, state):
+def run_all(args, cwd, mutants, scratch):
     for s in CAUGHT:
         signal.signal(s, on_signal)
     results, code = [], None
@@ -637,6 +641,7 @@ def run_all(args, cwd, mutants, scratch, state):
         # Held from before the baselines until the last restore, so no other in-place run's mutant is
         # read as an original, checked as clean, or restored over ours.
         with worktree_locks(locked):
+            state = tree_state(cwd, scratch)
             baselines = {} if args.no_baseline else run_baselines(mutants, cwd, scratch)
             for i, m in enumerate(mutants):
                 results.append(dict(run_mutant(i, m, cwd, scratch, args, baselines), **state))
