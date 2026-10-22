@@ -452,7 +452,10 @@ def prepare_worktree(cfg, row):
     wt, branch = row["worktree"], row["branch"]
     if not os.path.lexists(wt):
         os.makedirs(os.path.dirname(wt), exist_ok=True)
-        rc, _, err = git(cfg["repo"], "worktree", "add", "-q", "-b", branch, wt, cfg["base"])
+        git(cfg["repo"], "worktree", "prune")
+        has_branch = git(cfg["repo"], "rev-parse", "--verify", "-q", "refs/heads/" + branch)[0] == 0
+        add = [wt, branch] if has_branch else ["-b", branch, wt, cfg["base"]]
+        rc, _, err = git(cfg["repo"], "worktree", "add", "-q", *add)
         if rc != 0:
             return "git worktree add failed: %s" % err
         row["created"] = wt
@@ -969,7 +972,9 @@ def cmd_set(store, a):
             if not a.runs_dir:
                 raise Refused("%s attempt %s may still own %s; pass --runs-dir so set can check its runs"
                               % (a.id, row["reserved"], row["worktree"]))
-            blockers = ownership_blockers(a.runs_dir, row)
+            # A writer cannot still be working in a worktree directory that no longer exists (a reboot cleared
+            # $TMPDIR), even when its run records vanished with it.
+            blockers = ownership_blockers(a.runs_dir, row) if os.path.lexists(row["worktree"]) else []
             if blockers:
                 raise Refused("%s attempt %s still owns %s: %s"
                               % (a.id, row["reserved"], row["worktree"], "; ".join(blockers)))

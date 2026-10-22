@@ -775,6 +775,19 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(self.reconcile(), [])
         self.assertEqual(self.launch("A")["attempt"], 2)
 
+    def test_reserved_attempt_whose_worktree_is_gone_releases_and_relaunches_on_its_branch(self):
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        self.started("A")
+        head = self.commit("A")
+        self.g("set", "A", "parked", "--reason", "host rebooted")
+        self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs, code=3)
+        shutil.rmtree(self.wt("A"))
+        self.g("set", "A", "queued", "--reason", "resume", "--runs-dir", self.runs)
+        self.assertEqual(self.launch("A")["attempt"], 2)
+        self.assertEqual(self.rows()["A"]["start_head"], head)
+        self.assertEqual(sh(self.wt("A"), "symbolic-ref", "--short", "HEAD"), "orchestrate/A")
+
     def test_reconcile_waits_while_an_older_bound_controller_runs(self):
         self.init()
         self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
