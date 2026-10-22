@@ -650,6 +650,62 @@ class MutateTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(r["log"]), r["log"])
         self.assertIn("add is wrong", read(out[0]["log"]).decode())
 
+    def test_json_records_head_and_dirty(self):
+        spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        head = git(self.repo, "rev-parse", "HEAD")
+        [r] = self.results(spec, "--out", os.path.join(self.repo, "receipts"), code=0)
+        self.assertEqual((r["head"], r["dirty"]), (head, False))
+        write(os.path.join(self.repo, "notes.txt"), "x")
+        [r] = self.results(spec, code=0)
+        self.assertEqual((r["head"], r["dirty"]), (head, True))
+        shutil.rmtree(os.path.join(self.repo, ".git"))
+        [r] = self.results(spec, "--allow-dirty", code=0)
+        self.assertEqual((r["verdict"], r["head"], r["dirty"]), ("killed", None, None))
+
+    def test_dirt_inside_a_pre_existing_out_dir_counts(self):
+        spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        out = os.path.join(self.repo, "receipts")
+        os.mkdir(out)
+        write(os.path.join(out, "new.txt"), "x")
+        [r] = self.results(spec, "--out", out, code=0)
+        self.assertEqual(r["dirty"], True)
+        shutil.rmtree(out)
+        os.mkdir(out)
+        write(os.path.join(out, "kept.txt"), "a")
+        git(self.repo, "add", "receipts")
+        git(self.repo, "commit", "-q", "-m", "receipts")
+        write(os.path.join(out, "kept.txt"), "b")
+        [r] = self.results(spec, "--out", out, code=0)
+        self.assertEqual(r["dirty"], True)
+
+    def test_new_out_dir_with_glob_characters_excludes_only_itself(self):
+        spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        write(os.path.join(self.repo, "receipts-old.txt"), "a")
+        git(self.repo, "add", "receipts-old.txt")
+        git(self.repo, "commit", "-q", "-m", "old")
+        write(os.path.join(self.repo, "receipts-old.txt"), "b")
+        [r] = self.results(spec, "--out", os.path.join(self.repo, "receipts-*"), code=0)
+        self.assertEqual(r["dirty"], True)
+
+    def test_dirty_is_read_after_waiting_for_another_in_place_run(self):
+        spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        with mutate.file_lock(mutate.lock_path(self.calc), mutate.fcntl.LOCK_EX, "test"):
+            write(self.calc, CALC.replace("x * 2", "x * 3"))
+            p = subprocess.Popen([sys.executable, SCRIPT, "--no-baseline", "--json", "-"], cwd=self.repo,
+                                 env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True)
+            p.stdin.write(json.dumps(spec))
+            p.stdin.close()
+            self.assertIn("waiting for another in-place run", p.stderr.readline())
+            write(self.calc, CALC)
+        p.wait(60)
+        out, err = p.stdout.read(), p.stderr.read()
+        p.stdout.close()
+        p.stderr.close()
+        self.assertEqual(p.returncode, 0, out + err)
+        [r] = json.loads(out)
+        self.assertEqual((r["verdict"], r["dirty"]), ("killed", False))
+
     def test_text_output_one_line_per_mutant(self):
         p = self.mutate({"test": TEST, "mutants": [
             {"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"},

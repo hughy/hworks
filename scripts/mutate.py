@@ -47,7 +47,9 @@ never read its mutant as the original; overlay runs do not wait for each other.
 Before any mutant runs, each distinct command runs once unmutated and must pass; otherwise a failure under
 a mutant proves nothing and its mutants are invalid. --no-baseline skips this.
 
-Verdicts, one line per mutant on stdout (--json prints a list of objects instead):
+Verdicts, one line per mutant on stdout. --json prints a list of objects instead; each also has "head",
+the `git rev-parse HEAD` of "cwd", and "dirty", whether `git status --porcelain` there was non-empty
+before the run, ignoring a --out dir this run created (both null outside a git work tree):
   killed       the command exited nonzero
   survived     the command exited zero
   build-error  a changed file is .go and the output shows a Go package failed to build or set up
@@ -601,18 +603,42 @@ def main(argv=None):
 
     with contextlib.ExitStack() as stack:
         if args.out:
-            os.makedirs(args.out, exist_ok=True)
             scratch = os.path.abspath(args.out)
+            try:
+                os.makedirs(scratch)
+                created = True
+            except FileExistsError:
+                if not os.path.isdir(scratch):
+                    raise
+                created = False
             # Scratch paths depend only on the mutant's index and name, so two runs sharing --out would
             # overwrite each other's overlay files and logs mid-run.
             stack.enter_context(file_lock(os.path.join(scratch, ".lock"), fcntl.LOCK_EX,
                                           "another run using --out " + scratch))
         else:
-            scratch = tempfile.mkdtemp(prefix="mutate-")
-        return run_all(args, cwd, mutants, scratch)
+            scratch, created = tempfile.mkdtemp(prefix="mutate-"), True
+        # Only a scratch dir this run created holds nothing but mutate's own files; a pre-existing one may
+        # hold the user's edits, which count as dirt.
+        return run_all(args, cwd, mutants, scratch, scratch if created else None)
 
 
-def run_all(args, cwd, mutants, scratch):
+def tree_state(cwd, own):
+    head = git(cwd, "rev-parse", "HEAD")
+    top = git(cwd, "rev-parse", "--show-toplevel")
+    if head.returncode or top.returncode:
+        return {"head": None, "dirty": None}
+    exclude = []
+    if own:
+        rel = os.path.relpath(os.path.realpath(own), os.path.realpath(top.stdout.decode().strip()))
+        if rel not in (os.curdir, os.pardir) and not rel.startswith(os.pardir + os.sep):
+            exclude = [":(top,exclude,literal)" + rel]
+    status = git(cwd, "status", "--porcelain", "--", ":(top)", *exclude)
+    if status.returncode:
+        return {"head": None, "dirty": None}
+    return {"head": head.stdout.decode().strip(), "dirty": bool(status.stdout.strip())}
+
+
+def run_all(args, cwd, mutants, scratch, own):
     for s in CAUGHT:
         signal.signal(s, on_signal)
     results, code = [], None
@@ -625,9 +651,10 @@ def run_all(args, cwd, mutants, scratch):
         # Held from before the baselines until the last restore, so no other in-place run's mutant is
         # read as an original, checked as clean, or restored over ours.
         with worktree_locks(locked):
+            state = tree_state(cwd, own)
             baselines = {} if args.no_baseline else run_baselines(mutants, cwd, scratch)
             for i, m in enumerate(mutants):
-                results.append(run_mutant(i, m, cwd, scratch, args, baselines))
+                results.append(dict(run_mutant(i, m, cwd, scratch, args, baselines), **state))
     except Interrupted as e:
         print("mutate: interrupted by signal %d; every in-place file was restored" % e.signum, file=sys.stderr)
         code = 128 + e.signum
