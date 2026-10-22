@@ -662,6 +662,22 @@ class MutateTest(unittest.TestCase):
         [r] = self.results(spec, "--allow-dirty", code=0)
         self.assertEqual((r["verdict"], r["head"], r["dirty"]), ("killed", None, None))
 
+    def test_dirt_inside_a_pre_existing_out_dir_counts(self):
+        spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        out = os.path.join(self.repo, "receipts")
+        os.mkdir(out)
+        write(os.path.join(out, "new.txt"), "x")
+        [r] = self.results(spec, "--out", out, code=0)
+        self.assertEqual(r["dirty"], True)
+        shutil.rmtree(out)
+        os.mkdir(out)
+        write(os.path.join(out, "kept.txt"), "a")
+        git(self.repo, "add", "receipts")
+        git(self.repo, "commit", "-q", "-m", "receipts")
+        write(os.path.join(out, "kept.txt"), "b")
+        [r] = self.results(spec, "--out", out, code=0)
+        self.assertEqual(r["dirty"], True)
+
     def test_dirty_is_read_after_waiting_for_another_in_place_run(self):
         spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
         with mutate.file_lock(mutate.lock_path(self.calc), mutate.fcntl.LOCK_EX, "test"):
