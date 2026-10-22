@@ -678,6 +678,15 @@ class MutateTest(unittest.TestCase):
         [r] = self.results(spec, "--out", out, code=0)
         self.assertEqual(r["dirty"], True)
 
+    def test_new_out_dir_with_glob_characters_excludes_only_itself(self):
+        spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
+        write(os.path.join(self.repo, "receipts-old.txt"), "a")
+        git(self.repo, "add", "receipts-old.txt")
+        git(self.repo, "commit", "-q", "-m", "old")
+        write(os.path.join(self.repo, "receipts-old.txt"), "b")
+        [r] = self.results(spec, "--out", os.path.join(self.repo, "receipts-*"), code=0)
+        self.assertEqual(r["dirty"], True)
+
     def test_dirty_is_read_after_waiting_for_another_in_place_run(self):
         spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
         with mutate.file_lock(mutate.lock_path(self.calc), mutate.fcntl.LOCK_EX, "test"):

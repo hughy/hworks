@@ -631,7 +631,7 @@ def tree_state(cwd, own):
     if own:
         rel = os.path.relpath(os.path.realpath(own), os.path.realpath(top.stdout.decode().strip()))
         if rel not in (os.curdir, os.pardir) and not rel.startswith(os.pardir + os.sep):
-            exclude = [":(top,exclude)" + rel]
+            exclude = [":(top,exclude,literal)" + rel]
     status = git(cwd, "status", "--porcelain", "--", ":(top)", *exclude)
     if status.returncode:
         return {"head": None, "dirty": None}
