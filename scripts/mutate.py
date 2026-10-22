@@ -47,7 +47,9 @@ never read its mutant as the original; overlay runs do not wait for each other.
 Before any mutant runs, each distinct command runs once unmutated and must pass; otherwise a failure under
 a mutant proves nothing and its mutants are invalid. --no-baseline skips this.
 
-Verdicts, one line per mutant on stdout (--json prints a list of objects instead):
+Verdicts, one line per mutant on stdout. --json prints a list of objects instead; each also has "head",
+the `git rev-parse HEAD` of "cwd", and "dirty", whether `git status --porcelain` there was non-empty
+before the run (both null outside a git work tree):
   killed       the command exited nonzero
   survived     the command exited zero
   build-error  a changed file is .go and the output shows a Go package failed to build or set up
@@ -612,6 +614,14 @@ def main(argv=None):
         return run_all(args, cwd, mutants, scratch)
 
 
+def tree_state(cwd):
+    head = git(cwd, "rev-parse", "HEAD")
+    status = git(cwd, "status", "--porcelain")
+    if head.returncode or status.returncode:
+        return {"head": None, "dirty": None}
+    return {"head": head.stdout.decode().strip(), "dirty": bool(status.stdout.strip())}
+
+
 def run_all(args, cwd, mutants, scratch):
     for s in CAUGHT:
         signal.signal(s, on_signal)
@@ -625,9 +635,10 @@ def run_all(args, cwd, mutants, scratch):
         # Held from before the baselines until the last restore, so no other in-place run's mutant is
         # read as an original, checked as clean, or restored over ours.
         with worktree_locks(locked):
+            state = tree_state(cwd)
             baselines = {} if args.no_baseline else run_baselines(mutants, cwd, scratch)
             for i, m in enumerate(mutants):
-                results.append(run_mutant(i, m, cwd, scratch, args, baselines))
+                results.append(dict(run_mutant(i, m, cwd, scratch, args, baselines), **state))
     except Interrupted as e:
         print("mutate: interrupted by signal %d; every in-place file was restored" % e.signum, file=sys.stderr)
         code = 128 + e.signum
