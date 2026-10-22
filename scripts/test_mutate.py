@@ -653,7 +653,7 @@ class MutateTest(unittest.TestCase):
     def test_json_records_head_and_dirty(self):
         spec = {"test": TEST, "mutants": [{"name": "kill", "file": "calc.py", "old": "a + b", "new": "a - b"}]}
         head = git(self.repo, "rev-parse", "HEAD")
-        [r] = self.results(spec, code=0)
+        [r] = self.results(spec, "--out", os.path.join(self.repo, "receipts"), code=0)
         self.assertEqual((r["head"], r["dirty"]), (head, False))
         write(os.path.join(self.repo, "notes.txt"), "x")
         [r] = self.results(spec, code=0)
