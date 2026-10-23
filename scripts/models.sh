@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Apply a model profile: write each agent role's model to pi settings (subagents.agentOverrides.<role>.model)
 # and record the profile so hughy-router can read its slots. Profiles come from models.conf and models.d/*.conf.
+# A role is an agent role when agents/<role>.md exists or HWORKS_MODEL_AGENTS names it (comma- or space-separated;
+# set in the environment or in adapters/local/*.env), for agents another package defines. Other roles are slots.
 # usage: models.sh show
 #        models.sh <profile>
 set -euo pipefail
@@ -15,7 +17,20 @@ rows() {
   for f in "$root/models.conf" "$root"/models.d/*.conf; do if [ -f "$f" ]; then cat "$f"; fi; done | awk '!/^#/ && NF'
 }
 active() { [ -f "$marker" ] && cat "$marker" || echo inherit; }
-roles() { for f in "$agents"/*.md; do basename "$f" .md; done; }
+extra_agents() {
+  if [ -n "${HWORKS_MODEL_AGENTS+x}" ]; then printf '%s\n' "$HWORKS_MODEL_AGENTS"; return; fi
+  local f
+  for f in "$root"/adapters/local/*.env; do if [ -f "$f" ]; then sed -n 's/^HWORKS_MODEL_AGENTS=//p' "$f"; fi; done | tail -n 1 | tr -d "\"'"
+}
+extras=$(extra_agents | tr ',' ' ')
+is_agent() {
+  [ -f "$agents/$1.md" ] && return 0
+  case " $extras " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+roles() {
+  { for f in "$agents"/*.md; do basename "$f" .md; done; for r in $extras; do echo "$r"; done; } | awk '!seen[$0]++'
+}
 
 override() {
   [ -f "$settings" ] || return 0
@@ -38,7 +53,7 @@ show() {
     echo
   done
   rows | awk -v p="$p" '$1==p {print $2, $3}' | while read -r role model; do
-    [ -f "$agents/$role.md" ] && continue
+    is_agent "$role" && continue
     [ "$model" = "-" ] && model="(session model)"
     printf '%-12s %s (slot)\n' "$role" "$model"
   done
@@ -46,7 +61,7 @@ show() {
 
 cmd=${1:-}
 case "$cmd" in
-  ""|-h|--help) sed -n '2,5p' "$0"; exit 2 ;;
+  ""|-h|--help) sed -n '2,7p' "$0"; exit 2 ;;
   show) show; exit 0 ;;
 esac
 
@@ -60,7 +75,7 @@ cp "$settings" "$settings.bak-models"
 
 args=()
 while read -r role model; do
-  [ -f "$agents/$role.md" ] && args+=("$role" "$model")
+  is_agent "$role" && args+=("$role" "$model")
 done <<< "$pins"
 
 node -e '

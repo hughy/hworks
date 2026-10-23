@@ -68,7 +68,8 @@ mine exhaustive  -
 ```
 
 - A role with a file in `agents/` is an agent role. `scripts/models.sh <profile>` writes its model to `subagents.agentOverrides.<role>.model` in pi settings. It writes to `$PI_SETTINGS` if set and to `~/.pi/agent/settings.json` otherwise, and saves a backup next to the file as `settings.json.bak-models`.
-- A role without an agent file is a slot. The router reads two slots for per-call overrides: `review2`, the second reviewer, and `exhaustive`, the `coder` model at exhaustive effort. Rename a slot in both `models.conf` and the router.
+- A role named in `HWORKS_MODEL_AGENTS` is also an agent role. Use it for an agent another package ships, such as a harness's own subagent: set `HWORKS_MODEL_AGENTS=<role>[,<role>...]` in the environment or in `adapters/local/*.env` (the environment wins), and add the role's row to each profile.
+- Any other role without an agent file is a slot. The router reads two slots for per-call overrides: `review2`, the second reviewer, and `exhaustive`, the `coder` model at exhaustive effort. Rename a slot in both `models.conf` and the router.
 - `-` clears the override, so the role runs on the session model.
 - `scripts/models.sh show` prints the active profile and flags settings that drifted from it. Run `/reload` in pi after you apply a profile.
 
