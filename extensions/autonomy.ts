@@ -1,6 +1,8 @@
 // Keeps the agent from stalling on mid-task questions or running commands git cannot undo.
 // The block reason is returned to the model as the tool result, so it doubles as the redirect.
 // `/autonomy off` relaxes both checks for the current session; `/autonomy on` restores them.
+// A rule the operator's own prompt asks for ("rebase onto main", "delete the merged branches") is granted for
+// the rest of the session, so a run does not stop on the step it was asked to do. A negated mention denies it.
 // The model can call autonomy_phase with phase "cleanup" once the work is done, so end-of-run asks and
 // classified commands pass on to the harness's own guards and approvals. The phase returns to "work" at
 // every agent_start, session_start, and session_tree.
@@ -42,18 +44,39 @@ const ASK_REASON =
   "text, record each question with state `asked`, and end the turn." + CLEANUP_HINT;
 
 const DESTRUCTIVE_REASON =
-  "Autonomy: blocked a command git on the working branch cannot undo. Use a reversible alternative " +
-  "(commit first, `git revert`, `git stash push`, move files to a backup path) or skip this step, finish the " +
-  "rest, record it as an [irreversible] entry, " + ENTRY_FORMAT + " List the skipped step first in your final " +
-  "reply." + CLEANUP_HINT + " Pattern: ";
+  "Autonomy: blocked a command git on the working branch cannot undo. ";
+
+const SKIP_REASON =
+  "If no reversible form does the job, skip this step, finish the rest, record it as an [irreversible] entry, " +
+  ENTRY_FORMAT + " List the skipped step first in your final reply." + CLEANUP_HINT + " Pattern: ";
+
+const LEASE_HINT =
+  "Retry now with `git push --force-with-lease=<branch>:<sha>`, where <sha> is the remote head you expect " +
+  "(`git ls-remote origin <branch>`). That form passes: it names the old head, so the push is undoable, and it " +
+  "refuses to overwrite commits you have not seen. ";
+
+// The redirect for each rule, so the model can retry in the same turn instead of stopping.
+const HINTS: Record<string, string> = {
+  "git push --force": LEASE_HINT,
+  "git push --force-with-lease": LEASE_HINT,
+  "git reset --hard":
+    "Commit the work you want to keep, then use `git reset --keep <rev>`, which passes because it refuses to " +
+    "discard uncommitted changes. ",
+  "git branch -D": "Use `git branch -d` for a merged branch; it passes. ",
+  "git worktree remove --force":
+    "Commit what the worktree holds and drop `--force`, or make throwaway worktrees under `$(mktemp -d)` or " +
+    "$TMPDIR, which pass. ",
+  "git stash drop/clear": "Leave the stash entry in place; it costs nothing. ",
+  "git clean -f": "Move the files to a backup path under $TMPDIR instead. ",
+};
+
+const blockReason = (rule: string) => DESTRUCTIVE_REASON + (HINTS[rule] ?? "") + SKIP_REASON + rule;
 
 const PATTERNS: Array<[string, RegExp]> = [
-  ["git reset --hard", /\bgit\s+(?:-C\s+\S+\s+)?reset\b[^;&|]*--(?:hard|merge|keep)\b/],
+  ["git reset --hard", /\bgit\s+(?:-C\s+\S+\s+)?reset\b[^;&|]*--(?:hard|merge)\b/],
   ["git clean -f", /\bgit\s+(?:-C\s+\S+\s+)?clean\b[^;&|]*\s-[a-zA-Z]*f/],
-  ["git push --force", /\bgit\s+(?:-C\s+\S+\s+)?push\b[^;&|]*(?:\s--force(?:-with-lease)?\b|\s-[a-zA-Z]*f\b|\s\+\S)/],
   ["git branch -D", /\bgit\s+(?:-C\s+\S+\s+)?branch\b[^;&|]*\s(?:-D\b|--delete\s+--force|-d\s+-f)/],
   ["git stash drop/clear", /\bgit\s+(?:-C\s+\S+\s+)?stash\s+(?:drop|clear)\b/],
-  ["git worktree remove --force", /\bgit\s+(?:-C\s+\S+\s+)?worktree\s+remove\b(?=[^;&|]*--force)(?![^;&|]*\s(?:\/tmp\/|\/private\/tmp\/|\/var\/folders\/))/],
   ["git update-ref -d / reflog expire", /\bgit\s+(?:-C\s+\S+\s+)?(?:update-ref\s+-d|reflog\s+(?:expire|delete))\b/],
   ["git filter-branch / filter-repo", /\bgit\s+(?:-C\s+\S+\s+)?filter-(?:branch|repo)\b/],
   ["gh repo/release delete", /\bgh\s+(?:repo|release)\s+delete\b/],
@@ -67,16 +90,75 @@ const PATTERNS: Array<[string, RegExp]> = [
 // Dropping them misses `sh -c "..."`; a harness guard that matches the full string is the backstop.
 function stripData(command: string): string {
   return command
+    .replace(/--force-with-lease=(['"])([^'"\s]*)\1/g, "--force-with-lease=$2")
+    .replace(/"(\$[^"\s]*)"/g, "$1")
     .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, "")
     .replace(/'[^']*'/g, "''")
     .replace(/"(?:[^"\\]|\\.)*"/g, '""');
 }
 
+// A lease that names the expected remote head (`--force-with-lease=<ref>:<sha>`) is undoable: the old head is in
+// the command, and the push fails if the remote moved. A bare lease checks the remote-tracking ref, which a
+// background fetch can advance, so it can still overwrite unseen commits.
+function classifyPush(segment: string): string | null {
+  if (!/\bgit\s+(?:-C\s+\S+\s+)?push\b/.test(segment)) return null;
+  if (/\s--force(?=\s|$)|\s-[a-zA-Z]*f\b|\s\+\S/.test(segment)) return "git push --force";
+  for (const m of segment.matchAll(/\s--force-with-lease(?:=(\S*))?/g)) {
+    if (!/^[^:\s]+:\S+$/.test(m[1] ?? "")) return "git push --force-with-lease";
+  }
+  return null;
+}
+
+const TMP_PATH = /^(?:\/tmp\/|\/private\/tmp\/|\/var\/folders\/|\/private\/var\/folders\/|\$\{?TMPDIR\b)/;
+
+// `git worktree remove --force` only loses the worktree's uncommitted files, which are scratch under a temp dir,
+// including a path held in a variable the same command set from `mktemp`.
+function forcesNonTmpWorktree(segment: string, tmpVars: Set<string>): boolean {
+  const m = segment.match(/\bgit\s+(?:-C\s+\S+\s+)?worktree\s+remove\b(.*)/);
+  if (!m || !/\s--force\b|\s-f\b/.test(m[1])) return false;
+  const target = m[1].split(/\s+/).find((a) => a && !a.startsWith("-"));
+  if (!target) return true;
+  if (TMP_PATH.test(target)) return false;
+  const v = target.match(/^\$\{?(\w+)/)?.[1];
+  return !(v && tmpVars.has(v));
+}
+
 export function classify(command: string): string | null {
   const code = stripData(command);
+  const tmpVars = new Set([...code.matchAll(/\b(\w+)=\$\(mktemp\b/g)].map((m) => m[1]));
+  for (const segment of code.split(/[;&|\n]+/)) {
+    const push = classifyPush(segment);
+    if (push) return push;
+    if (forcesNonTmpWorktree(segment, tmpVars)) return "git worktree remove --force";
+  }
   // SQL arrives quoted (`psql -c "..."`), so it is matched against the raw command.
   for (const [name, re] of PATTERNS) if (re.test(name.startsWith("SQL") ? command : code)) return name;
   return null;
+}
+
+// Operator phrases that ask for a guarded step. Plain `--force` is never granted: the lease form always works.
+const INTENTS: Array<[string, RegExp]> = [
+  ["git push --force-with-lease", /\brebas(?:e|ed|es|ing)\b|\bforce[- ]?push|\bforce-with-lease\b|\bpush\s+(?:--force|-f)\b|\bsquash|\bamend\b|\brewrite\s+(?:the\s+)?(?:git\s+)?history\b/i],
+  ["git reset --hard", /\breset\s+--hard\b|\bhard[- ]reset\b/i],
+  ["git branch -D", /\bbranch\s+-D\b|\bdelete\s+(?:the\s+|these\s+|those\s+|stale\s+|old\s+|merged\s+|local\s+|unused\s+)*branch(?:es)?\b|\bprune\s+(?:local\s+|stale\s+)*branches\b/i],
+  ["git worktree remove --force", /\bworktree\s+remove\b|\b(?:remove|delete|clean\s*up|prune)\s+(?:the\s+|these\s+|stale\s+|old\s+|all\s+)*worktrees?\b/i],
+  ["git stash drop/clear", /\bstash\s+(?:drop|clear)\b|\bdrop\s+(?:the\s+|that\s+|my\s+)?stash/i],
+  ["git clean -f", /\bgit\s+clean\b|\bremove\s+(?:all\s+)?untracked\s+files\b/i],
+];
+
+const NEGATION = /\b(?:don'?t|do\s+not|never|no|not|without|avoid)\b/i;
+
+// Grants every rule some clause asks for, minus any rule a negated clause mentions, so "no amend, rebase, or push"
+// grants nothing and "rebase onto main. Do not force-push" grants no push.
+export function grantsFrom(prompt: string): Set<string> {
+  const want = new Set<string>();
+  const deny = new Set<string>();
+  for (const clause of prompt.split(/[.;:!?\n]+/)) {
+    const target = NEGATION.test(clause) ? deny : want;
+    for (const [rule, re] of INTENTS) if (re.test(clause)) target.add(rule);
+  }
+  for (const rule of deny) want.delete(rule);
+  return want;
 }
 
 function record(ctx: any, kind: string, rule: string, blocked: boolean, detail: unknown) {
@@ -101,10 +183,27 @@ export default function (pi: any) {
   if (process.env.PI_AUTONOMY === "0") return;
   let enabled = true;
   let phase: "work" | "cleanup" = "work";
+  const grants = new Set<string>();
   const resetPhase = () => {
     phase = "work";
   };
-  for (const event of ["agent_start", "session_start", "session_tree"]) pi.on(event, resetPhase);
+  pi.on("agent_start", resetPhase);
+  // A new, forked, or resumed session, or a jump in the tree, may no longer hold the prompt that granted a rule.
+  for (const event of ["session_start", "session_tree"]) {
+    pi.on(event, () => {
+      resetPhase();
+      grants.clear();
+    });
+  }
+
+  pi.on("before_agent_start", (event: any, ctx: any) => {
+    if (event?.messageType !== "user" || typeof event.prompt !== "string") return;
+    for (const rule of grantsFrom(event.prompt)) {
+      if (grants.has(rule)) continue;
+      grants.add(rule);
+      record(ctx, "grant", rule, false, event.prompt);
+    }
+  });
 
   pi.registerCommand("autonomy", {
     description: "on|off: block mid-task questions and irreversible commands (default on)",
@@ -162,9 +261,9 @@ export default function (pi: any) {
       const command = String(input.command ?? "");
       const hit = classify(command);
       if (hit) {
-        const block = phase === "work";
+        const block = phase === "work" && !grants.has(hit);
         record(ctx, "destructive", hit, block, command);
-        if (block) return { block: true, reason: DESTRUCTIVE_REASON + hit };
+        if (block) return { block: true, reason: blockReason(hit) };
       }
     }
   });
