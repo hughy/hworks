@@ -5,12 +5,41 @@ import { join } from "node:path";
 const logPath = join(mkdtempSync(join(tmpdir(), "autonomy-test-")), "blockers.jsonl");
 process.env.HWORKS_BLOCKERS_LOG = logPath;
 delete process.env.PI_AUTONOMY;
-const { classify, default: register } = await import("./autonomy.ts");
+const { classify, grantsFrom, default: register } = await import("./autonomy.ts");
 const block = ["git reset --hard HEAD~1","git -C repo reset --hard","git clean -fdx","git push --force origin feat","git push -f","git push --force-with-lease origin feat","git push origin +feat","git branch -D old","git stash drop","git worktree remove --force ../wt","DROP TABLE users;","kubectl delete pod x","terraform apply","psql -c \"drop table users\"","cd \"my repo\" && git reset --hard","python3 - <<'EOF'\nprint(1)\nEOF\ngit reset --hard","git commit -m 'wip' && git push --force origin x"];
 const allow = ["git worktree remove --force /tmp/wt","rm -rf build","git checkout -- src/a.ts","rm -rf /tmp/foo","rm -f $TMPDIR/x","rm ~/.local/state/agent-tasks/t/a.md","find /tmp/x -delete","git rm src/old.ts","git status","git push origin feat","git restore --staged a.ts","git checkout -b new","git checkout main","git branch -d merged","git stash push","git reset HEAD~1","git reset --soft HEAD~1","grep -rn 'rm -rf' .","npm run format","git commit -m 'remove dead code'","echo terraform plan","agent -p \"run git reset --hard and report\"","git commit -m 'docs: never git reset --hard'","python3 - <<'EOF'\ns = 'never `git reset --hard`'\nEOF","cat > f.md <<EOF\nuse git push --force rarely\nEOF\necho ok","grep -n \"git-reset-hard\\|reset --hard\" log"];
+block.push("git push --force-with-lease=feat origin feat", "git push --force-if-includes --force origin x", "git push --force-with-lease= origin x", "git reset --merge", "d=$(mktemp -d); git worktree remove --force $other", "git worktree remove -f ~/dev/repo-wt");
+allow.push(
+  "git push --force-with-lease=feat:e177836 origin feat",
+  "B=feat; git push -q --force-with-lease=$B:5bc10d4f origin $B 2>&1 | tail -3",
+  "git push --force-with-lease=\"$B:$SHA\" origin HEAD:refs/heads/x",
+  "git push --force-with-lease=a:1 --force-if-includes origin a",
+  "git reset --keep origin/feat",
+  "d=$(mktemp -d); git worktree add -q --detach $d HEAD && (cd $d && make); git worktree remove $d --force",
+  "d=$(mktemp -d); git worktree add $d/wt HEAD; git worktree remove --force $d/wt",
+  "git worktree remove --force \"$TMPDIR/wt\"",
+  "git worktree remove --force /private/var/folders/x/T/wt",
+  "git worktree remove ../wt",
+);
 let bad=0;
 for (const c of block) { const r=classify(c); if(!r){bad++;console.log("MISSED  ",c);} }
 for (const c of allow) { const r=classify(c); if(r){bad++;console.log("FALSE+  ",c,"->",r);} }
+
+// Operator prompts grant the rules they ask for; negated clauses deny them.
+const g = (p: string) => [...grantsFrom(p)].sort().join(",");
+for (const [prompt, want] of [
+  ["rebase this branch onto main and push it", "git push --force-with-lease"],
+  ["Squash the fixups, then force-push", "git push --force-with-lease"],
+  ["Commit on the current branch with new commits only: no amend, rebase, reset, or push.", ""],
+  ["Rebase onto main. Do not force-push.", ""],
+  ["never git reset --hard", ""],
+  ["delete the merged branches and clean up stale worktrees", "git branch -D,git worktree remove --force"],
+  ["hard reset to origin/main", "git reset --hard"],
+  ["fix the flaky test", ""],
+] as const) {
+  const got = g(prompt);
+  if (got !== want) { bad++; console.log("GRANT   ", JSON.stringify(prompt), "->", got, "want", want); }
+}
 
 // Fake pi API: records every registered hook, tool, and command.
 function fakePi() {
@@ -97,6 +126,25 @@ const askReason = call("ask_user_question", {})?.reason ?? "";
 const script = askReason.match(/`(\S+\/scripts\/task-dir\.sh) <task-slug>`/)?.[1];
 check("task-dir", !!script && existsSync(script), script);
 check("reason names autonomy_phase", askReason.includes("autonomy_phase"));
+
+// A block reason carries the rule's retry hint.
+const pushReason = call("bash", { command: "git push --force origin x" })?.reason ?? "";
+check("push reason names lease form", pushReason.includes("--force-with-lease=<branch>:<sha>"), pushReason);
+
+// An operator prompt grants its rules for the session; plain --force stays blocked; session_start clears grants.
+pi.emit("before_agent_start", { messageType: "custom", prompt: "rebase onto main" });
+expectBlock("custom message grants nothing", "bash", { command: "git push --force-with-lease origin x" }, true);
+pi.emit("before_agent_start", { messageType: "user", prompt: "rebase onto main and push" });
+pi.emit("agent_start");
+expectBlock("granted lease push", "bash", { command: "git push --force-with-lease origin x" }, false);
+expectBlock("plain force still blocked", "bash", { command: "git push --force origin x" }, true);
+expectBlock("ungranted rule still blocked", "bash", destructive, true);
+pi.emit("before_agent_start", { messageType: "user", prompt: "continue" });
+pi.emit("agent_start");
+expectBlock("grant survives later runs", "bash", { command: "git push --force-with-lease origin x" }, false);
+check("grant logged once", readLog().filter((r) => r.kind === "grant").length === 1);
+pi.emit("session_start", { reason: "new" });
+expectBlock("session_start clears grants", "bash", { command: "git push --force-with-lease origin x" }, true);
 
 // PI_AUTONOMY=0 registers nothing.
 process.env.PI_AUTONOMY = "0";
