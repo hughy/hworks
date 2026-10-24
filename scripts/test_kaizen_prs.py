@@ -110,12 +110,27 @@ class KaizenPrs(unittest.TestCase):
         self.assertEqual(top["other_sessions"], [CHILD])
         self.assertEqual((top["commits_after_create"], top["changes_requested"], top["failing_checks"],
                           top["rework"]), (2, 1, ["lint"], 4))
+        self.assertEqual(top["commit_dates_after_create"], 2)
         self.assertEqual(top["pending_checks"], ["deploy"])
         self.assertEqual(top["feedback_bodies"], 2)
         self.assertEqual((top["hours_to_first_review"], top["hours_to_close"], top["hours_last_commit_to_merge"]),
                          (2.0, 24.0, 2.0))
         self.assertEqual(o["rows"][2]["opened_by"], None)
         self.assertEqual(o["unfetched"], [{"url": BAD, "opened_by": None, "other_sessions": ["m1.jsonl"]}])
+
+    def test_rebased_replay_counts_once(self):
+        with open(os.path.join(os.path.dirname(FAKE_GH), "pr-1.json")) as f:
+            pr = json.load(f)
+        replay = [{"committedDate": "2026-10-01T14:00:00Z"}] * 26
+        before = [{"committedDate": "2026-10-01T09:50:00Z"},
+                  {"committedDate": pr["createdAt"]}, {}, {"committedDate": "invalid"}]
+        for extra, count, dates, rework in [([], 26, 1, 3),
+                ([{"committedDate": "2026-10-02T08:00:00Z"}], 27, 2, 4)]:
+            with self.subTest(distinct_times=dates):
+                row = kp.outcome({**pr, "commits": before + replay + extra})
+                self.assertEqual(row["rework"], rework)
+                self.assertEqual(row["commits_after_create"], count)
+                self.assertEqual(row["commit_dates_after_create"], dates)
 
     def test_test_ratio_leads(self):
         leads = {t["url"]: t["leads"] for t in self.analyze()["tests"]}
@@ -202,7 +217,9 @@ class KaizenPrs(unittest.TestCase):
         p = subprocess.run([sys.executable, SCRIPT, "--since", "2026-01-01"], capture_output=True, text=True, env=env)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("git.example.com: 0 fetched, 1 failed  error: error connecting to git.example.com", p.stdout)
-        self.assertIn(f"{PR1}  [MERGED] rework 4", p.stdout)
+        self.assertIn("rework = distinct commit times after create + changes requested + failing checks", p.stdout)
+        self.assertIn(f"{PR1}  [MERGED] rework 4: commits after create 2, distinct commit times after create 2, "
+                      "changes requested 1, failing checks 1", p.stdout)
         self.assertIn("    tool latency (overlaps for batched calls): bash 4x total 0.0h median 7.5s, "
                       "read 1x total 0.0h median 5.0s\n", p.stdout)
         env["HWORKS_PI_SESSIONS"] = os.path.join(self.d, "nope")

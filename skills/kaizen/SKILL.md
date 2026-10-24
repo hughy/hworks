@@ -55,7 +55,7 @@ Both reporters are heuristics. A group is a lead, not a fact. Before acting on o
 
 `kaizen-setup.py` reads files, not behaviour. An overlap score is shared words, a lead to open both parts and compare, never proof that one replaces the other. A stale-reference hit can be an intentional example or a gitignored path (`adapters/local/`) that exists only in the main checkout. "may be a builtin" can be fine. The overlap section sees only harness parts that appeared in session baselines in the window.
 
-`kaizen-prs.py`: the final check rollup shows only the last CI run, not earlier failures. Rework counts every commit after the PR opened, including ones the operator pushed. A test-ratio lead counts only after you read the diff.
+`kaizen-prs.py`: the final check rollup shows only the last CI run, not earlier failures. Rework counts distinct commit times after the PR opened, so a rebase replay counts once, and still includes commits the operator pushed. It also counts changes-requested reviews and failing final checks. A test-ratio lead counts only after you read the diff.
 
 ## Verification lanes
 
