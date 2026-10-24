@@ -19,21 +19,39 @@ const MAKE_TARGET = /^(?:[\w.]*[-_:/])?(?:tests?|check|lint|gate|ci|e2e|verify)(
 const MAKE_OPTION_ARG = new Set(["-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile", "--include-dir",
   "--old-file", "--assume-old", "--new-file", "--assume-new", "--what-if"]);
 
+// In `-sfCI` the first value-taking letter (`f`) takes the rest of the word (`CI`) as its value; only a
+// value-taking letter at the end of the word takes the next word.
+function shortOptionTakesNext(t: string): boolean {
+  if (!/^-[a-zA-Z]+$/.test(t)) return false;
+  const k = t.slice(1).search(/[CfIoW]/);
+  return k === t.length - 2;
+}
+
 function makeRunsGate(h: string): boolean {
   const toks = h.split(/\s+/);
   if (toks[0] !== "make") return false;
   for (let i = 1; i < toks.length; i++) {
     const t = toks[i];
-    if (MAKE_OPTION_ARG.has(t) || /^-[a-zA-Z]*[CfIoW]$/.test(t)) i++;
+    if (MAKE_OPTION_ARG.has(t) || shortOptionTakesNext(t)) i++;
     else if (!t.startsWith("-") && !t.includes("=") && MAKE_TARGET.test(t)) return true;
   }
   return false;
 }
 
 // Node options before the script; `--check`/`-c` there only parses the file. Arguments after it go to the test.
+const NODE_OPTION_ARG = new Set(["-r", "--require", "--import", "--loader", "--experimental-loader", "-e", "--eval",
+  "-p", "--print", "--env-file", "--conditions", "-C", "--input-type", "--title", "--stack-size"]);
+
 function nodeRunsTestFile(h: string): boolean {
-  const m = /^node\s+((?:-\S+\s+)*)\S*\.test\.[cm]?[jt]s\b/.exec(h);
-  return !!m && !/(?:^|\s)(?:--check|-c)(?=\s|$)/.test(m[1]);
+  const toks = h.split(/\s+/);
+  if (toks[0] !== "node") return false;
+  for (let i = 1; i < toks.length; i++) {
+    const t = toks[i];
+    if (t === "--check" || t === "-c") return false;
+    if (NODE_OPTION_ARG.has(t)) i++;
+    else if (!t.startsWith("-")) return /\.test\.[cm]?[jt]s$/.test(t);
+  }
+  return false;
 }
 
 const GATES: Array<[string, { test(h: string): boolean }]> = [
@@ -65,9 +83,16 @@ function head(segment: string): string {
   return toks.join(" ");
 }
 
+// stripData drops a heredoc opener's whole line with the body, which hides `python3 - <<'PY' | mutate.py -`.
+// Classify the rest of each opener line too; a wrong guess here only raises a timeout.
+function heredocOpenerRests(command: string): string[] {
+  return [...command.matchAll(/<<-?\s*(['"]?)\w+\1([^\n]*)/g)].map((m) => stripData(m[2]));
+}
+
 // Returns the name of the gate the command runs, or null.
 export function gateCommand(command: string): string | null {
-  for (const segment of stripData(command).split(/[;&|\n]+|\$\(|`/)) {
+  const code = [stripData(command), ...heredocOpenerRests(command)].join("\n");
+  for (const segment of code.split(/[;&|\n]+|\$\(|`/)) {
     const h = head(segment);
     for (const [name, re] of GATES) if (re.test(h)) return name;
   }
