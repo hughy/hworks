@@ -63,6 +63,7 @@ link "$root/global/AGENTS.md" "$HOME/.claude/CLAUDE.md"
 link "$root/global/AGENTS.md" "$HOME/.codex/AGENTS.md"
 link "$root/agents" "$pi/agents/hworks"
 for ext in "$root"/extensions/*.ts; do
+  [ -e "$ext" ] || continue
   link "$ext" "$pi/extensions/$(basename "$ext")"
 done
 
