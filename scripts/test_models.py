@@ -66,5 +66,39 @@ class ModelsTest(unittest.TestCase):
         self.assertNotIn("model", self.overrides()["babysitter"])
 
 
+def linked_worktree(tmp):
+    """A main checkout with adapters/local and a linked worktree of it without one."""
+    main, wt = os.path.join(tmp, "main"), os.path.join(tmp, "wt")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    for args in (["init", "-q", main], ["-C", main, "commit", "-q", "--allow-empty", "-m", "x"],
+                 ["-C", main, "worktree", "add", "-q", wt]):
+        subprocess.run(git + args, env=env, check=True, capture_output=True)
+    os.makedirs(os.path.join(main, "adapters", "local"))
+    return main, wt
+
+
+class WorktreeTest(unittest.TestCase):
+    def test_linked_worktree_reads_main_checkout_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            main, wt = linked_worktree(tmp)
+            os.makedirs(os.path.join(wt, "scripts"))
+            os.makedirs(os.path.join(wt, "agents"))
+            shutil.copy(os.path.join(ROOT, "scripts", "models.sh"), os.path.join(wt, "scripts"))
+            with open(os.path.join(wt, "models.conf"), "w") as f:
+                f.write(CONF)
+            with open(os.path.join(main, "adapters", "local", "models.env"), "w") as f:
+                f.write("HWORKS_MODEL_AGENTS=babysitter\n")
+            settings = os.path.join(tmp, "settings.json")
+            with open(settings, "w") as f:
+                json.dump({}, f)
+            e = {k: v for k, v in os.environ.items() if k != "HWORKS_MODEL_AGENTS" and not k.startswith("GIT_")}
+            e["PI_SETTINGS"] = settings
+            subprocess.run(["bash", os.path.join(wt, "scripts", "models.sh"), "p"], env=e, check=True, capture_output=True)
+            with open(settings) as f:
+                self.assertEqual(json.load(f)["subagents"]["agentOverrides"]["babysitter"]["model"], "model-b")
+
+
 if __name__ == "__main__":
     unittest.main()

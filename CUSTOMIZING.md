@@ -154,7 +154,7 @@ Do not edit files under `pstack/`. A local edit conflicts at the next pull, and 
 
 ## Check a change
 
-hworks has no test suite. After you change it:
+After you change hworks, run `scripts/check.sh`, which runs the Python script tests, the workflow tests, and the extension tests. Then:
 
 - Run `scripts/skill.sh list` and confirm that the linked set matches the `DIVERGENCE.md` rows.
 - Run `for l in skills/*; do [ -e "$l" ] || echo "broken: $l"; done` to find broken symlinks.

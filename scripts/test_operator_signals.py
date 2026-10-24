@@ -420,5 +420,29 @@ class Cli(unittest.TestCase):
         self.assertIn("review-loop", out)
 
 
+def linked_worktree(tmp):
+    """A main checkout with adapters/local and a linked worktree of it without one."""
+    main, wt = os.path.join(tmp, "main"), os.path.join(tmp, "wt")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    for args in (["init", "-q", main], ["-C", main, "commit", "-q", "--allow-empty", "-m", "x"],
+                 ["-C", main, "worktree", "add", "-q", wt]):
+        subprocess.run(git + args, env=env, check=True, capture_output=True)
+    os.makedirs(os.path.join(main, "adapters", "local"))
+    return main, wt
+
+
+class LocalEnv(unittest.TestCase):
+    def test_linked_worktree_reads_main_checkout_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            main, wt = linked_worktree(tmp)
+            with open(os.path.join(main, "adapters", "local", "x.env"), "w") as f:
+                f.write("HWORKS_TEST_LOCAL_ENV=from-main\n")
+            self.addCleanup(os.environ.pop, "HWORKS_TEST_LOCAL_ENV", None)
+            os_.load_env_files(wt)
+            self.assertEqual(os.environ.get("HWORKS_TEST_LOCAL_ENV"), "from-main")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -84,6 +84,7 @@ import json
 import os
 import re
 import statistics
+import subprocess
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -171,8 +172,24 @@ def to_dt(v):
         return None
 
 
+def local_dir(root=ROOT):
+    """adapters/local under root, or the main checkout's when root is a linked worktree without
+    one: install scripts link local adapters into the main checkout only."""
+    own = os.path.join(root, "adapters", "local")
+    if os.path.isdir(own):
+        return own
+    try:
+        common = subprocess.run(["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                capture_output=True, text=True, timeout=10,
+                                env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")}).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return own
+    main = os.path.join(os.path.dirname(common), "adapters", "local")
+    return main if os.path.basename(common) == ".git" and os.path.isdir(main) else own
+
+
 def load_env_files(root=ROOT):
-    for path in sorted(glob.glob(os.path.join(root, "adapters", "local", "*.env"))):
+    for path in sorted(glob.glob(os.path.join(local_dir(root), "*.env"))):
         try:
             lines = open(path, errors="replace").read().splitlines()
         except OSError:
