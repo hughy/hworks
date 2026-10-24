@@ -86,6 +86,21 @@ const PATTERNS: Array<[string, RegExp]> = [
   ["shred / dd", /(?:^|[;&|]\s*)(?:shred|dd)\s/],
 ];
 
+// Cuts a shell comment from one line. A `#` inside quotes is not a comment, and an apostrophe inside a comment
+// must not pair with a quote on a later line, so the scan tracks quote state.
+function dropComment(line: string): string {
+  let quote = "";
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === "\\" && quote === '"') i++;
+      else if (c === quote) quote = "";
+    } else if (c === "'" || c === '"') quote = c;
+    else if (c === "#" && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+  }
+  return line;
+}
+
 // Heredoc bodies and quoted strings are data (prompts, commit messages, doc edits), not commands.
 // Dropping them misses `sh -c "..."`; a harness guard that matches the full string is the backstop.
 export function stripData(command: string): string {
@@ -93,7 +108,7 @@ export function stripData(command: string): string {
     .replace(/--force-with-lease=(['"])([^'"\s]*)\1/g, "--force-with-lease=$2")
     .replace(/"(\$[^"\s]*)"/g, "$1")
     .replace(/<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, (_m, _q, _t, rest: string) =>
-      rest.replace(/(?:^|\s)#.*$/, ""))
+      dropComment(rest))
     .replace(/'[^']*'/g, "''")
     .replace(/"(?:[^"\\]|\\.)*"/g, '""');
 }
