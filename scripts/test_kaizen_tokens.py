@@ -308,22 +308,36 @@ WF = "99999999-0000-0000-0000-000000000000"
 
 class BackendMiss(unittest.TestCase):
     @staticmethod
-    def turns(*reads, events_at=()):
-        return [{"cr": cr, "events": ["compaction"] if i in events_at else []} for i, cr in enumerate(reads)]
+    def turns(*reads_writes, events_at=None):
+        events_at = events_at or {}
+        return [{"input": 0, "cr": cr, "cw": cw, "events": events_at.get(i, [])}
+                for i, (cr, cw) in enumerate(reads_writes)]
 
     def test_later_read_of_an_older_entry_proves_it(self):
-        self.assertTrue(kt.backend_miss(self.turns(3000, 0, 3000), 1, prev_ctx=3500))
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (3500, 500))
+        self.assertTrue(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_read_inside_the_tools_and_system_prompt_proves_nothing(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (2000, 2000))
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
 
     def test_reading_only_the_new_write_proves_nothing(self):
-        self.assertFalse(kt.backend_miss(self.turns(3000, 0, 7500), 1, prev_ctx=3500))
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (4000, 500))
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
 
     def test_an_event_ends_the_search(self):
-        self.assertFalse(kt.backend_miss(self.turns(3000, 0, 0, 3000, events_at=(2,)), 1, prev_ctx=3500))
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (0, 4000), (3500, 500), events_at={3: ["compaction"]})
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_system_prompt_change_raises_the_floor(self):
+        t = self.turns((0, 2000), (0, 3000), (3000, 1000), (0, 5000), (3000, 2000),
+                       events_at={1: ["system prompt change"]})
+        self.assertFalse(kt.backend_miss(t, 3, prev_ctx=4000))
 
     def test_report_splits_proven_misses_from_unexplained(self):
         with tempfile.TemporaryDirectory() as d:
             root = fake_root(d)
-            for name, after in (("proven", 3000), ("unproven", 7500)):
+            for name, after in (("proven", 3505), ("unproven", 3000)):
                 b = Builder().system(sections(root), TOOLS).user("u")
                 b.turn(usage(inp=5, cw=3000)).turn(usage(inp=5, cr=3000, cw=500))
                 b.turn(usage(inp=5, cw=4000, cost_cw=0.04)).turn(usage(inp=5, cr=after, cw=1500))

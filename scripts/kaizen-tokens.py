@@ -408,15 +408,23 @@ def rewrite_cause(prev, t):
 
 
 def backend_miss(turns, i, prev_ctx, lookahead=10):
-    """True when a later turn reads a cached prefix longer than turn i read but no longer than
-    the context before it. Turn i's own write ends past that context, so the entry read predates
-    turn i: the prefix was intact and turn i reached a cache that lacked it (another region or
-    replica), not a changed prompt."""
+    """True when a later turn reads a cached prefix that turn i could not have written: longer
+    than turn i read and than the tools and system prompt, and no longer than the context before
+    turn i. Cache breakpoints sit on the tools, the system prompt, and the last message, so turn i
+    wrote entries only inside the tools and system prompt and at its own end, past that context.
+    Such a read means the prefix was intact and turn i reached a cache that lacked it (another
+    region or replica), not a changed prompt. The context of a segment's first turn bounds the
+    tools and system prompt from above; a system prompt change starts a new segment."""
+    ctx = lambda x: x["input"] + x["cr"] + x["cw"]
+    floor = ctx(turns[0])
+    for x in turns[1:i]:
+        if "system prompt change" in x["events"]:
+            floor = ctx(x)
     t = turns[i]
     for u in turns[i + 1:i + 1 + lookahead]:
         if u["events"]:
             return False
-        if t["cr"] < u["cr"] <= prev_ctx:
+        if max(t["cr"], floor) < u["cr"] <= prev_ctx:
             return True
     return False
 
