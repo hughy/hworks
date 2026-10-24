@@ -274,6 +274,7 @@ class Report(unittest.TestCase):
         self.assertIn("upstream:pi or provider", owners)
         self.assertIn(("upstream:unattributed", "tool fastgrep"), {(r["owner"], r["what"]) for r in self.report["upstream"]})
 
+
     def test_long_context_share_by_threshold(self):
         rep, _ = kt.analyze({"sessions": self.sroot}, kt.ks.parse_since("2026-09-01"), min_sessions=3, top=50,
                             root=self.root, owners=self.owners, long_context=5000)
@@ -305,6 +306,87 @@ class Report(unittest.TestCase):
 WF = "99999999-0000-0000-0000-000000000000"
 
 
+class BackendMiss(unittest.TestCase):
+    @staticmethod
+    def turns(*reads_writes, events_at=None, models=None):
+        events_at, models = events_at or {}, models or {}
+        return [{"input": 0, "cr": cr, "cw": cw, "events": events_at.get(i, []), "model": models.get(i, "m1")}
+                for i, (cr, cw) in enumerate(reads_writes)]
+
+    def test_later_read_of_an_older_entry_proves_it(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (3500, 500))
+        self.assertTrue(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_read_inside_the_tools_and_system_prompt_proves_nothing(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (2000, 2000))
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_reading_only_the_new_write_proves_nothing(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (4000, 500))
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_an_event_ends_the_search(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (0, 4000), (3500, 500), events_at={3: ["compaction"]})
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_system_prompt_change_raises_the_floor(self):
+        t = self.turns((0, 2000), (0, 3000), (3000, 1000), (0, 5000), (3000, 2000),
+                       events_at={1: ["system prompt change"]})
+        self.assertFalse(kt.backend_miss(t, 3, prev_ctx=4000))
+
+    def test_floor_skips_a_failed_first_request(self):
+        t = self.turns((0, 0), (0, 2000), (2000, 1500), (0, 4000), (2000, 2500))
+        self.assertFalse(kt.backend_miss(t, 3, prev_ctx=3500))
+
+    def test_a_shrinking_context_after_the_miss_ends_the_search(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (0, 3000), (3500, 500))
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_a_read_of_the_misses_own_write_proves_nothing(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 3500), (3500, 500))
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def branch_events(self, parent_of_second_user):
+        b = Builder().user("u").turn(usage(inp=5, cw=3000)).user("again").turn(usage(inp=5, cw=3000))
+        for k, line in enumerate(b.lines):
+            line["id"], line["parentId"] = f"e{k}", f"e{k - 1}" if k > 1 else None
+        b.lines[3]["parentId"] = parent_of_second_user
+        with tempfile.TemporaryDirectory() as d:
+            b.write(os.path.join(d, "s.jsonl"))
+            s = kt.read_session(os.path.join(d, "s.jsonl"), kt.ks.parse_since("2026-09-01"), [])
+        return s
+
+    def test_a_parent_break_is_a_branch(self):
+        s = self.branch_events("e1")
+        self.assertEqual([t["events"] for t in s["turns"]], [[], ["branch"]])
+        self.assertEqual(kt.rewrite_cause(*s["turns"]), "branch")
+
+    def test_a_reset_to_a_new_root_is_a_branch(self):
+        self.assertEqual([t["events"] for t in self.branch_events(None)["turns"]], [[], ["branch"]])
+
+    def test_a_linear_chain_has_no_branch(self):
+        self.assertEqual([t["events"] for t in self.branch_events("e2")["turns"]], [[], []])
+
+    def test_model_change_resets_the_floor(self):
+        t = self.turns((0, 2000), (0, 4000), (0, 5000), (3000, 2500), models={1: "m2", 2: "m2", 3: "m2"})
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=4000))
+
+    def test_report_splits_proven_misses_from_unexplained(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = fake_root(d)
+            for name, after in (("proven", 3505), ("unproven", 3000)):
+                b = Builder().system(sections(root), TOOLS).user("u")
+                b.turn(usage(inp=5, cw=3000)).turn(usage(inp=5, cr=3000, cw=500))
+                b.turn(usage(inp=5, cw=4000, cost_cw=0.04)).turn(usage(inp=5, cr=after, cw=1500))
+                b.write(os.path.join(d, "sessions", "proj", f"{name}.jsonl"))
+            rep, _ = kt.analyze({"sessions": os.path.join(d, "sessions")}, kt.ks.parse_since("2026-09-01"),
+                                min_sessions=1, top=1, root=root, owners=kt.Owners(root, rules=[]))
+        causes = {r["cause"]: (r["turns"], r["cost"]) for r in rep["cache writes"]}
+        self.assertEqual(causes["backend cache miss"], (1, 0.04))
+        self.assertEqual(causes["unexplained"], (1, 0.04))
+        self.assertEqual([r["owner"] for r in rep["upstream"]], ["upstream:provider routing"])
+
+
 def child_id(n):
     return "00000000-0000-0000-0000-%012d" % n
 
@@ -324,7 +406,6 @@ def blocking(origin=None):
     if origin:
         f["origin"] = origin
     return f
-
 
 class Loops(unittest.TestCase):
     """One review-loop run: round 1 has two reviewers, only the first blocks; round 2's second
