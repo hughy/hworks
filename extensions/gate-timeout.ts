@@ -1,9 +1,9 @@
-// Keeps gate and test runs from dying on the bash tool's timeout. The harness kills a foreground bash call at
-// its `timeout` (300 s when none is passed, capped at 1800 s), and agents often pass 10-120 s, so a full test
-// run or gate ends as "Command timed out" and is rerun. For a bash call whose command runs a gate or test
-// (go test, pytest, make check, mutate.py, scripts/check.sh, ...), this sets `timeout` to the cap. Handlers
-// mutate the same input in load order, and the harness only lowers values above the cap or fills a missing
-// one, so the result is the same whichever extension runs first. Long commands that are not gates keep the
+// Keeps gate and test runs from dying on the bash tool's timeout. pi's bash kills a call at its `timeout`; pi
+// sets none by default, but a harness guard may inject one (300 s) and cap it (1800 s), and agents often pass
+// 10-120 s, so a full test run or gate ends as "Command timed out" and is rerun. For a bash call whose command
+// runs a gate or test (go test, pytest, make check, mutate.py, scripts/check.sh, ...), this sets `timeout` to
+// 1800 s. Handlers mutate the same input in load order, and such a guard only lowers values above its cap or
+// fills a missing one, so the result is the same whichever extension runs first. Long commands that are not gates keep the
 // global rule: start them with a background process. PI_GATE_TIMEOUT=0 disables it.
 
 import { stripData } from "./autonomy.ts";
