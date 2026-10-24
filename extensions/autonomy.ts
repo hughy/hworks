@@ -92,7 +92,8 @@ export function stripData(command: string): string {
   return command
     .replace(/--force-with-lease=(['"])([^'"\s]*)\1/g, "--force-with-lease=$2")
     .replace(/"(\$[^"\s]*)"/g, "$1")
-    .replace(/<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, "$3")
+    .replace(/<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, (_m, _q, _t, rest: string) =>
+      rest.replace(/(?:^|\s)#.*$/, ""))
     .replace(/'[^']*'/g, "''")
     .replace(/"(?:[^"\\]|\\.)*"/g, '""');
 }
