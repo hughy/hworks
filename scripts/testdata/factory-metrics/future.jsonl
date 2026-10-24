@@ -1,0 +1,2 @@
+{"type": "session", "id": "future", "cwd": "/work/factory"}
+{"type": "message", "timestamp": "2026-02-01T10:00:00Z", "message": {"role": "assistant", "content": [], "usage": {"input": 1, "output": 1, "cost": {"total": 900}}}}

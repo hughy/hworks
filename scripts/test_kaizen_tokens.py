@@ -489,6 +489,15 @@ class FirstSystem(unittest.TestCase):
 
 
 class Cli(unittest.TestCase):
+    def test_upper_window_bound_excludes_later_turn_cost(self):
+        with tempfile.TemporaryDirectory() as d:
+            session = Builder().turn(usage(cost_cw=1)).turn(usage(cost_cw=9))
+            session.write(os.path.join(d, 'session.jsonl'))
+            report, _ = kt.analyze({'sessions': d}, kt.ks.to_dt('2026-10-01T00:00:00Z'),
+                                   until=kt.ks.to_dt('2026-10-01T10:02:00Z'))
+            all_rows = [r for r in report['totals'] if r['group'] == 'all']
+            self.assertEqual(all_rows[0]['cost'], 1.01)
+
     def test_json_and_missing_source(self):
         with tempfile.TemporaryDirectory() as d:
             root = fake_root(d)

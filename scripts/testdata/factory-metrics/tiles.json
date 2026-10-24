@@ -1,0 +1,78 @@
+{
+  "series": {
+    "runs": {
+      "2026-01-21": 7
+    },
+    "okay": {
+      "2026-01-21": 4
+    },
+    "failed": {
+      "2026-01-21": 3
+    }
+  },
+  "tiles": [
+    {
+      "key": "dispatch",
+      "band": "Review and quality",
+      "title": "Dispatch verdicts",
+      "home": "companion",
+      "about": "Generic test <definition>",
+      "kind": "bars",
+      "series": [
+        "runs"
+      ],
+      "kpi": {
+        "series": "runs",
+        "how": "sum"
+      },
+      "score_row": {
+        "category": "Quality",
+        "title": "Reviews",
+        "series": "runs",
+        "how": "sum"
+      }
+    },
+    {
+      "key": "automation",
+      "band": "Factory health and improvement",
+      "title": "Automation outcomes",
+      "home": "companion",
+      "about": "Outcomes",
+      "kind": "stacked bars",
+      "series": [
+        "okay",
+        "failed"
+      ]
+    },
+    {
+      "key": "tiny",
+      "band": "Cost",
+      "title": "Cost table",
+      "home": "companion",
+      "about": "A table",
+      "kind": "table",
+      "series": [],
+      "rows": [
+        [
+          "name",
+          "cost"
+        ],
+        [
+          "example",
+          12
+        ]
+      ]
+    },
+    {
+      "key": "daily-table",
+      "band": "Cost",
+      "title": "Daily cost table",
+      "home": "companion",
+      "about": "Daily samples",
+      "kind": "table",
+      "series": [
+        "runs"
+      ]
+    }
+  ]
+}

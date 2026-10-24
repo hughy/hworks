@@ -1,0 +1,2 @@
+{"type": "session", "id": "child", "cwd": "/unrelated", "timestamp": "2026-01-02T10:00:00Z"}
+{"type": "message", "timestamp": "2026-01-02T10:00:00Z", "message": {"role": "assistant", "content": [], "usage": {"input": 150001, "cacheWrite": 0, "cacheRead": 0, "output": 10, "cost": {"total": 5, "cacheWrite": 0.5}}}}

@@ -1,0 +1,429 @@
+{
+  "generated": "2026-01-22T00:00:00Z",
+  "tz": "UTC",
+  "start": "2026-01-01",
+  "end": "2026-01-21",
+  "days": [
+    {
+      "date": "2026-01-01",
+      "merged": 10,
+      "opened": 11,
+      "spend": 101,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-02",
+      "merged": 10,
+      "opened": 11,
+      "spend": 102,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-03",
+      "merged": 10,
+      "opened": 11,
+      "spend": 103,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-04",
+      "merged": 10,
+      "opened": 11,
+      "spend": 104,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-05",
+      "merged": 10,
+      "opened": 11,
+      "spend": 105,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-06",
+      "merged": 10,
+      "opened": 11,
+      "spend": 106,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-07",
+      "merged": 10,
+      "opened": 11,
+      "spend": 107,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-08",
+      "merged": 10,
+      "opened": 11,
+      "spend": 108,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-09",
+      "merged": 10,
+      "opened": 11,
+      "spend": 109,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-10",
+      "merged": 10,
+      "opened": 11,
+      "spend": 110,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-11",
+      "merged": 10,
+      "opened": 11,
+      "spend": 111,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-12",
+      "merged": 10,
+      "opened": 11,
+      "spend": 112,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-13",
+      "merged": 10,
+      "opened": 11,
+      "spend": 113,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-14",
+      "merged": 10,
+      "opened": 11,
+      "spend": 114,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-15",
+      "merged": 10,
+      "opened": 11,
+      "spend": 115,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-16",
+      "merged": 10,
+      "opened": 11,
+      "spend": 116,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-17",
+      "merged": 10,
+      "opened": 11,
+      "spend": 117,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-18",
+      "merged": 10,
+      "opened": 11,
+      "spend": 118,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-19",
+      "merged": 10,
+      "opened": 11,
+      "spend": 119,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-20",
+      "merged": 10,
+      "opened": 11,
+      "spend": 120,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    },
+    {
+      "date": "2026-01-21",
+      "merged": 10,
+      "opened": 11,
+      "spend": 121,
+      "ops": 20,
+      "tasks_done": 2,
+      "tasks_landed": 2,
+      "tasks_fixed": 0,
+      "tasks_nopr": 0,
+      "tasks_holding": 0,
+      "friction": {
+        "operator": 1,
+        "ci": 0
+      },
+      "added": 10,
+      "churn21": 1,
+      "subagent_fail": 1,
+      "babysitter_fail": 0
+    }
+  ],
+  "tables": {}
+}
