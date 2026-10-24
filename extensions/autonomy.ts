@@ -88,11 +88,11 @@ const PATTERNS: Array<[string, RegExp]> = [
 
 // Heredoc bodies and quoted strings are data (prompts, commit messages, doc edits), not commands.
 // Dropping them misses `sh -c "..."`; a harness guard that matches the full string is the backstop.
-function stripData(command: string): string {
+export function stripData(command: string): string {
   return command
     .replace(/--force-with-lease=(['"])([^'"\s]*)\1/g, "--force-with-lease=$2")
     .replace(/"(\$[^"\s]*)"/g, "$1")
-    .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, "")
+    .replace(/<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, "$3")
     .replace(/'[^']*'/g, "''")
     .replace(/"(?:[^"\\]|\\.)*"/g, '""');
 }
