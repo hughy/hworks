@@ -64,6 +64,8 @@ Output fields:
    churn (per checkout daily counts, totals, excluded paths).
  coverage: sources read, counts, failures and missing_sources; partial PR failures
    null all PR-derived daily fields rather than report a falsely complete count.
+   Failed git sources null aggregate churn fields; a failed factory checkout also
+   nulls factory_commits. Successful per-checkout tables remain available.
 """
 import argparse
 import glob
@@ -400,6 +402,7 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
         raise ValueError('repos must be a list of path/class objects')
     if not repos:
         cov['missing_sources'].append('git checkouts: not configured')
+    missing_git = set()
     for repo in repos:
         if repo.get('class') not in ('factory', 'product') or not isinstance(repo.get('path'), str):
             raise ValueError('repo needs path and class product|factory')
@@ -425,6 +428,10 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
                     dd['factory_commits'] += row['changes']
         except (OSError, RuntimeError, subprocess.SubprocessError) as e:
             cov['missing_sources'].append(f'git {path}: {e}')
+            missing_git.update(GIT if repo['class'] == 'factory' else GIT[1:])
+    for d in days.values():
+        for field in missing_git:
+            d[field] = None
     cov['failures'].extend(notes)
     for note in cov['missing_sources'] + cov['failures']:
         print(note, file=sys.stderr)
@@ -437,11 +444,12 @@ def blockers(days, since, tz, cov):
     if p.returncode:
         cov['failures'].append('blockers: ' + p.stderr)
         return
+    missing = {s.removeprefix('note: ').split(': not found', 1)[0] for s in p.stderr.splitlines() if ': not found' in s}
     available = {
-        'friction': os.path.isdir(ks.sources()['tasks']),
-        'oq': os.path.isdir(ks.sources()['tasks']),
-        'guard': os.path.isfile(os.environ.get('HWORKS_BLOCKERS_LOG', str(Path(ks.sources()['tasks']) / 'blockers.jsonl'))) or os.path.isfile(os.environ.get('HWORKS_HARNESS_AUDIT_LOG', '')),
-        'fail': os.path.isfile(os.path.expanduser(os.environ.get('HWORKS_RUN_HISTORY', '~/.pi/agent/run-history.jsonl'))) or os.path.isdir(os.environ.get('HWORKS_SUBAGENT_RUNS', '')),
+        'friction': 'open questions' not in missing,
+        'oq': 'open questions' not in missing,
+        'guard': not {'autonomy log', 'harness audit log'} <= missing,
+        'fail': not {'run history', 'subagent runs'} <= missing,
     }
     fields = {'friction': ['friction', 'fr_rows', 'fr_inschema'], 'oq': ['oq', 'oq_kept', 'oq_reversed'], 'guard': ['guard'], 'fail': ['subagent_fail', 'babysitter_fail']}
     for source, present in available.items():

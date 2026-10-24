@@ -27,7 +27,8 @@ import html
 import math
 from pathlib import Path
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 ACC, INK, GREY, LIGHT, PAPER = "#b3261e", "#222", "#8a8a8a", "#cfcfcf", "#fffff8"
 esc = lambda s: html.escape(str(s))
@@ -141,7 +142,7 @@ def chart(series, w=360, h=120, ymax=None, kind="", notes=(), R=58, yfmt=None, x
                 tip = ", ".join(f"{n} {fmt(p, kind)}" for n, p in zip(s["names"], v) if p)
                 for p, c in zip(v, s["colors"]):
                     if p:
-                        out.append(f'<rect x="{x(i)-bw/2:.1f}" y="{y(base+p):.1f}" width="{bw:.1f}" height="{y(base)-y(base+p):.1f}" fill="{c}"><title>{daylabel(dates[i])}: {tip}</title></rect>')
+                        out.append(f'<rect x="{x(i)-bw/2:.1f}" y="{y(base+p):.1f}" width="{bw:.1f}" height="{y(base)-y(base+p):.1f}" fill="{c}"><title>{daylabel(dates[i])}: {esc(tip)}</title></rect>')
                         base += p
         elif sty == "dots":
             for i, v in enumerate(vals):
@@ -380,12 +381,19 @@ def generic_tiles(metrics):
     has_tasks = any(d.get('tasks_done') is not None for d in D)
     add('tasks', 'Tasks completed per day', 'Output', ['tasks_stack'], 'stacked bars', 'sum', better='up', target=output_target if has_tasks else '', names=['landed', 'PR fixed', 'no PR', 'holding'])
     specs[-1]['kpi']['series'] = 'tasks_done'
+    ppt = metrics['tables'].get('prs_per_task', [])
+    if ppt:
+        specs[-1]['foot'] = f'PRs per task: mean {st.mean(ppt):.2f}, max {max(ppt)}, over {len(ppt)} tasks'
     add('merged', 'PRs merged per day', 'Output', ['merged'], 'bars', 'sum', better='up', target=output_target if not has_tasks else '')
     add('opened', 'PRs opened per day', 'Output', ['opened'], 'bars', 'sum', better='up')
     add('landed', 'Landed PRs, by merge day', 'Output', ['landed_stack'], 'stacked bars', names=['landed', 'fixed within 7d', 'in 7d window'])
     specs[-1]['kpi'] = dict(series='pr_fixed', how='sum', better='down')
     add('queue', 'Queue and work in progress', 'Output', ['queue', 'wip', 'open_prs'])
+    specs[-1]['kpi'] = dict(series='open_prs', how='last', better='down')
+    specs[-1]['foot'] = f'median open-PR age {fmt(D[-1].get("open_age"))} days'
     add('abandoned', 'Closed unmerged', 'Output', ['abandoned'], 'bars', 'sum', better='down')
+    abandoned_spend = nullable_sum([d.get('abandoned_spend') for d in D])
+    specs[-1]['foot'] = f'Direct cost of these PRs: {fmt(abandoned_spend, "$")} over the period'
     add('cpp', 'Cost per merged PR', 'Cost', ['cpp_all', 'cpp_prod', 'attr7'], kind='cost lines', form='$', better='down', target='optimize: lower', wide=True)
     add('cw', 'Cache-write share of spend', 'Cost', ['cw_share'], form='%', better='down')
     add('longc', 'Long-context share of spend', 'Cost', ['long_share'], form='%', better='down')
@@ -403,6 +411,7 @@ def generic_tiles(metrics):
     add('ops_pr', 'Operator messages per merged PR', 'Human touches and friction', ['ops_pr'], better='down', target='optimize: lower')
     add('touches', 'Operator touches per day, by type', 'Human touches and friction', ['touch_stack'], 'stacked bars', names=['corrections', 'aborts', 'approvals and status checks', 'other'], wide=True)
     specs[-1]['kpi'] = dict(series='corr_pr', how='last', better='down')
+    specs[-1]['overlay'] = 'human_reviews'
     add('fr_pr', 'Friction per merged PR', 'Human touches and friction', ['fr_pr'], better='down')
     add('catcher', 'Friction by who caught it', 'Human touches and friction', ['fr_self', 'fr_test', 'fr_reviewer', 'fr_operator', 'fr_ci'], 'small bars', wide=True)
     specs[-1]['kpi'] = {}
@@ -417,9 +426,13 @@ def generic_tiles(metrics):
         models[r['model']][1] += r.get('first_rounds', 0)
     add('firstclean', 'First review clean, by coder model', 'Review and quality', kind='hbars', rows=[(m, a/b) for m, (a, b) in models.items() if b >= 10], form='%')
     weeks = defaultdict(lambda: [0, 0])
+    tz = ZoneInfo(metrics['tz'])
     for p in metrics['tables'].get('prs', []):
         if p.get('mergedAt'):
-            dd = date.fromisoformat(p['mergedAt'][:10]); week = (dd - timedelta(days=dd.weekday())).isoformat()
+            dd = datetime.fromisoformat(p['mergedAt'].replace('Z', '+00:00')).astimezone(tz).date()
+            if not metrics['start'] <= dd.isoformat() <= metrics['end']:
+                continue
+            week = (dd - timedelta(days=dd.weekday())).isoformat()
             weeks[week][0] += 1
             # Outcome definitions remain owned by kaizen-prs via collector table.
             weeks[week][1] += bool(p.get('no_rework'))
@@ -472,8 +485,14 @@ def render_tile(spec, series):
         names = spec.get('names') or fields
         names = names if len(names) == count else [str(i+1) for i in range(count)]
         stack = [v if v is not None else [0] * count for v in stack]
-        body = chart([dict(vals=stack, style='stack', colors=[colors[i % len(colors)] for i in range(count)], names=names)], kind=form)
-        body += '<div class="lg">' + ''.join(f'<span><i style="background:{colors[i % len(colors)]}"></i>{esc(name)}</span>' for i, name in enumerate(names)) + '</div>'
+        styles = [dict(vals=stack, style='stack', colors=[colors[i % len(colors)] for i in range(count)], names=names)]
+        if spec.get('overlay'):
+            styles.append(dict(vals=roll(series.get(spec['overlay'], [None] * N)), color=INK, label='PR reviews by others'))
+        body = chart(styles, kind=form, w=740 if spec.get('wide') else 360, h=150 if spec.get('wide') else 120, R=120 if spec.get('overlay') else 58)
+        body += '<div class="lg">' + ''.join(f'<span><i style="background:{colors[i % len(colors)]}"></i>{esc(name)}</span>' for i, name in enumerate(names))
+        if spec.get('overlay'):
+            body += f'<span><i style="background:{INK}"></i>reviews by others, 7d mean</span>'
+        body += '</div>'
     else:
         styles = [dict(vals=v, style='bar' if kind == 'bars' else 'line', color=colors[i % len(colors)], label=fields[i] if kind == 'lines' and len(vals) > 1 else '') for i, v in enumerate(vals)]
         if kind in ('cost lines', 'merge lines'):
@@ -486,6 +505,8 @@ def render_tile(spec, series):
         body = chart(styles, kind=form, w=740 if spec.get('wide') else 360, h=170 if spec.get('wide') else 120, ymax=40 if kind == 'cost lines' else 72 if kind == 'merge lines' else None)
         if kind == 'bars':
             body = chart([dict(vals=vals[0], style='bar', color=LIGHT), dict(vals=roll(vals[0]), color=INK, label='7d mean')], kind=form)
+    if spec.get('foot'):
+        body += f'<div class="foot">{esc(spec["foot"])}</div>'
     return tile(title, body, key, spec['home'], kval, 'w2' if spec.get('wide') else '')
 
 

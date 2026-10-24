@@ -29,6 +29,7 @@ class CollectorTest(unittest.TestCase):
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('HWORKS_')}
         self.env.update(HOME=str(self.root), HWORKS_PI_SESSIONS=str(self.sessions),
                         HWORKS_TASKS_DIR=str(self.root / 'missing'), HWORKS_RUN_HISTORY=str(self.root / 'missing-history'),
+                        HWORKS_SUBAGENT_RUNS=str(self.root / 'missing-runs'),
                         HWORKS_FM_TZ='UTC', HWORKS_FM_SESSION_RULES='[{"pattern":"factory", "class":"factory"}]',
                         HWORKS_GH=str(FIX / 'fake-gh.sh'), FM_GH_DATA=str(FIX / 'prs.json'), FM_GH_CALLS=str(self.root / 'gh-calls'))
 
@@ -101,6 +102,25 @@ class CollectorTest(unittest.TestCase):
         self.assertTrue(any('pi sessions:' in x for x in result['coverage']['missing_sources']))
         self.assertTrue(any('git ' in x for x in result['coverage']['missing_sources']))
 
+    def test_default_subagent_directory_availability(self):
+        self.env.pop('HWORKS_SUBAGENT_RUNS')
+        self.env['TMPDIR'] = str(self.root)
+        runs = self.root / f'pi-subagents-uid-{os.getuid()}' / 'async-subagent-runs'
+        run = runs / 'run-1'; run.mkdir(parents=True)
+        (run / 'events.jsonl').write_text(json.dumps(dict(
+            type='subagent.control', event=dict(type='needs_attention',
+            ts='2026-01-02T12:00:00Z', reason='failed', agent='coder', message='help'))) + '\n')
+        result = self.run_metrics()
+        self.assertEqual([result['days'][1][k] for k in ('subagent_fail', 'babysitter_fail')], [1, 0])
+        self.assertIn('blockers: fail', result['coverage']['sources'])
+        (run / 'events.jsonl').write_text('')
+        result = self.run_metrics()
+        self.assertEqual(result['days'][1]['subagent_fail'], 0)
+        self.env['HWORKS_SUBAGENT_RUNS'] = str(self.root / 'absent-runs')
+        result = self.run_metrics()
+        self.assertIsNone(result['days'][1]['subagent_fail'])
+        self.assertTrue(any('subagent runs: not found' in s for s in result['coverage']['missing_sources']))
+
     def test_churn_on_small_git_repo(self):
         repo = self.root / 'repo'; repo.mkdir()
         def git(*args, **env):
@@ -121,6 +141,16 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual([day[k] for k in ('added', 'deleted', 'churn21', 'churn7', 'revisit_changes', 'factory_commits')], [1, 1, 1, 1, 1, 1])
         self.assertEqual(result['tables']['churn'][str(repo)]['totals']['churn21_ratio'], .25)
         self.assertEqual(result['days'][3]['factory_commits'], 0)
+        for repo_class in ('product', 'factory'):
+            missing = dict(path=str(self.root / 'missing-repo'), **{'class': repo_class})
+            for repos in ([missing, dict(path=str(repo), **{'class': 'factory'})],
+                          [dict(path=str(repo), **{'class': 'factory'}), missing]):
+                self.env['HWORKS_FM_REPOS'] = json.dumps(repos)
+                partial = self.run_metrics()
+                self.assertEqual([partial['days'][2][k] for k in ('added', 'deleted', 'churn21', 'churn7', 'moved', 'revisit_changes', 'changes')], [None] * 7)
+                self.assertEqual(partial['days'][2]['factory_commits'], 1 if repo_class == 'product' else None)
+                self.assertEqual(partial['tables']['churn'][str(repo)]['totals']['churn21_ratio'], .25)
+                self.assertTrue(any('missing-repo' in s for s in partial['coverage']['missing_sources']))
 
 
 if __name__ == '__main__':

@@ -80,6 +80,52 @@ class RendererTest(unittest.TestCase):
             self.assertIn('key metric: optimize: higher', merged)
             self.assertEqual(text.count('<tr class="krow">'), 6)
 
+    def test_stack_labels_are_escaped(self):
+        data = json.loads((FIX / 'tiles.json').read_text())
+        data['tiles'][1]['names'] = ['</title><script>alert(1)</script><title>', 'ok']
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'tiles.json'; path.write_text(json.dumps(data))
+            text = self.run_dashboard(FIX / 'metrics.json', '--tiles', str(path))
+        self.assertIn('&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;title&gt; 4', text)
+        self.assertNotIn('<script', text.lower())
+
+    def test_weekly_no_rework_uses_local_reporting_window(self):
+        data = json.loads((FIX / 'metrics.json').read_text())
+        data['tz'] = 'America/Los_Angeles'
+        data['tables']['prs'] = [
+            dict(mergedAt=ts, no_rework=ts not in ('2026-01-01T07:59:59Z', '2026-01-22T08:00:00Z'))
+            for ts in ('2025-01-01T12:00:00Z', '2027-01-01T12:00:00Z',
+                       '2026-01-01T07:59:59Z', '2026-01-05T01:00:00Z',
+                       '2026-01-22T07:59:59Z', '2026-01-22T08:00:00Z')
+            for _ in range(5)]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+            text = self.run_dashboard(path)
+        fragment = text[text.index('Merged with no rework, by week'):text.index('Review dispatcher verdicts against outcome')]
+        self.assertIn('2025-12-29', fragment)
+        self.assertIn('2026-01-19', fragment)
+        self.assertEqual(fragment.count('>1.0</text>'), 2)
+        for week in ('2024-12-30', '2026-12-28', '2026-01-05'):
+            self.assertNotIn(week, fragment)
+
+    def test_measured_prototype_annotations(self):
+        data = json.loads((FIX / 'metrics.json').read_text())
+        data['tables']['prs_per_task'] = [2, 4]
+        for d in data['days']:
+            d.update(abandoned=1, abandoned_spend=0, open_prs=2, open_age=1,
+                     human_reviews=54321, ops=20, sig_correction=1, sig_abort=0,
+                     sig_approval=0, **{'sig_status-check': 0})
+        data['days'][-1].update(abandoned_spend=123.45, open_age=987.6)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+            text = self.run_dashboard(path)
+        self.assertIn('PRs per task: mean 3.00, max 4, over 2 tasks', text)
+        self.assertIn('Direct cost of these PRs: $123 over the period', text)
+        self.assertIn('median open-PR age 988 days', text)
+        fragment = text[text.index('Operator touches per day, by type'):text.index('Friction per merged PR', text.index('<h2>Human touches'))]
+        self.assertIn('PR reviews by others', fragment)
+        self.assertIn('54,321', fragment)
+
     def test_rejects_invalid_extension_at_boundary(self):
         with tempfile.TemporaryDirectory() as temp:
             p = Path(temp) / 'bad.json'

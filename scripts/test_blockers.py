@@ -45,6 +45,11 @@ class Friction(unittest.TestCase):
     def rows(self, *args):
         return [json.loads(line) for line in self.run_script("--since", "2026-01-01", "--json", *args).stdout.splitlines()]
 
+    def test_json_reports_missing_sources_on_stderr(self):
+        result = self.run_script('--since', '2026-01-01', '--json')
+        self.assertIn('note: subagent runs: not found', result.stderr)
+        self.assertEqual({r['source'] for r in map(json.loads, result.stdout.splitlines())}, {'friction', 'open-questions'})
+
     def test_entries_group_by_who_caught_them_and_category(self):
         got = {(r["kind"], r["rule"], r["ts"][:10]) for r in self.rows() if r["source"] == "friction"}
         undated = [r for r in self.rows() if r["rule"] == "test-gap"]
