@@ -413,19 +413,28 @@ def backend_miss(turns, i, prev_ctx, lookahead=10):
     turn i. Cache breakpoints sit on the tools, the system prompt, and the last message, so turn i
     wrote entries only inside the tools and system prompt and at its own end, past that context.
     Such a read means the prefix was intact and turn i reached a cache that lacked it (another
-    region or replica), not a changed prompt. The context of a segment's first turn bounds the
-    tools and system prompt from above; a system prompt change starts a new segment."""
+    region or replica), not a changed prompt.
+
+    The first turn with usage after a model or system prompt change bounds the tools and system
+    prompt from above. Contexts must not shrink from the turn before i through the read: a
+    shorter context means a branch, whose turns can write their ends at or below that context."""
     ctx = lambda x: x["input"] + x["cr"] + x["cw"]
-    floor = ctx(turns[0])
-    for x in turns[1:i]:
-        if "system prompt change" in x["events"]:
+    floor = model = None
+    for x in turns[:i]:
+        if x["model"] != model or "system prompt change" in x["events"] or "model change" in x["events"]:
+            floor, model = None, x["model"]
+        if floor is None and ctx(x) > 0:
             floor = ctx(x)
     t = turns[i]
+    if floor is None or t["model"] != model or ctx(t) < prev_ctx:
+        return False
+    last = ctx(t)
     for u in turns[i + 1:i + 1 + lookahead]:
-        if u["events"]:
+        if u["events"] or u["model"] != model or ctx(u) < last:
             return False
         if max(t["cr"], floor) < u["cr"] <= prev_ctx:
             return True
+        last = ctx(u)
     return False
 
 

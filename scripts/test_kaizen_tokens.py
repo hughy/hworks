@@ -308,9 +308,9 @@ WF = "99999999-0000-0000-0000-000000000000"
 
 class BackendMiss(unittest.TestCase):
     @staticmethod
-    def turns(*reads_writes, events_at=None):
-        events_at = events_at or {}
-        return [{"input": 0, "cr": cr, "cw": cw, "events": events_at.get(i, [])}
+    def turns(*reads_writes, events_at=None, models=None):
+        events_at, models = events_at or {}, models or {}
+        return [{"input": 0, "cr": cr, "cw": cw, "events": events_at.get(i, []), "model": models.get(i, "m1")}
                 for i, (cr, cw) in enumerate(reads_writes)]
 
     def test_later_read_of_an_older_entry_proves_it(self):
@@ -333,6 +333,18 @@ class BackendMiss(unittest.TestCase):
         t = self.turns((0, 2000), (0, 3000), (3000, 1000), (0, 5000), (3000, 2000),
                        events_at={1: ["system prompt change"]})
         self.assertFalse(kt.backend_miss(t, 3, prev_ctx=4000))
+
+    def test_floor_skips_a_failed_first_request(self):
+        t = self.turns((0, 0), (0, 2000), (2000, 1500), (0, 4000), (2000, 2500))
+        self.assertFalse(kt.backend_miss(t, 3, prev_ctx=3500))
+
+    def test_a_shorter_context_is_a_branch(self):
+        t = self.turns((0, 2000), (2000, 1500), (3500, 4500), (0, 4000), (4000, 500))
+        self.assertFalse(kt.backend_miss(t, 3, prev_ctx=8000))
+
+    def test_model_change_resets_the_floor(self):
+        t = self.turns((0, 2000), (0, 4000), (0, 5000), (3000, 2500), models={1: "m2", 2: "m2", 3: "m2"})
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=4000))
 
     def test_report_splits_proven_misses_from_unexplained(self):
         with tempfile.TemporaryDirectory() as d:
