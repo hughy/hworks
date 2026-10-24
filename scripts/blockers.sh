@@ -15,12 +15,18 @@
 #   HWORKS_SUBAGENT_RUNS       pi-subagents async run dirs (default $TMPDIR/pi-subagents-uid-$UID/async-subagent-runs)
 #   HWORKS_RUN_HISTORY         pi-subagents run history (default ~/.pi/agent/run-history.jsonl)
 #   HWORKS_HARNESS_AUDIT_LOG   a harness guard audit log: JSONL rows with ts, action, rule (unset by default)
-# adapters/local/blockers.env, when present, is sourced first to set any of these.
+# adapters/local/blockers.env, when present, is sourced first to set any of these. A linked worktree without
+# adapters/local reads the main checkout's, where install scripts link it.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+local_dir="$root/adapters/local"
+if [ ! -d "$local_dir" ] && common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+  [ "${common##*/}" = .git ] && [ -d "${common%/.git}/adapters/local" ]; then
+  local_dir="${common%/.git}/adapters/local"
+fi
 # shellcheck disable=SC1091
-[ -f "$root/adapters/local/blockers.env" ] && . "$root/adapters/local/blockers.env"
+[ -f "$local_dir/blockers.env" ] && . "$local_dir/blockers.env"
 
 since=7d; json=0; match=; source=; kind=
 while [ $# -gt 0 ]; do

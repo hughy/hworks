@@ -11,6 +11,12 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 agents="$root/agents"
 marker="$root/.models-profile"
 settings=${PI_SETTINGS:-$HOME/.pi/agent/settings.json}
+# A linked worktree without adapters/local reads the main checkout's, where install scripts link it.
+local_dir="$root/adapters/local"
+if [ ! -d "$local_dir" ] && common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+  [ "${common##*/}" = .git ] && [ -d "${common%/.git}/adapters/local" ]; then
+  local_dir="${common%/.git}/adapters/local"
+fi
 
 rows() {
   local f
@@ -20,7 +26,7 @@ active() { [ -f "$marker" ] && cat "$marker" || echo inherit; }
 extra_agents() {
   if [ -n "${HWORKS_MODEL_AGENTS+x}" ]; then printf '%s\n' "$HWORKS_MODEL_AGENTS"; return; fi
   local f
-  for f in "$root"/adapters/local/*.env; do if [ -f "$f" ]; then sed -n 's/^HWORKS_MODEL_AGENTS=//p' "$f"; fi; done | tail -n 1 | tr -d "\"'"
+  for f in "$local_dir"/*.env; do if [ -f "$f" ]; then sed -n 's/^HWORKS_MODEL_AGENTS=//p' "$f"; fi; done | tail -n 1 | tr -d "\"'"
 }
 extras=$(extra_agents | tr ',' ' ')
 is_agent() {
