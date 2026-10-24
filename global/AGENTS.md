@@ -47,7 +47,7 @@
 
 ## Tool hygiene
 
-- Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands as background processes that wake you on exit or on a log match, and use a PR tracker, not polling, for CI and reviews.
+- Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands as background processes that wake you on exit or on a log match, and use a PR tracker, not polling, for CI and reviews. Do not pass a short `timeout` to a gate or test run in foreground bash; on pi, hworks `extensions/gate-timeout.ts` raises it to 1800 s.
 - Read files with `hashread` and an `offset`/`limit` range. Pipe any command that may print more than 200 lines through `head`, `tail`, or a filter (`rg -m`, `git diff --stat`, `jq`). Exception: never filter a test, lint, or check run. The failing line can fall outside the filter and force a rerun; run it unfiltered and, when the harness truncates and saves the full output to a file, search that file.
 
 ## Comments
@@ -109,6 +109,16 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). F
 - Do not call the Datadog MCP tools, even if they are available.
 - Run `pup --help` or `pup <domain> --help` to discover commands. Run `pup auth login` if auth fails.
 - Add `--no-agent` when writing scripts, aliases, or runbooks for me to run myself. Agent mode wraps output in a `{status,data,metadata}` envelope that my shell does not produce.
+
+## Rules and what enforces them
+
+When the operator corrects a mistake, add its rule here with what enforces it. A rule enforced by nothing is a repeat risk: fix it with code, a type, a check, or a test before adding more prose.
+
+| Rule | Enforced by |
+|---|---|
+| Do not ask mid-task; do not run git commands that destroy history or uncommitted work. | `extensions/autonomy.ts`; `extensions/autonomy.test.mts` |
+| A gate or test in foreground bash must not die on the bash timeout. | `extensions/gate-timeout.ts` raises `timeout` to 1800 s for gate and test commands; `extensions/gate-timeout.test.mts` replays past timed-out commands |
+| `subagent({ workflow: true })` needs a fence tagged `js workflow`. | `extensions/workflow-fence.ts`; `extensions/workflow-fence.test.mts` |
 
 ## hworks
 

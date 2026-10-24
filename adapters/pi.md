@@ -37,7 +37,7 @@ Give every `coder` run a `gate` (the test command, typecheck, or the repo's veri
 
 ## Long commands
 
-A child whose tools include both `bash` and `subagent_command` can monitor a long command: `bash({ command, yieldTimeMs: 30000 })` returns a handle with its `toolCallId`, then `subagent_command({ action: "status", toolCallId: "<that exact id>", waitMs: 30000 })` reports running or the terminal state, exit, and output tail. A yielded handle is not a successful exit. The command stays owned by the child: it counts against the run's deadline, and the run fails if it ends with the command unfinished. A local adapter may name a different monitor.
+A child whose tools include both `bash` and `subagent_command` can monitor a long command: `bash({ command, yieldTimeMs: 30000 })` returns a handle with its `toolCallId`, then `subagent_command({ action: "status", toolCallId: "<that exact id>", waitMs: 30000 })` reports running or the terminal state, exit, and output tail. A yielded handle is not a successful exit, and the command still ends at its bash `timeout` (a harness guard may inject 300 s when none is passed): `extensions/gate-timeout.ts` raises that to 1800 s for gate and test commands, and any other long command needs an explicit `timeout`. The command stays owned by the child: it counts against the run's deadline, and the run fails if it ends with the command unfinished. A local adapter may name a different monitor.
 
 ## Workflow scripts
 
