@@ -86,64 +86,15 @@ const PATTERNS: Array<[string, RegExp]> = [
   ["shred / dd", /(?:^|[;&|]\s*)(?:shred|dd)\s/],
 ];
 
-// Heredoc bodies, quoted strings, and comments are data (prompts, commit messages, doc edits), not commands.
-// One left-to-right scan, so a quote inside another kind of quote, an escaped quote, or an apostrophe in a
-// comment cannot pair with a later quote and hide the commands between them. An unclosed quote, or a `<<`
-// with no closing delimiter line (an arithmetic shift), is left as text. Dropping quoted text misses
-// `sh -c "..."`; a harness guard that matches the full string is the backstop.
+// Heredoc bodies and quoted strings are data (prompts, commit messages, doc edits), not commands.
+// Dropping them misses `sh -c "..."`; a harness guard that matches the full string is the backstop.
 export function stripData(command: string): string {
-  const s = command
+  return command
     .replace(/--force-with-lease=(['"])([^'"\s]*)\1/g, "--force-with-lease=$2")
-    .replace(/"(\$[^"\s]*)"/g, "$1");
-  let out = "";
-  const heredocs: string[] = [];
-  let i = 0;
-  while (i < s.length) {
-    const c = s[i];
-    if (c === "\\") {
-      out += s.slice(i, i + 2);
-      i += 2;
-    } else if (c === "'" || c === '"') {
-      let j = i + 1;
-      while (j < s.length && s[j] !== c) j += c === '"' && s[j] === "\\" ? 2 : 1;
-      if (j >= s.length) {
-        out += c;
-        i++;
-      } else {
-        out += c + c;
-        i = j + 1;
-      }
-    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(s[i - 1]))) {
-      while (i < s.length && s[i] !== "\n") i++;
-    } else if (c === "<" && s[i + 1] === "<" && s[i - 1] !== "<" && s[i + 2] !== "<") {
-      const m = /^<<-?[ \t]*(['"]?)(\w+)\1/.exec(s.slice(i));
-      if (m && new RegExp(`\\n[ \\t]*${m[2]}[ \\t]*(?:\\n|$)`).test(s.slice(i))) {
-        heredocs.push(m[2]);
-        out += " ";
-        i += m[0].length;
-      } else {
-        out += c;
-        i++;
-      }
-    } else if (c === "\n" && heredocs.length) {
-      out += "\n";
-      i++;
-      for (const delim of heredocs) {
-        while (i < s.length) {
-          let e = s.indexOf("\n", i);
-          if (e < 0) e = s.length;
-          const line = s.slice(i, e);
-          i = e + 1;
-          if (line.trim() === delim) break;
-        }
-      }
-      heredocs.length = 0;
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  return out;
+    .replace(/"(\$[^"\s]*)"/g, "$1")
+    .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\s*(?=\n|$)/g, "")
+    .replace(/'[^']*'/g, "''")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""');
 }
 
 // A lease that names the expected remote head (`--force-with-lease=<ref>:<sha>`) is undoable: the old head is in
