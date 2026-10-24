@@ -74,7 +74,7 @@ The smallest-complete-change ladder and the never-cut floor were adopted into `a
 
 ### pasted agent-audit prompt (2026-10-21)
 
-`scripts/kaizen-prs.py` (PR outcomes, test share, time split), the `kaizen-prep.py` source preflight, kaizen verification lanes, and sampled scorecards were adopted from it. The idea in Watching above is not repeated here.
+`scripts/kaizen-prs.py` (PR outcomes, test share, time split), the `kaizen-prep.py` source preflight, kaizen verification lanes, and sampled scorecards were adopted from it. Its Watching idea, extending an existing test before adding one, landed in `agents/coder.md`.
 
 | idea | reason |
 |---|---|
