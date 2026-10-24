@@ -338,9 +338,24 @@ class BackendMiss(unittest.TestCase):
         t = self.turns((0, 0), (0, 2000), (2000, 1500), (0, 4000), (2000, 2500))
         self.assertFalse(kt.backend_miss(t, 3, prev_ctx=3500))
 
-    def test_a_shorter_context_is_a_branch(self):
-        t = self.turns((0, 2000), (2000, 1500), (3500, 4500), (0, 4000), (4000, 500))
-        self.assertFalse(kt.backend_miss(t, 3, prev_ctx=8000))
+    def test_a_shrinking_context_after_the_miss_ends_the_search(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 4000), (0, 3000), (3500, 500))
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_a_read_of_the_misses_own_write_proves_nothing(self):
+        t = self.turns((0, 2000), (2000, 1500), (0, 3500), (3500, 500))
+        self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
+
+    def test_a_parent_break_is_a_branch(self):
+        b = Builder().user("u").turn(usage(inp=5, cw=3000)).user("again").turn(usage(inp=5, cw=3000))
+        for k, line in enumerate(b.lines):
+            line["id"], line["parentId"] = f"e{k}", f"e{k - 1}" if k else None
+        b.lines[3]["parentId"] = "e1"
+        with tempfile.TemporaryDirectory() as d:
+            b.write(os.path.join(d, "s.jsonl"))
+            s = kt.read_session(os.path.join(d, "s.jsonl"), kt.ks.parse_since("2026-09-01"), [])
+        self.assertEqual([t["events"] for t in s["turns"]], [[], ["branch"]])
+        self.assertEqual(kt.rewrite_cause(*s["turns"]), "branch")
 
     def test_model_change_resets_the_floor(self):
         t = self.turns((0, 2000), (0, 4000), (0, 5000), (3000, 2500), models={1: "m2", 2: "m2", 3: "m2"})

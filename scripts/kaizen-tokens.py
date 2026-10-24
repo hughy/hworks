@@ -21,7 +21,8 @@ Sections:
                 each result's size times the turns left before the session ends or compacts.
   cache writes  turns whose cache read fell below half the previous turn's context, so the
                 cached prefix was written again, by cause: session start,
-                compaction, model or thinking change, context edit, system prompt change, idle
+                compaction, model or thinking change, context edit, system prompt change, branch
+                (an entry whose parent is not the entry before it), idle
                 past the cache lifetime, backend cache miss, or unexplained. A backend cache
                 miss is proven when a later turn reads an entry that predates the miss, so the
                 prefix was intact and the request reached a cache without it (another region or
@@ -196,7 +197,7 @@ def read_session(path, since, notes):
     results, and the prompt characters sent before the first turn."""
     s = {"turns": [], "system": None, "tools": None, "results": [], "pre_chars": 0, "cwd": None, "agent": None,
          "child_id": None, "thinking": None, "structured": None, "wf_children": []}
-    calls, pending, bad = {}, [], 0
+    calls, pending, bad, last_id = {}, [], 0, None
     try:
         f = open(path, errors="replace")
     except OSError as e:
@@ -212,6 +213,10 @@ def read_session(path, since, notes):
             if not isinstance(e, dict):
                 continue
             t = e.get("type")
+            parent = e.get("parentId")
+            if parent and last_id and parent != last_id:
+                pending.append("branch")
+            last_id = e.get("id") or last_id
             if t == "session":
                 s["cwd"] = e.get("cwd") if isinstance(e.get("cwd"), str) else None
                 continue
@@ -398,7 +403,7 @@ def p90(xs):
 def rewrite_cause(prev, t):
     if prev is None:
         return "session start"
-    for ev in ("compaction", "model change", "thinking change", "context edit", "system prompt change"):
+    for ev in ("compaction", "model change", "thinking change", "context edit", "system prompt change", "branch"):
         if ev in t["events"]:
             return ev
     ttl = 3600 if prev["cw1h"] or t["cw1h"] else 300
@@ -411,13 +416,13 @@ def backend_miss(turns, i, prev_ctx, lookahead=10):
     """True when a later turn reads a cached prefix that turn i could not have written: longer
     than turn i read and than the tools and system prompt, and no longer than the context before
     turn i. Cache breakpoints sit on the tools, the system prompt, and the last message, so turn i
-    wrote entries only inside the tools and system prompt and at its own end, past that context.
-    Such a read means the prefix was intact and turn i reached a cache that lacked it (another
-    region or replica), not a changed prompt.
+    wrote entries only inside the tools and system prompt and at its write end (cache read plus
+    write), which must lie past that context. Such a read means the prefix was intact and turn i
+    reached a cache that lacked it (another region or replica), not a changed prompt.
 
     The first turn with usage after a model or system prompt change bounds the tools and system
-    prompt from above. Contexts must not shrink from the turn before i through the read: a
-    shorter context means a branch, whose turns can write their ends at or below that context."""
+    prompt from above. Any event between turn i and the read, a branch included, ends the search,
+    and so does a shrinking context, which can mean a branch the transcript did not mark."""
     ctx = lambda x: x["input"] + x["cr"] + x["cw"]
     floor = model = None
     for x in turns[:i]:
@@ -426,7 +431,7 @@ def backend_miss(turns, i, prev_ctx, lookahead=10):
         if floor is None and ctx(x) > 0:
             floor = ctx(x)
     t = turns[i]
-    if floor is None or t["model"] != model or ctx(t) < prev_ctx:
+    if floor is None or t["model"] != model or t["cr"] + t["cw"] <= prev_ctx:
         return False
     last = ctx(t)
     for u in turns[i + 1:i + 1 + lookahead]:
