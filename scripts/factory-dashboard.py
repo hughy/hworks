@@ -311,6 +311,7 @@ table.tbl{{border-collapse:collapse;width:100%;font-size:12.5px}}
 .tbl th{{font-weight:400;color:#888;text-align:right;font-size:11px;padding:2px 6px;border-bottom:1px solid #ddd}}
 .tbl th:first-child{{text-align:left}}
 .tbl td{{padding:2px 6px;border-bottom:1px solid #f0ede4}}
+table.tbl:not(.sc) td{{text-align:right}} table.tbl:not(.sc) td:first-child{{text-align:left}}
 .num{{text-align:right}}
 table.mx{{border-collapse:collapse;margin:8px 0;font-size:12.5px}}
 .mx th{{font-weight:400;color:#666;padding:4px 8px;text-align:left;font-size:11.5px}}
