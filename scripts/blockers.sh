@@ -21,7 +21,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 local_dir="$root/adapters/local"
-if [ ! -d "$local_dir" ] && common=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+if [ ! -d "$local_dir" ] && common=$(unset $(git rev-parse --local-env-vars); git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
   [ "${common##*/}" = .git ] && [ -d "${common%/.git}/adapters/local" ]; then
   local_dir="${common%/.git}/adapters/local"
 fi
