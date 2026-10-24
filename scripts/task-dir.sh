@@ -15,6 +15,7 @@
 # collisions).
 # A newly created task dir gets a .task file of key=value lines: created, repo, branch, slug, cwd.
 set -euo pipefail
+export LC_ALL=C
 
 clean() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's#/#--#g' -e 's/[^a-z0-9._-]/-/g' -e 's/^[.-]*//'; }
 
