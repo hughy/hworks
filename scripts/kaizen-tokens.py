@@ -213,10 +213,12 @@ def read_session(path, since, notes):
             if not isinstance(e, dict):
                 continue
             t = e.get("type")
-            parent = e.get("parentId")
-            if parent and last_id and parent != last_id:
-                pending.append("branch")
-            last_id = e.get("id") or last_id
+            # The session header is not in the entry chain; a null parent after the chain began is a
+            # reset to a new root.
+            if t != "session" and "parentId" in e:
+                if last_id and e["parentId"] != last_id:
+                    pending.append("branch")
+                last_id = e.get("id") or last_id
             if t == "session":
                 s["cwd"] = e.get("cwd") if isinstance(e.get("cwd"), str) else None
                 continue

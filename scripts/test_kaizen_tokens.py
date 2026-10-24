@@ -346,16 +346,26 @@ class BackendMiss(unittest.TestCase):
         t = self.turns((0, 2000), (2000, 1500), (0, 3500), (3500, 500))
         self.assertFalse(kt.backend_miss(t, 2, prev_ctx=3500))
 
-    def test_a_parent_break_is_a_branch(self):
+    def branch_events(self, parent_of_second_user):
         b = Builder().user("u").turn(usage(inp=5, cw=3000)).user("again").turn(usage(inp=5, cw=3000))
         for k, line in enumerate(b.lines):
-            line["id"], line["parentId"] = f"e{k}", f"e{k - 1}" if k else None
-        b.lines[3]["parentId"] = "e1"
+            line["id"], line["parentId"] = f"e{k}", f"e{k - 1}" if k > 1 else None
+        b.lines[3]["parentId"] = parent_of_second_user
         with tempfile.TemporaryDirectory() as d:
             b.write(os.path.join(d, "s.jsonl"))
             s = kt.read_session(os.path.join(d, "s.jsonl"), kt.ks.parse_since("2026-09-01"), [])
+        return s
+
+    def test_a_parent_break_is_a_branch(self):
+        s = self.branch_events("e1")
         self.assertEqual([t["events"] for t in s["turns"]], [[], ["branch"]])
         self.assertEqual(kt.rewrite_cause(*s["turns"]), "branch")
+
+    def test_a_reset_to_a_new_root_is_a_branch(self):
+        self.assertEqual([t["events"] for t in self.branch_events(None)["turns"]], [[], ["branch"]])
+
+    def test_a_linear_chain_has_no_branch(self):
+        self.assertEqual([t["events"] for t in self.branch_events("e2")["turns"]], [[], []])
 
     def test_model_change_resets_the_floor(self):
         t = self.turns((0, 2000), (0, 4000), (0, 5000), (3000, 2500), models={1: "m2", 2: "m2", 3: "m2"})
