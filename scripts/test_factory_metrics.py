@@ -154,8 +154,19 @@ class CollectorTest(unittest.TestCase):
                                        ('kaizen', 'md', '- [x] private checklist text\n- [3] K-1 title | evidence | actor | deliverable | artifact | open\n- [drop] noise | reason\n- [5] K-2 title | evidence | actor | deliverable | artifact | implemented (landed)\n')]:
             root = Path(subprocess.check_output([str(HERE / 'task-dir.sh'), skill, checkout], env=self.env, text=True).strip())
             (root / ('findings-2026-01-02.' + suffix)).write_text(content)
+            if skill == 'hansei':
+                malformed = root / 'findings-2026-01-03.json'
+        expected = [dict(skill='hansei', date='2026-01-02', counts={'findings': 2}), dict(skill='kaizen', date='2026-01-02', counts={'open': 1, 'dropped': 1, 'implemented': 1})]
         result = self.run_metrics()
-        self.assertEqual(result['tables']['findings'], [dict(skill='hansei', date='2026-01-02', counts={'findings': 2}), dict(skill='kaizen', date='2026-01-02', counts={'open': 1, 'dropped': 1, 'implemented': 1})])
+        self.assertEqual(result['tables']['findings'], expected)
+        for payload in ([], None, True, 7, 'invalid'):
+            with self.subTest(payload=payload):
+                malformed.write_text(json.dumps(payload))
+                partial = self.run_metrics()
+                self.assertEqual(partial['tables']['findings'], expected)
+                self.assertIn(f'findings {malformed}: hansei findings must be an object', partial['coverage']['failures'])
+                self.assertEqual(sum(d['spend'] for d in partial['days']), 8)
+                self.assertEqual(partial['days'][1]['merged'], 4)
 
     def test_churn_on_small_git_repo(self):
         repo = self.root / 'repo'; repo.mkdir()

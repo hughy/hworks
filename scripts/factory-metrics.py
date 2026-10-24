@@ -484,6 +484,8 @@ def findings(start, end, cov):
                     continue
                 if skill == 'hansei':
                     data = json.loads(path.read_text())
+                    if not isinstance(data, dict):
+                        raise ValueError('hansei findings must be an object')
                     if not isinstance(data.get('findings'), list):
                         raise ValueError('findings must be a list')
                     counts = {'findings': len(data['findings'])}
