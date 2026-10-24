@@ -5,7 +5,7 @@ description: Entry point for non-trivial engineering work. Routes a task to one 
 
 # hughy-router
 
-On pi, read `../../adapters/pi.md` once per session before following any playbook. It maps Cursor terms in pstack text to pi mechanisms and names the agent for each role. Then read every file in `../../adapters/local/` if it exists; local adapters map the generic terms below to this harness's tools and win where they conflict. On Claude Code and Codex only the skills load: the roles named below map to that harness's own subagent, and `adapters/pi.md` does not apply.
+On pi, read `../../adapters/pi.md` once per session before following any playbook. It maps Cursor terms in pstack text to pi mechanisms and names the agent for each role. Then read every file in `../../adapters/local/` if it exists (in a linked worktree without one, the main checkout's); local adapters map the generic terms below to this harness's tools and win where they conflict. On Claude Code and Codex only the skills load: the roles named below map to that harness's own subagent, and `adapters/pi.md` does not apply.
 
 Skills named below live at `../<name>/SKILL.md`; read them by path, since the commands among them (`orchestrate`, `handoff`) are hidden from the catalog. Playbooks live under `../../pstack/skills/poteto-mode/playbooks/`. Playbooks are references, not scripts. Read the matched one when a run stalls, the change is high-stakes, or it runs unattended, and apply the deltas below where they conflict. Do not copy its steps into a todo list.
 

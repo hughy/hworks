@@ -13,7 +13,7 @@ marker="$root/.models-profile"
 settings=${PI_SETTINGS:-$HOME/.pi/agent/settings.json}
 # A linked worktree without adapters/local reads the main checkout's, where install scripts link it.
 local_dir="$root/adapters/local"
-if [ ! -d "$local_dir" ] && common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+if [ ! -d "$local_dir" ] && common=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
   [ "${common##*/}" = .git ] && [ -d "${common%/.git}/adapters/local" ]; then
   local_dir="${common%/.git}/adapters/local"
 fi

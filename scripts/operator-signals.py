@@ -180,7 +180,8 @@ def local_dir(root=ROOT):
         return own
     try:
         common = subprocess.run(["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                                capture_output=True, text=True, timeout=10).stdout.strip()
+                                capture_output=True, text=True, timeout=10,
+                                env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")}).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return own
     main = os.path.join(os.path.dirname(common), "adapters", "local")

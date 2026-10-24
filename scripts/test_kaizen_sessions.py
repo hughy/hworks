@@ -259,7 +259,8 @@ def linked_worktree(tmp):
     """A main checkout with adapters/local and a linked worktree of it without one."""
     main, wt = os.path.join(tmp, "main"), os.path.join(tmp, "wt")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
     for args in (["init", "-q", main], ["-C", main, "commit", "-q", "--allow-empty", "-m", "x"],
                  ["-C", main, "worktree", "add", "-q", wt]):
         subprocess.run(git + args, env=env, check=True, capture_output=True)
