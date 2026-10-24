@@ -50,6 +50,8 @@ const notGates: Array<[string, string]> = [
   ["go run", "go run /tmp/decode_check.go"],
   ["make target containing ci", "make special && make specify && make facilities"],
   ["npm install", "npm install"],
+  ["make makefile named test", "make -C services/api -f test clean"],
+  ["node --check on a test file", "node --check extensions/autonomy.test.mts"],
 ];
 for (const [name, cmd] of notGates) check(`not a gate: ${name}`, gateCommand(cmd) === null, { cmd, got: gateCommand(cmd) });
 

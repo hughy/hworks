@@ -14,19 +14,35 @@ export const MAX_TIMEOUT_S = 1800;
 const WRAPPER = /^(?:\w+=\S*|env|time|nice|nohup|exec|command|caffeinate|do|then|else|if|while|until)$/;
 const PY = String.raw`(?:(?:\S*/)?python[\d.]*\s+(?:-\S+\s+)*)`;
 
-const GATES: Array<[string, RegExp]> = [
+const MAKE_TARGET = /^(?:[\w.]*[-_:/])?(?:tests?|check|lint|gate|ci|e2e|verify)(?:[-_:][\w.:-]*)?$/;
+// make options whose value is the next word, so a makefile or directory named `test` is not a target.
+const MAKE_OPTION_ARG = new Set(["-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile", "--include-dir",
+  "--old-file", "--assume-old", "--new-file", "--assume-new", "--what-if"]);
+
+function makeRunsGate(h: string): boolean {
+  const toks = h.split(/\s+/);
+  if (toks[0] !== "make") return false;
+  for (let i = 1; i < toks.length; i++) {
+    const t = toks[i];
+    if (MAKE_OPTION_ARG.has(t)) i++;
+    else if (!t.startsWith("-") && !t.includes("=") && MAKE_TARGET.test(t)) return true;
+  }
+  return false;
+}
+
+const GATES: Array<[string, { test(h: string): boolean }]> = [
   ["go test/vet/build", /^go\s+(?:test|vet|build)\b/],
   ["python -m pytest/unittest", new RegExp(String.raw`^${PY}-m\s+(?:pytest|unittest)\b`)],
   ["pytest", /^(?:\S*\/)?pytest\b/],
   ["mutate.py", new RegExp(String.raw`^${PY}?\S*mutate\.py\b`)],
-  ["make gate target", /^make\b.*?\s(?:[\w.]*[-_:/])?(?:tests?|check|lint|gate|ci|e2e|verify)(?:[-_:][\w.:-]*)?(?=\s|$)/],
+  ["make gate target", { test: makeRunsGate }],
   ["golangci-lint run", /^(?:\S*\/)?golangci-lint\s+run\b/],
   ["package-manager test/build", /^(?:npm|pnpm|yarn|bun)(?:\s+--?[\w-]+(?:[=\s](?!-)\S+)?)*\s+(?:run\s+)?(?:test|check|lint|build|e2e)(?:[-:]\S*)?(?=\s|$)/],
   ["jest/vitest/playwright", /^(?:npx\s+|pnpm\s+exec\s+)?(?:jest|vitest|playwright\s+test)\b/],
   ["cargo test/build", /^cargo\s+(?:test|build|clippy|nextest)\b/],
   ["forge test/build", /^forge\s+(?:test|build|coverage)\b/],
   ["node --test", /^node\s+(?:--\S+\s+)*--test\b/],
-  ["node test file", /^node\s+(?:--\S+\s+)*\S*\.test\.[cm]?[jt]s\b/],
+  ["node test file", /^node(?!.*\s(?:--check|-c)(?:\s|$))\s+(?:--\S+\s+)*\S*\.test\.[cm]?[jt]s\b/],
   ["gate script", new RegExp(String.raw`^(?:(?:ba|z)?sh\s+|${PY})?\S*\b(?:check|gate|smoke|e2e|test)[\w-]*\.sh\b`)],
   ["gate script", new RegExp(String.raw`^${PY}?\S*(?:gate|smoke|e2e)[\w-]*\.py\b`)],
 ];
