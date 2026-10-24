@@ -172,6 +172,8 @@ if need(p, "harness audit log"):
                 o.get("cmd") or o.get("filePath") or o.get("reason"))
 
 rows.sort(key=lambda r: r["ts"])
+for n in notes:
+    print(f"\nnote: {n}", file=sys.stderr)
 if os.environ["BLOCKERS_JSON"] == "1":
     for r in rows:
         print(json.dumps(r))
@@ -214,6 +216,4 @@ if outcomes:
 unrecorded = sum(1 for r in rows if r["source"] == "open-questions" and not r["verdict"])
 if unrecorded:
     print(f"\n{unrecorded} open-question entries have no state field (written before it existed or malformed)")
-for n in notes:
-    print(f"\nnote: {n}", file=sys.stderr)
 PY

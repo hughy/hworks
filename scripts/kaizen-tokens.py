@@ -621,7 +621,7 @@ def long_context_report(sessions, rel, threshold, top):
     return rows, per[:top]
 
 
-def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=None, long_context=150000):
+def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=None, long_context=150000, until=None):
     notes = []
     sroot = src["sessions"]
     if not os.path.isdir(sroot):
@@ -639,6 +639,8 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=
         except OSError:
             continue
         s = read_session(p, since, notes)
+        if until is not None:
+            s["turns"] = [t for t in s["turns"] if t["dt"] is None or t["dt"] < until]
         if not any(t["after"] for t in s["turns"]):
             continue
         if cwd_match and not any(m.lower() in (s["cwd"] or os.path.relpath(p, sroot)).lower() for m in cwd_match):

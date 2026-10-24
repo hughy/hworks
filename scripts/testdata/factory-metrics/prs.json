@@ -1,0 +1,155 @@
+{
+  "https://github.com/example/widget/pull/1": {
+    "number": 1,
+    "url": "https://github.com/example/widget/pull/1",
+    "title": "feat: thing 1 task-A",
+    "body": "",
+    "headRefName": "feature",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": "2026-01-02T12:00:00Z",
+    "closedAt": "2026-01-02T12:00:00Z",
+    "state": "MERGED",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  },
+  "https://github.com/example/widget/pull/2": {
+    "number": 2,
+    "url": "https://github.com/example/widget/pull/2",
+    "title": "feat: thing 2",
+    "body": "",
+    "headRefName": "feature/TASK-b",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": "2026-01-02T12:00:00Z",
+    "closedAt": "2026-01-02T12:00:00Z",
+    "state": "MERGED",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  },
+  "https://github.com/example/widget/pull/3": {
+    "number": 3,
+    "url": "https://github.com/example/widget/pull/3",
+    "title": "feat: thing 3",
+    "body": "Resolves Task-C",
+    "headRefName": "feature",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": "2026-01-02T12:00:00Z",
+    "closedAt": "2026-01-02T12:00:00Z",
+    "state": "MERGED",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  },
+  "https://github.com/example/widget/pull/4": {
+    "number": 4,
+    "url": "https://github.com/example/widget/pull/4",
+    "title": "fix: fixes #1",
+    "body": "",
+    "headRefName": "feature",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": "2026-01-04T12:00:00Z",
+    "closedAt": "2026-01-04T12:00:00Z",
+    "state": "MERGED",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  },
+  "https://github.com/example/widget/pull/5": {
+    "number": 5,
+    "url": "https://github.com/example/widget/pull/5",
+    "title": "fix: unrelated, same files",
+    "body": "",
+    "headRefName": "feature",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": "2026-01-04T12:00:00Z",
+    "closedAt": "2026-01-04T12:00:00Z",
+    "state": "MERGED",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  },
+  "https://github.com/example/widget/pull/6": {
+    "number": 6,
+    "url": "https://github.com/example/widget/pull/6",
+    "title": "Revert \"feat: thing 3\"",
+    "body": "",
+    "headRefName": "feature",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": "2026-01-05T12:00:00Z",
+    "closedAt": "2026-01-05T12:00:00Z",
+    "state": "MERGED",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  },
+  "https://github.com/example/widget/pull/7": {
+    "number": 7,
+    "url": "https://github.com/example/widget/pull/7",
+    "title": "feat: thing 7",
+    "body": "",
+    "headRefName": "feature",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": null,
+    "closedAt": "2026-01-02T12:00:00Z",
+    "state": "CLOSED",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  },
+  "https://github.com/example/widget/pull/8": {
+    "number": 8,
+    "url": "https://github.com/example/widget/pull/8",
+    "title": "feat: thing 8",
+    "body": "",
+    "headRefName": "feature",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": null,
+    "closedAt": null,
+    "state": "OPEN",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  },
+  "https://github.com/example/widget/pull/9": {
+    "number": 9,
+    "url": "https://github.com/example/widget/pull/9",
+    "title": "feat: thing 9",
+    "body": "",
+    "headRefName": "feature",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "mergedAt": "2026-01-02T12:00:00Z",
+    "closedAt": "2026-01-02T12:00:00Z",
+    "state": "MERGED",
+    "author": {
+      "login": "operator"
+    },
+    "reviews": [],
+    "commits": [],
+    "files": []
+  }
+}
