@@ -35,6 +35,7 @@ const gates: Array<[string, string]> = [
   ["npm --prefix", "npm --prefix apps/web test"],
   ["go test in a for loop", "for pkg in a b; do go test \"$pkg\"; done"],
   ["node test file", "node --experimental-strip-types extensions/autonomy.test.mts"],
+  ["node test file with script args", "node probe.test.mts --check"],
 ];
 for (const [name, cmd] of gates) check(`gate: ${name}`, gateCommand(cmd) !== null, cmd);
 
@@ -51,6 +52,7 @@ const notGates: Array<[string, string]> = [
   ["make target containing ci", "make special && make specify && make facilities"],
   ["npm install", "npm install"],
   ["make makefile named test", "make -C services/api -f test clean"],
+  ["make combined -sf test", "make -sf test clean"],
   ["node --check on a test file", "node --check extensions/autonomy.test.mts"],
 ];
 for (const [name, cmd] of notGates) check(`not a gate: ${name}`, gateCommand(cmd) === null, { cmd, got: gateCommand(cmd) });

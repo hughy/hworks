@@ -24,10 +24,16 @@ function makeRunsGate(h: string): boolean {
   if (toks[0] !== "make") return false;
   for (let i = 1; i < toks.length; i++) {
     const t = toks[i];
-    if (MAKE_OPTION_ARG.has(t)) i++;
+    if (MAKE_OPTION_ARG.has(t) || /^-[a-zA-Z]*[CfIoW]$/.test(t)) i++;
     else if (!t.startsWith("-") && !t.includes("=") && MAKE_TARGET.test(t)) return true;
   }
   return false;
+}
+
+// Node options before the script; `--check`/`-c` there only parses the file. Arguments after it go to the test.
+function nodeRunsTestFile(h: string): boolean {
+  const m = /^node\s+((?:-\S+\s+)*)\S*\.test\.[cm]?[jt]s\b/.exec(h);
+  return !!m && !/(?:^|\s)(?:--check|-c)(?=\s|$)/.test(m[1]);
 }
 
 const GATES: Array<[string, { test(h: string): boolean }]> = [
@@ -42,7 +48,7 @@ const GATES: Array<[string, { test(h: string): boolean }]> = [
   ["cargo test/build", /^cargo\s+(?:test|build|clippy|nextest)\b/],
   ["forge test/build", /^forge\s+(?:test|build|coverage)\b/],
   ["node --test", /^node\s+(?:--\S+\s+)*--test\b/],
-  ["node test file", /^node(?!.*\s(?:--check|-c)(?:\s|$))\s+(?:--\S+\s+)*\S*\.test\.[cm]?[jt]s\b/],
+  ["node test file", { test: nodeRunsTestFile }],
   ["gate script", new RegExp(String.raw`^(?:(?:ba|z)?sh\s+|${PY})?\S*\b(?:check|gate|smoke|e2e|test)[\w-]*\.sh\b`)],
   ["gate script", new RegExp(String.raw`^${PY}?\S*(?:gate|smoke|e2e)[\w-]*\.py\b`)],
 ];
