@@ -68,7 +68,8 @@ def daylabel(d):
 
 
 # ---------- sparkline ----------
-def spark(vals, w=120, h=20, kind="", bars=False):
+def spark(vals, w=120, h=20, kind="", bars=False, sample_dates=None):
+    sample_dates = sample_dates or dates
     pts = [(i, v) for i, v in enumerate(vals) if v is not None]
     if not pts:
         return ""
@@ -80,14 +81,14 @@ def spark(vals, w=120, h=20, kind="", bars=False):
     if bars:
         bw = max(1.2, (w - 6) / len(vals) * 0.6)
         for i, v in pts:
-            s.append(f'<rect x="{x(i)-bw/2:.1f}" y="{y(v):.1f}" width="{bw:.1f}" height="{h-2-y(v):.1f}" fill="{GREY}"><title>{daylabel(dates[i])}: {fmt(v, kind)}</title></rect>')
+            s.append(f'<rect x="{x(i)-bw/2:.1f}" y="{y(v):.1f}" width="{bw:.1f}" height="{h-2-y(v):.1f}" fill="{GREY}"><title>{daylabel(sample_dates[i])}: {fmt(v, kind)}</title></rect>')
     else:
         d = " ".join(f"{'M' if j == 0 else 'L'}{x(i):.1f},{y(v):.1f}" for j, (i, v) in enumerate(pts))
         s.append(f'<path d="{d}" fill="none" stroke="{GREY}" stroke-width="1"/>')
     imax = max(pts, key=lambda p: p[1])
-    s.append(f'<circle cx="{x(imax[0]):.1f}" cy="{y(imax[1]):.1f}" r="1.6" fill="{INK}"><title>max {daylabel(dates[imax[0]])}: {fmt(imax[1], kind)}</title></circle>')
+    s.append(f'<circle cx="{x(imax[0]):.1f}" cy="{y(imax[1]):.1f}" r="1.6" fill="{INK}"><title>max {daylabel(sample_dates[imax[0]])}: {fmt(imax[1], kind)}</title></circle>')
     li, lv = pts[-1]
-    s.append(f'<circle cx="{x(li):.1f}" cy="{y(lv):.1f}" r="2" fill="{ACC}"><title>{daylabel(dates[li])}: {fmt(lv, kind)}</title></circle>')
+    s.append(f'<circle cx="{x(li):.1f}" cy="{y(lv):.1f}" r="2" fill="{ACC}"><title>{daylabel(sample_dates[li])}: {fmt(lv, kind)}</title></circle>')
     s.append("</svg>")
     return "".join(s)
 
@@ -375,16 +376,15 @@ def generic_tiles(metrics):
     specs = []
     def add(key, title, bandname, fields=(), kind='lines', how='last', form='', better='none', target='', names=(), wide=False, rows=None):
         specs.append(dict(key=key, title=title, band=bandname, home='hworks', about=P.get(key, ''), kind=kind, series=list(fields),
-                          kpi=dict(series=fields[0], how=how, format=form, better=better) if fields else {},
+                          format=form, kpi=dict(series=fields[0], how=how, format=form, better=better) if fields else {},
                           key_metric=target, names=list(names), wide=wide, rows=rows))
-    output_target = 'optimize: higher'
     has_tasks = any(d.get('tasks_done') is not None for d in D)
-    add('tasks', 'Tasks completed per day', 'Output', ['tasks_stack'], 'stacked bars', 'sum', better='up', target=output_target if has_tasks else '', names=['landed', 'PR fixed', 'no PR', 'holding'])
+    add('tasks', 'Tasks completed per day', 'Output', ['tasks_stack'], 'stacked bars', 'sum', better='up', target='higher is better' if has_tasks else '', names=['landed', 'PR fixed', 'no PR', 'holding'])
     specs[-1]['kpi']['series'] = 'tasks_done'
     ppt = metrics['tables'].get('prs_per_task', [])
     if ppt:
         specs[-1]['foot'] = f'PRs per task: mean {st.mean(ppt):.2f}, max {max(ppt)}, over {len(ppt)} tasks'
-    add('merged', 'PRs merged per day', 'Output', ['merged'], 'bars', 'sum', better='up', target=output_target if not has_tasks else '')
+    add('merged', 'PRs merged per day', 'Output', ['merged'], 'bars', 'sum', better='up', target='higher is better' if not has_tasks else '')
     add('opened', 'PRs opened per day', 'Output', ['opened'], 'bars', 'sum', better='up')
     add('landed', 'Landed PRs, by merge day', 'Output', ['landed_stack'], 'stacked bars', names=['landed', 'fixed within 7d', 'in 7d window'])
     specs[-1]['kpi'] = dict(series='pr_fixed', how='sum', better='down')
@@ -394,7 +394,7 @@ def generic_tiles(metrics):
     add('abandoned', 'Closed unmerged', 'Output', ['abandoned'], 'bars', 'sum', better='down')
     abandoned_spend = nullable_sum([d.get('abandoned_spend') for d in D])
     specs[-1]['foot'] = f'Direct cost of these PRs: {fmt(abandoned_spend, "$")} over the period'
-    add('cpp', 'Cost per merged PR', 'Cost', ['cpp_all', 'cpp_prod', 'attr7'], kind='cost lines', form='$', better='down', target='optimize: lower', wide=True)
+    add('cpp', 'Cost per merged PR', 'Cost', ['cpp_all', 'cpp_prod', 'attr7'], kind='cost lines', form='$', better='down', target='lower is better', wide=True)
     add('cw', 'Cache-write share of spend', 'Cost', ['cw_share'], form='%', better='down')
     add('longc', 'Long-context share of spend', 'Cost', ['long_share'], form='%', better='down')
     add('spend', 'Spend per day by where the session ran', 'Cost', ['spend_product', 'spend_factory', 'spend_home', 'spend_auto'], 'small bars', 'sum', '$', wide=True)
@@ -405,10 +405,10 @@ def generic_tiles(metrics):
     add('repo_cost', 'Direct cost per PR, by repo', 'Cost', kind='range', rows=[(k.rsplit('/', 1)[-1], v['median'], v['p90'], v['n']) for k, v in repo.items()])
     report = metrics['tables'].get('token_report', {})
     for key, title, section, label in [('rewrites', 'Cache rewrites by cause', 'cache writes', 'cause'), ('loops', 'Review-loop spend by round', 'loop rounds', 'round')]:
-        add(key, title, 'Cost', kind='hbars', rows=[(str(r[label]), r['cost']) for r in report.get(section, [])], form='$')
+        add(key, title, 'Cost', kind='hbars', rows=[(('round ' if label == 'round' else '') + str(r[label]), r['cost']) for r in report.get(section, [])], form='$')
     add('cloud', 'Cloud agent spend', 'Cost', ['cloud'], 'empty')
     add('revcost', 'Cost per dispatched review', 'Cost', ['revcost'], 'empty')
-    add('ops_pr', 'Operator messages per merged PR', 'Human touches and friction', ['ops_pr'], better='down', target='optimize: lower')
+    add('ops_pr', 'Operator messages per merged PR', 'Human touches and friction', ['ops_pr'], better='down', target='lower is better')
     add('touches', 'Operator touches per day, by type', 'Human touches and friction', ['touch_stack'], 'stacked bars', names=['corrections', 'aborts', 'approvals and status checks', 'other'], wide=True)
     specs[-1]['kpi'] = dict(series='corr_pr', how='last', better='down')
     specs[-1]['overlay'] = 'human_reviews'
@@ -417,14 +417,14 @@ def generic_tiles(metrics):
     specs[-1]['kpi'] = {}
     add('decisions', 'Agent decisions: reversed and judged', 'Human touches and friction', ['oq_rev', 'oq_judged'], form='%', better='down')
     add('htm', 'Hours to merge', 'Human touches and friction', ['htm7'], kind='merge lines', form='h', better='down')
-    add('timesplit', 'Main-session time by who held the turn', 'Human touches and friction', kind='hbars', rows=[(k, v/3600) for k, v in metrics['tables'].get('time', {}).items()], form='h')
-    add('escaped', 'Escaped defects per merged PR', 'Review and quality', ['escaped_pr'], better='down', target='guardrail')
+    add('timesplit', 'Main-session time by who held the turn', 'Human touches and friction', kind='hbars', rows=[({'tool': 'tools', 'human': 'operator'}.get(k, k), v/3600) for k, v in metrics['tables'].get('time', {}).items()], form='h')
+    add('escaped', 'Escaped defects per merged PR', 'Review and quality', ['escaped_pr'], better='down', target='guardrail, keep low')
     add('funnel', 'Review-loop rounds', 'Review and quality', kind='hbars', rows=[('round ' + str(r['round']), [(r['rounds_with_blocker'], INK, 'blocked'), (r['runs'] - r['rounds_with_blocker'], LIGHT, 'clean')]) for r in report.get('loop rounds', [])])
     models = defaultdict(lambda: [0, 0])
     for r in report.get('roles', []):
         models[r['model']][0] += r.get('first_round_clean', 0)
         models[r['model']][1] += r.get('first_rounds', 0)
-    add('firstclean', 'First review clean, by coder model', 'Review and quality', kind='hbars', rows=[(m, a/b) for m, (a, b) in models.items() if b >= 10], form='%')
+    add('firstclean', 'First review clean, by coder model', 'Review and quality', kind='hbars', rows=[(f'{m.rsplit("/", 1)[-1]} ({b})', [(a/b, INK, 'clean')]) for m, (a, b) in models.items() if b >= 10], form='%')
     weeks = defaultdict(lambda: [0, 0])
     tz = ZoneInfo(metrics['tz'])
     for p in metrics['tables'].get('prs', []):
@@ -436,23 +436,56 @@ def generic_tiles(metrics):
             weeks[week][0] += 1
             # Outcome definitions remain owned by kaizen-prs via collector table.
             weeks[week][1] += bool(p.get('no_rework'))
-    add('rework', 'Merged with no rework, by week', 'Review and quality', kind='hbars', rows=[(w, b/a) for w, (a, b) in sorted(weeks.items()) if a >= 5], form='%')
+    add('rework', 'Merged with no rework, by week', 'Review and quality', kind='hbars', rows=[(f'week of {daylabel(w)} ({a})', [(b/a, INK, 'no rework')]) for w, (a, b) in sorted(weeks.items()) if a >= 5], form='%')
     add('hdispatch', 'Review dispatcher verdicts against outcome', 'Review and quality', kind='empty')
-    add('churn_chart', 'Lines rewritten within 21 days, share of added', 'Churn', ['cr'], form='%', better='down', target='guardrail')
-    rows = [['repo', 'lines added', 'churn21', 'moved', 'revisit']]
+    add('churn_chart', 'Lines rewritten within 21 days, share of added', 'Churn', ['cr'], form='%', better='down', target='guardrail, keep low')
+    rows = [['repo', 'lines added', 'churn21', 'moved', 'revisit', 'weekly']]
     for name, r in metrics['tables'].get('churn', {}).items():
-        t = r['totals']; rows.append([Path(name).name, t['added'], fmt(t['churn21_ratio'], '%'), fmt(t['moved_ratio'], '%'), fmt(t['revisit_share'], '%')])
+        t = r['totals']; rows.append([Path(name).name, fmt(t['added']), f"{t['churn21_ratio']:.1%}" if t['churn21_ratio'] is not None else '-', f"{t['moved_ratio']:.1%}" if t['moved_ratio'] is not None else '-', fmt(t['revisit_share'], '%'), name])
     add('churn_tbl', 'Churn by repo', 'Churn', kind='table', rows=rows if len(rows) > 1 else [], wide=True)
-    add('failures', 'Subagent failures per day', 'Factory health and improvement', ['sub_stack'], 'stacked bars', 'sum', better='down', target='guardrail', names=['other roles', 'pr-babysitter'])
+    specs[-1]['weekly'] = []
+    for name, result in metrics['tables'].get('churn', {}).items():
+        weekly = defaultdict(lambda: [0, 0])
+        for row in result.get('daily', []):
+            dd = date.fromisoformat(row['date'])
+            week = (dd - timedelta(days=dd.weekday())).isoformat()
+            weekly[week][0] += row['added']
+            weekly[week][1] += row['churn21']
+        weeks = [(w, b/a) for w, (a, b) in sorted(weekly.items()) if a >= 200]
+        specs[-1]['weekly'].append((name, [v for _, v in weeks], [w for w, _ in weeks]))
+    add('failures', 'Subagent failures per day', 'Factory health and improvement', ['sub_stack'], 'stacked bars', 'sum', better='down', target='guardrail, keep low', names=['other roles', 'pr-babysitter'])
     specs[-1]['kpi']['series'] = 'subfail'
-    for key, title, field in [('guards', 'Guard blocks per day', 'guard'), ('automations', 'Automation runs per day', 'automations'), ('commits', 'Factory commits per day', 'factory_commits'), ('kaizen', 'Kaizen and hansei findings per run', 'kaizen'), ('effective', 'Days to an effective fix', 'effective'), ('schema', 'Friction rows in schema', 'schema')]:
+    specs[-1]['notes'] = [(d['date'], nullable_sum([d.get('subagent_fail'), d.get('babysitter_fail')]) or 0, f"{daylabel(d['date'])}: {d['runs_never_started']:,} runs never started") for d in D if d.get('runs_never_started')]
+    for key, title, field in [('guards', 'Guard blocks per day', 'guard'), ('automations', 'Automation runs per day', 'automations'), ('commits', 'Factory commits per day', 'factory_commits'), ('effective', 'Days to an effective fix', 'effective'), ('schema', 'Friction rows in schema', 'schema')]:
         add(key, title, 'Factory health and improvement', [field], 'bars' if key in ('guards', 'commits') else 'lines', 'sum' if key in ('guards', 'commits') else 'last', '%' if key == 'schema' else '')
+    state_colors = {'implemented': INK, 'effective': INK, 'open': ACC, 'awaiting-user': GREY, 'dropped': LIGHT, 'findings': GREY, 'pending': LIGHT, 'unproven': GREY}
+    add('kaizen', 'Kaizen and hansei findings per run', 'Factory health and improvement', kind='hbars', rows=[(f"{r['skill']} {daylabel(r['date'])}", [(v, state_colors.get(k, GREY), k) for k, v in r['counts'].items()]) for r in sorted(metrics['tables'].get('findings', []), key=lambda r: (r['skill'] != 'kaizen', r['date']))])
+    labels = {'spend': ['product repos', 'factory repos', 'home tabs', 'automations'], 'catcher': ['self', 'test', 'reviewer', 'operator', 'ci'], 'decisions': ['reversed', 'judged'], 'queue': ['tasks not started', 'in progress', 'open PRs']}
+    palettes = {'tasks': [INK, ACC, LIGHT, GREY], 'landed': [INK, ACC, LIGHT], 'touches': [ACC, '#e08a7f', GREY, LIGHT], 'failures': [GREY, ACC], 'decisions': [ACC, GREY], 'queue': [GREY, INK, ACC], 'catcher': [GREY, GREY, GREY, ACC, GREY], 'ops_pr': [ACC], 'spend': [GREY], 'guards': [GREY], 'commits': [GREY], 'abandoned': [GREY]}
+    for spec in specs:
+        spec['labels'] = labels.get(spec['key'], [])
+        if spec['key'] in palettes:
+            spec['colors'] = palettes[spec['key']]
+        if spec['key'] in ('cw', 'longc', 'coverage', 'factory', 'decisions', 'schema'):
+            spec['ymax'] = 1
+        if spec['key'] in ('funnel', 'loops', 'timesplit'):
+            spec['lw'] = 70
+        elif spec['key'] in ('rework', 'rewrites'):
+            spec['lw'] = 150
+        elif spec['key'] == 'firstclean':
+            spec['lw'] = 170
+        elif spec['key'] == 'kaizen':
+            spec['lw'] = 100
+            spec['legend'] = [(k, state_colors[k]) for k in state_colors if any(k in r['counts'] for r in metrics['tables'].get('findings', []))]
+    findings_tile = next(s for s in specs if s['key'] == 'kaizen')
+    specs.remove(findings_tile)
+    specs.insert(next(i for i, s in enumerate(specs) if s['key'] == 'effective'), findings_tile)
     return specs
 
 
 def score_row(title, values, how='last', form='', better='none', target=''):
     b, a = summ(values, how)
-    return (f'<tr class="{"krow" if target else ""}"><td>{esc(title)}</td><td>{spark(values, kind=form)}</td>'
+    return (f'<tr class="{"krow" if target else ""}"><td>{esc(title)}</td><td>{spark(values, kind=form, bars=how == "sum")}</td>'
             f'<td class="num">{fmt(b, form)}</td><td class="num"><b>{fmt(a, form)}</b></td>'
             f'<td class="num">{change(b, a, better)}</td><td class="tg">{esc(target)}</td></tr>')
 
@@ -467,18 +500,27 @@ def render_tile(spec, series):
     if kind == 'empty' or (vals and all(v is None for field in vals for v in field)) or (not vals and not spec.get('rows')):
         return empty(title, key, spec['home'])
     conf = spec.get('kpi', {})
-    form = conf.get('format', '')
+    form = spec.get('format', conf.get('format', ''))
     kval = kpi(series.get(conf.get('series'), [None] * N), conf.get('how', 'last'), form, conf.get('better', 'none')) if conf else ''
-    colors = [INK, ACC, GREY, LIGHT, '#e08a7f']
+    prefixes = {'cpp': 'all spend, ', 'landed': 'fixed within 7 days, ', 'queue': 'open PRs, ', 'touches': 'corrections and aborts per merged PR, ', 'decisions': 'reversed, '}
+    kval = kval.replace('prior 7d', prefixes.get(key, '') + 'prior 7d')
+    if key == 'cpp':
+        kval += kpi(series['attr7'], 'last', '$', 'down').replace('prior 7d', 'direct, median, prior 7d')
+    colors = spec.get('colors', [INK, ACC, GREY, LIGHT, '#e08a7f'])
     if kind == 'table':
         rows = spec.get('rows') or [['date', *fields], *[[dd, *[fmt(v[i]) for v in vals]] for i, dd in enumerate(dates)]]
         body = '<table class="tbl">' + ''.join('<tr>' + ''.join(f'<{"th" if i == 0 else "td"}>{esc(c)}</{"th" if i == 0 else "td"}>' for c in row) + '</tr>' for i, row in enumerate(rows)) + '</table>'
     elif kind == 'range':
-        body = hrange(spec['rows'])
+        body = hrange(sorted(spec['rows'], key=lambda row: -row[1]), w=380, lw=165)
     elif kind == 'hbars':
-        body = hbars(spec['rows'], form)
+        body = hbars(spec['rows'], form, lw=spec.get('lw', 130))
     elif kind == 'small bars':
-        body = '<div class="sms">' + ''.join(f'<div class="sm"><div class="smt">{esc(k)}</div>{chart([dict(vals=v, style="bar", color=GREY)], w=180, h=70, R=14, kind=form)}</div>' for k, v in zip(fields, vals)) + '</div>'
+        maximum = 300 if key == 'spend' else max((x for field in vals for x in field if x is not None), default=1)
+        panels = []
+        for i, (label, values) in enumerate(zip(spec.get('labels') or fields, vals)):
+            plot = chart([dict(vals=values, style='bar', color=colors[i % len(colors)])], w=180, h=70, R=14, kind=form, xt='ends', ymax=maximum)
+            panels.append(f'<div class="sm"><div class="smt">{esc(label)}</div>{plot}</div>')
+        body = '<div class="sms">' + ''.join(panels) + '</div>'
     elif kind == 'stacked bars':
         stack = vals[0] if len(vals) == 1 and any(isinstance(v, list) for v in vals[0] if v is not None) else [list(v) if all(x is not None for x in v) else None for v in zip(*vals)]
         count = max((len(v) for v in stack if v is not None), default=len(fields))
@@ -488,23 +530,38 @@ def render_tile(spec, series):
         styles = [dict(vals=stack, style='stack', colors=[colors[i % len(colors)] for i in range(count)], names=names)]
         if spec.get('overlay'):
             styles.append(dict(vals=roll(series.get(spec['overlay'], [None] * N)), color=INK, label='PR reviews by others'))
-        body = chart(styles, kind=form, w=740 if spec.get('wide') else 360, h=150 if spec.get('wide') else 120, R=120 if spec.get('overlay') else 58)
+        body = chart(styles, kind=form, w=740 if spec.get('wide') else 360, h=150 if spec.get('wide') else 120, R=120 if spec.get('overlay') else 58, notes=spec.get('notes', []))
         body += '<div class="lg">' + ''.join(f'<span><i style="background:{colors[i % len(colors)]}"></i>{esc(name)}</span>' for i, name in enumerate(names))
         if spec.get('overlay'):
             body += f'<span><i style="background:{INK}"></i>reviews by others, 7d mean</span>'
         body += '</div>'
     else:
-        styles = [dict(vals=v, style='bar' if kind == 'bars' else 'line', color=colors[i % len(colors)], label=fields[i] if kind == 'lines' and len(vals) > 1 else '') for i, v in enumerate(vals)]
+        styles = [dict(vals=v, style='bar' if kind == 'bars' else 'line', color=colors[i % len(colors)], label=(spec.get('labels') or fields)[i] if kind == 'lines' and len(vals) > 1 and key != 'queue' else '') for i, v in enumerate(vals)]
         if kind in ('cost lines', 'merge lines'):
             samples = series.get('pr_cost' if kind == 'cost lines' else 'htm', [None] * N)
             styles.insert(0, dict(vals=samples, style='dots', color=GREY))
+        if kind == 'merge lines':
+            styles[-1]['label'] = '7d median'
+        if key in ('ops_pr', 'fr_pr', 'escaped'):
+            styles[0]['label'] = '7d'
         if kind == 'cost lines':
             for style, name, color in zip(styles[1:], ('all spend', 'product repos', 'direct'), (INK, INK, ACC)):
                 style['label'], style['color'] = name, color
             styles[2]['style'] = 'dash'
-        body = chart(styles, kind=form, w=740 if spec.get('wide') else 360, h=170 if spec.get('wide') else 120, ymax=40 if kind == 'cost lines' else 72 if kind == 'merge lines' else None)
-        if kind == 'bars':
-            body = chart([dict(vals=vals[0], style='bar', color=LIGHT), dict(vals=roll(vals[0]), color=INK, label='7d mean')], kind=form)
+        body = chart(styles, kind=form, w=740 if spec.get('wide') else 360, h=170 if spec.get('wide') else 120, ymax=40 if kind == 'cost lines' else 72 if kind == 'merge lines' else spec.get('ymax'), R=74 if kind == 'cost lines' else 14 if key == 'queue' else 64 if key == 'decisions' else 58, yfmt=(lambda v: f'${v:.0f}') if kind == 'cost lines' else None)
+        if key == 'abandoned':
+            body = chart([dict(vals=vals[0], style='bar', color=GREY)], h=80)
+        elif kind == 'bars':
+            body = chart([dict(vals=vals[0], style='bar', color=colors[0] if key in ('guards', 'commits') else LIGHT), dict(vals=roll(vals[0]), color=INK, label='7d mean')], kind=form)
+    if key == 'churn_tbl' and spec.get('weekly'):
+        for name, values, week_dates in spec['weekly']:
+            body = body.replace('<td>' + esc(name) + '</td>', '<td>' + (spark(values, w=70, h=16, sample_dates=week_dates) if len(values) > 1 else '') + '</td>')
+    if spec.get('legend'):
+        body += '<div class="lg">' + ''.join(f'<span><i style="background:{c}"></i>{esc(n)}</span>' for n, c in spec['legend']) + '</div>'
+    if key == 'queue' and spec.get('labels'):
+        body += '<div class="lg">' + ''.join(f'<span><i style="background:{c}"></i>{esc(n)}</span>' for n, c in zip(spec['labels'], colors)) + '</div>'
+    if key == 'ops_pr':
+        body += '<div class="foot">Includes the first prompt.</div>'
     if spec.get('foot'):
         body += f'<div class="foot">{esc(spec["foot"])}</div>'
     return tile(title, body, key, spec['home'], kval, 'w2' if spec.get('wide') else '')
@@ -550,28 +607,55 @@ def render(metrics, prose, paths=()):
             specs = [s for s in specs if s['key'] != spec['key']]
             specs.append(spec)
     groups = defaultdict(list)
-    # One score row for each measured tile, with the approved six marked as keys.
-    categories = {'Human touches and friction': 'Human touches', 'Review and quality': 'Quality', 'Factory health and improvement': 'Factory health'}
+    output = ('Tasks completed', 'tasks_done') if any(d.get('tasks_done') is not None for d in D) else ('PRs merged', 'merged')
+    curated = [
+        ('Output', output[0], output[1], 'sum', '', 'up', 'optimize: higher'),
+        ('Output', 'PRs merged', 'merged', 'sum', '', 'up', ''),
+        ('Output', 'Open PRs', 'open_prs', 'last', '', 'down', ''),
+        ('Cost', 'Cost per merged PR, all spend', 'cpp_all', 'last', '$', 'down', 'optimize: lower'),
+        ('Cost', 'Cost per merged PR, direct (median)', 'attr7', 'last', '$', 'down', ''),
+        ('Cost', 'Spend', 'spend', 'sum', '$', 'none', ''),
+        ('Cost', 'Cache-write share of spend', 'cw_share', 'last', '%', 'down', ''),
+        ('Human touches', 'Operator messages per merged PR', 'ops_pr', 'last', '', 'down', 'optimize: lower'),
+        ('Human touches', 'Corrections and aborts per merged PR', 'corr_pr', 'last', '', 'down', ''),
+        ('Human touches', 'Hours to merge', 'htm7', 'last', 'h', 'down', ''),
+        ('Quality', 'Escaped defects per merged PR', 'escaped_pr', 'last', '', 'down', 'guardrail'),
+        ('Quality', 'PRs fixed within 7 days', 'pr_fixed', 'sum', '', 'down', ''),
+        ('Churn', 'Lines rewritten within 21 days', 'cr', 'last', '%', 'down', 'guardrail'),
+        ('Factory health', 'Subagent failures', 'subfail', 'sum', '', 'down', 'guardrail'),
+        ('Factory health', 'Automation runs failed', 'auto_fail', 'last', '%', 'down', ''),
+        ('Factory health', 'Spend linked to a PR', 'coverage', 'last', '%', 'up', ''),
+    ]
+    if output[1] == 'merged':
+        curated.pop(1)
+    for category, title, field, how, form, better, target in curated:
+        values = series.get(field, [None] * N)
+        if any(v is not None for v in values):
+            groups[category].append(score_row(title, values, how, form, better, target))
     for spec in specs:
-        conf = spec.get('score_row') or spec.get('kpi')
+        conf = spec.get('score_row')
         if not conf:
             continue
-        category = conf.get('category', categories.get(spec['band'], spec['band']))
         values = series.get(conf.get('series'), [None] * N)
-        if any(isinstance(x, list) for x in values if x is not None):
+        if any(isinstance(v, list) for v in values if v is not None):
             continue
-        groups[category].append(score_row(conf.get('title', spec['title']), values, conf.get('how', 'last'), conf.get('format', ''), conf.get('better', 'none'), spec.get('key_metric', '')))
+        if any(v is not None for v in values):
+            groups[conf.get('category', spec['band'])].append(score_row(conf.get('title', spec['title']), values, conf.get('how', 'last'), conf.get('format', ''), conf.get('better', 'none')))
     score = ''.join(f'<tr class="grp"><td colspan="6">{esc(category)}</td></tr>' + ''.join(rows) for category, rows in groups.items())
     P['score'] = prose.get('score', '')
-    score = tile('Last 7 days against the 7 days before', f'<table class="tbl sc"><tr><th></th><th>{esc(dates[0])} to {esc(dates[-1])}</th><th>prior 7d</th><th>last 7d</th><th>change</th><th></th></tr>{score}</table>', 'score', 'hworks', cls='full')
+    score = tile('Last 7 days against the 7 days before', f'<table class="tbl sc"><tr><th></th><th>{daylabel(dates[0])} to {daylabel(dates[-1])}</th><th>prior 7d</th><th>last 7d</th><th>change</th><th></th></tr>{score}</table>', 'score', 'hworks', cls='full')
     bands = [band('Scorecard', [score])]
     for bandname in BANDS:
         bands.append(band(bandname, [render_tile(s, series) for s in specs if s['band'] == bandname]))
     notes = ''.join(f'<li>{esc(n)}</li>' for n in prose.get('notes', []))
+    coverage = metrics.get('coverage', {})
+    missing = coverage.get('missing_prs', [])
+    hosts = coverage.get('unavailable_pr_hosts', [])
+    coverage_note = (f'<div class="foot">PR coverage: {len(missing)} PRs missing' + (f'; unavailable hosts: {esc(", ".join(hosts))}' if hosts else '') + '. PR series cover only PRs read.</div>') if missing or hosts else ''
     doc = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
            f'<title>hworks factory metrics</title><style>{CSS}</style></head><body>'
-           f'<header><h1>hworks factory metrics</h1><span class="sub">{esc(metrics.get("start", dates[0]))} to {esc(metrics.get("end", dates[-1]))}, {esc(metrics.get("tz", ""))}</span>'
-           f'<span class="sub">generated {esc(metrics.get("generated", "")[:10])}</span></header><main>{"".join(bands)}'
+           f'<header><h1>hworks factory metrics</h1><span class="sub">{esc(prose.get("subtitle", ""))}</span>'
+           f'<span class="sub" style="flex:0;white-space:nowrap">generated {esc(metrics.get("generated", "")[:10])}</span></header><main>{coverage_note}{"".join(bands)}'
            f'<details><summary>{esc(prose.get("notes_title", "About the data"))}</summary><ul>{notes}</ul></details></main></body></html>')
     return doc.encode('ascii', 'xmlcharrefreplace').decode('ascii')
 

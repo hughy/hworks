@@ -31,7 +31,7 @@
   "hdispatch": "Verdicts from the review dispatcher against what happened next. Changed means commits landed after the reviewed commit.",
   "churn": "churn21 counts deleted lines whose first-parent origin landed within 21 days before the deleting change, divided by lines added. Moved is the share of added lines that git blame -M -C traces to older code. Revisit is the share of changes that touch a file changed in the previous 7 days.",
   "churn_chart": "All configured repos, 7-day window. Deleted lines originated within 21 days divided by added lines. See the churn table for exclusions.",
-  "failures": "Subagent runs that failed, timed out, or needed attention, per day. Red is pr-babysitter. All recorded failures are counted.",
+  "failures": "Subagent runs that failed, timed out, or needed attention, per day. Red is pr-babysitter. Zero-duration failed runs never started and are annotated separately.",
   "guards": "Commands blocked by the autonomy guard or the harness, per day.",
   "automations": "Automation runs per day. Supply an extension collector.",
   "commits": "First-parent commits landed in the configured factory checkouts.",
@@ -41,7 +41,7 @@
   "notes_title": "About the data",
   "notes": [
     "Spend is the provider-reported usage.cost.total on each assistant message in pi sessions, across main sessions and subagent runs, by message date. Copies under subagent-artifacts/ are skipped because they duplicate subagent runs.",
-    "Only local pi session spend is counted. Missing sources leave null fields; incomplete PR fetches leave PR counts null.",
+    "Only local pi session spend is counted. Missing sources leave null fields. PR series cover successfully read PRs; missing PRs and unavailable hosts appear in the coverage note.",
     "Subagents take their parent session's class. A session's window cost, with its subagents, is split evenly over the PRs it links.",
     "Landed counts only explicit references: a revert, or a fix: PR whose title or body says it fixes, follows up on, or reverts the PR. Matching on shared files is not used. Unnamed or undiscovered fixes go undetected.",
     "Prompts, responses, and transcript text are not on this page."

@@ -53,17 +53,19 @@ Output fields:
  fr_rows/fr_inschema: total friction rows/exact allowed caught-by rows.
  guard: autonomy and harness blocks; oq/oq_kept/oq_reversed: decision rows/verdicts.
  subagent_fail/babysitter_fail: failed, timed_out, needs_attention run events;
-   babysitter role separated, with no prototype-specific outlier exclusion.
+   babysitter role separated. Zero-duration failures count as runs_never_started.
  factory_commits: first-parent commits in configured factory checkouts.
  added/deleted/churn21/churn7/moved/revisit_changes/changes: summed git churn;
    see factory-churn.py for blame definitions and exclusions. No overlap matching.
- cloud/revcost/effective/automations/kaizen: null, reserved for extension collectors.
+ cloud/revcost/effective/automations: null, reserved for extension collectors.
+ findings table: counts by run from task-dir hansei JSON and kaizen markdown.
  tables: prs (gh payload, landed outcome and linked task ids), repo_cost (direct
    median/p90/n), prs_per_task (completed linked-task counts), token_report (existing
    kaizen-tokens window sections), time (kaizen-prs main time buckets in seconds),
    churn (per checkout daily counts, totals, excluded paths).
- coverage: sources read, counts, failures and missing_sources; partial PR failures
-   null all PR-derived daily fields rather than report a falsely complete count.
+ coverage: sources read, counts, failures, missing_sources, dropped_pr_links,
+   missing_prs and unavailable_pr_hosts. PR series cover successfully read PRs;
+   entirely unavailable hosts are recorded separately, not reported as zero.
    Failed git sources null aggregate churn fields; a failed factory checkout also
    nulls factory_commits. Successful per-checkout tables remain available.
 """
@@ -157,13 +159,17 @@ def read_pr(url, cache, no_fetch, coverage):
         if path.exists():
             coverage['failures'].append(f'cache {path}: {e}')
     if no_fetch:
-        coverage['missing_sources'].append(f'uncached PR: {url}')
+        coverage['missing_prs'].append(dict(url=url, error='uncached PR'))
         return None
     try:
         p = subprocess.run([os.environ.get('HWORKS_GH', 'gh'), 'pr', 'view', url, '--json',
                             kp.FIELDS + ',url,body,headRefName,mergeCommit'],
                            capture_output=True, text=True, timeout=kp.GH_TIMEOUT)
         if p.returncode:
+            error = p.stderr.strip()
+            if re.search(r'Could not resolve to (?:a Repository|a PullRequest)|could not find (?:repository|pull request)|(?:repository|pull request).*not found', error, re.I):
+                coverage['dropped_pr_links'].append(dict(url=url, error=error))
+                return None
             raise ValueError(p.stderr.strip().splitlines()[0] if p.stderr.strip() else f'exit {p.returncode}')
         data = json.loads(p.stdout)
         validate_pr(data)
@@ -178,7 +184,7 @@ def read_pr(url, cache, no_fetch, coverage):
                 coverage['failures'].append(f'cache write: {e}')
         return data
     except (OSError, ValueError, subprocess.SubprocessError) as e:
-        coverage['failures'].append(f'{kp.host_of(url)} {url}: {e}')
+        coverage['missing_prs'].append(dict(url=url, error=str(e)))
         return None
 
 
@@ -208,7 +214,7 @@ def landed(prs, end):
 SESSION = 'spend spend_product spend_factory spend_home spend_auto cw longc linked ops sig_correction sig_abort sig_approval sig_status-check'.split()
 PR = 'opened merged abandoned pr_landed pr_fixed pr_holding pr_cost abandoned_spend open_prs open_age human_reviews htm'.split()
 TASK = 'tasks_done tasks_landed tasks_fixed tasks_nopr tasks_holding tasks_canceled queue wip'.split()
-BLOCK = 'friction fr_rows fr_inschema guard oq oq_kept oq_reversed subagent_fail babysitter_fail'.split()
+BLOCK = 'friction fr_rows fr_inschema guard oq oq_kept oq_reversed subagent_fail babysitter_fail runs_never_started'.split()
 GIT = 'factory_commits added deleted churn21 churn7 moved revisit_changes changes'.split()
 
 
@@ -239,7 +245,7 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
         key = (start + timedelta(days=i)).isoformat()
         days[key] = dict.fromkeys(SESSION + PR + TASK + BLOCK + GIT + ['cloud', 'revcost', 'effective', 'automations', 'kaizen'])
         days[key]['date'] = key
-    cov = dict(sources=[], counts=Counter(), failures=[], missing_sources=[])
+    cov = dict(sources=[], counts=Counter(), failures=[], missing_sources=[], dropped_pr_links=[], missing_prs=[], unavailable_pr_hosts=[])
     tables = dict(prs=[], repo_cost={}, prs_per_task=[], token_report={}, time={}, churn={})
     notes, sessions, links = [], {}, defaultdict(set)
     root = ks.sources()['sessions']
@@ -282,7 +288,6 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
                 d['spend_' + ('auto' if s['class'] == 'automation' else s['class'])] += cost
                 d['cw'] += t['cost'].get('cacheWrite') or 0
                 d['longc'] += cost if t['input'] + t['cr'] + t['cw'] > 150000 else 0
-                d['linked'] += cost if links[s['root']] else 0
             if s['kind'] == 'main':
                 _, _, messages = ops.read_session(path, since, ops.sources(), notes)
                 for op in messages:
@@ -310,16 +315,34 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
         except (OSError, ValueError, AttributeError):
             cov['failures'].append(f'invalid cache: {path}')
     urls = sorted(set(urls))
-    prs = {}
+    prs, read_hosts = {}, set()
     logins = {x.strip().lower() for x in os.environ.get('HWORKS_FM_LOGINS', '').split(',') if x.strip()}
     for url in urls:
         p = read_pr(url, cache, no_fetch, cov)
+        if p is not None:
+            read_hosts.add(kp.host_of(url))
         if p is not None and (not logins or (kp.login(p) or '').lower() in logins):
             p['url'] = url
             prs[url] = p
     cov['counts']['prs_found'] = len(urls)
     cov['counts']['prs_read'] = len(prs)
-    complete = os.path.isdir(root) and not any('uncached PR:' in s for s in cov['missing_sources']) and not any('https://' in s for s in cov['failures'])
+    complete = os.path.isdir(root) and not cov['missing_prs']
+    dropped = {r['url'] for r in cov['dropped_pr_links']}
+    for host in sorted({kp.host_of(u) for u in urls if u not in dropped}):
+        failures = [r for r in cov['missing_prs'] if kp.host_of(r['url']) == host]
+        if failures and host not in read_hosts:
+            cov['unavailable_pr_hosts'].append(host)
+    pr_available = os.path.isdir(root) and (bool(read_hosts) or not cov['missing_prs'])
+    for us in links.values():
+        us.difference_update(dropped)
+    if os.path.isdir(root):
+        for d in days.values():
+            d['linked'] = 0
+        for s in sessions.values():
+            if links[s['root']]:
+                for t in s['turns']:
+                    if t['dt'] and since <= t['dt'] < until:
+                        days[day(t['dt'].isoformat(), tz)]['linked'] += t['cost'].get('total') or 0
     states = landed(prs, until)
     costs = Counter()
     for path, s in sessions.items():
@@ -328,7 +351,7 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
             cost = sum(t['cost'].get('total') or 0 for t in s['turns'] if t['dt'] and since <= t['dt'] < until)
             for u in us:
                 costs[u] += cost / len(us)
-    if complete:
+    if pr_available:
         cov['sources'].append('gh/cache')
         initialize(days, PR)
         for url, p in prs.items():
@@ -397,6 +420,7 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
         outcome = kp.outcome(p)
         tables['prs'].append({**p, 'landed': states.get(u), 'no_rework': outcome['commits_after_create'] == 0 and outcome['changes_requested'] == 0 and not outcome['failing_checks']})
     blockers(days, since, tz, cov)
+    tables['findings'] = findings(start, end, cov)
     repos = json.loads(os.environ.get('HWORKS_FM_REPOS', '[]'))
     if not isinstance(repos, list) or any(not isinstance(r, dict) for r in repos):
         raise ValueError('repos must be a list of path/class objects')
@@ -433,9 +457,57 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
         for field in missing_git:
             d[field] = None
     cov['failures'].extend(notes)
+    for row in cov['missing_prs']:
+        print(f"PR unavailable {row['url']}: {row['error']}", file=sys.stderr)
     for note in cov['missing_sources'] + cov['failures']:
         print(note, file=sys.stderr)
     return dict(generated=datetime.now(tz).isoformat(), tz=str(tz), start=start.isoformat(), end=end.isoformat(), days=list(days.values()), tables=tables, coverage=cov)
+
+
+def findings(start, end, cov):
+    rows = []
+    common = subprocess.run(['git', '-C', str(HERE), 'rev-parse', '--path-format=absolute', '--git-common-dir'], capture_output=True, text=True)
+    checkout = str(Path(common.stdout.strip()).parent) if common.returncode == 0 else str(HERE.parent)
+    for skill, suffix in [('hansei', 'json'), ('kaizen', 'md')]:
+        p = subprocess.run([str(HERE / 'task-dir.sh'), skill, checkout], capture_output=True, text=True)
+        if p.returncode:
+            cov['missing_sources'].append(f'{skill} task dir: {p.stderr.strip()}')
+            continue
+        root = Path(p.stdout.strip())
+        paths = sorted(root.glob(f'findings-*.{suffix}'))
+        if not paths:
+            cov['missing_sources'].append(f'{skill} findings: none in {root}')
+        for path in paths:
+            try:
+                dd = date.fromisoformat(path.stem.removeprefix('findings-'))
+                if not start <= dd <= end:
+                    continue
+                if skill == 'hansei':
+                    data = json.loads(path.read_text())
+                    if not isinstance(data.get('findings'), list):
+                        raise ValueError('findings must be a list')
+                    counts = {'findings': len(data['findings'])}
+                else:
+                    counts = Counter()
+                    for line in path.read_text().splitlines():
+                        m = re.match(r'^- \[([^]]+)\] ', line)
+                        if not m or m[1] not in ('1', '2', '3', '4', '5', 'investigate', 'drop'):
+                            continue
+                        if m[1] == 'drop':
+                            counts['dropped'] += 1
+                        else:
+                            fields = line.split('|')
+                            if len(fields) != 6:
+                                raise ValueError('kaizen finding needs six fields')
+                            state = fields[-1].strip().split(' ', 1)[0].split(':', 1)[0]
+                            if state not in ('open', 'awaiting-user', 'implemented', 'effective', 'unproven', 'pending'):
+                                raise ValueError('invalid kaizen finding state')
+                            counts[state] += 1
+                rows.append(dict(skill=skill, date=dd.isoformat(), counts=dict(counts)))
+                cov['sources'].append(f'{skill}: {path.name}')
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                cov['failures'].append(f'findings {path}: {e}')
+    return rows
 
 
 def blockers(days, since, tz, cov):
@@ -451,7 +523,7 @@ def blockers(days, since, tz, cov):
         'guard': not {'autonomy log', 'harness audit log'} <= missing,
         'fail': not {'run history', 'subagent runs'} <= missing,
     }
-    fields = {'friction': ['friction', 'fr_rows', 'fr_inschema'], 'oq': ['oq', 'oq_kept', 'oq_reversed'], 'guard': ['guard'], 'fail': ['subagent_fail', 'babysitter_fail']}
+    fields = {'friction': ['friction', 'fr_rows', 'fr_inschema'], 'oq': ['oq', 'oq_kept', 'oq_reversed'], 'guard': ['guard'], 'fail': ['subagent_fail', 'babysitter_fail', 'runs_never_started']}
     for source, present in available.items():
         if present:
             initialize(days, fields[source])
@@ -474,7 +546,10 @@ def blockers(days, since, tz, cov):
         elif source in ('autonomy', 'harness') and available['guard']:
             d['guard'] += 1
         elif source in ('run-history', 'subagents') and kind in ('failed', 'timed_out', 'needs_attention') and available['fail']:
-            d['babysitter_fail' if row['rule'] == 'pr-babysitter' else 'subagent_fail'] += 1
+            if re.fullmatch(r'duration 0(?:\.0+)?', row.get('detail', '')):
+                d['runs_never_started'] += 1
+            else:
+                d['babysitter_fail' if row['rule'] == 'pr-babysitter' else 'subagent_fail'] += 1
 
 
 def main():

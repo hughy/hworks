@@ -86,13 +86,14 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(nofetch['coverage']['counts']['cache_hits'], 8)
         self.assertEqual([p['state'] for p in nofetch['tables']['prs'] if p['number'] == 1], ['MERGED'])
         self.assertEqual(calls.read_text(), 'https://github.com/example/widget/pull/8\n')
-        self.assertIsNone(nofetch['days'][0]['merged'])
+        self.assertEqual(nofetch['days'][1]['merged'], 4)
+        self.assertEqual(len(nofetch['coverage']['missing_prs']), 1)
 
     def test_missing_sources_and_auth_failure(self):
         self.env['FM_GH_FAIL'] = '1'
         result = self.run_metrics()
         self.assertIsNone(result['days'][0]['opened'])
-        self.assertTrue(any('authentication failed' in s for s in result['coverage']['failures']))
+        self.assertTrue(any('authentication failed' in r['error'] for r in result['coverage']['missing_prs']))
         self.env['HWORKS_PI_SESSIONS'] = str(self.root / 'not-found')
         self.env['HWORKS_FM_REPOS'] = json.dumps([dict(path=str(self.root / 'absent-repo'), **{'class': 'factory'})])
         result = self.run_metrics('--tasks', str(self.root / 'absent-tasks'))
@@ -101,6 +102,31 @@ class CollectorTest(unittest.TestCase):
         self.assertIsNone(result['days'][0]['churn21'])
         self.assertTrue(any('pi sessions:' in x for x in result['coverage']['missing_sources']))
         self.assertTrue(any('git ' in x for x in result['coverage']['missing_sources']))
+
+    def test_partial_pr_failure_and_not_found(self):
+        self.env['FM_GH_FAIL_URL'] = 'https://github.com/example/widget/pull/1'
+        for error, key in [('Could not resolve to a Repository', 'dropped_pr_links'),
+                           ('Could not resolve to a PullRequest with the number of 1.', 'dropped_pr_links'),
+                           ('authentication failed', 'missing_prs')]:
+            self.env['FM_GH_ERROR'] = error
+            result = self.run_metrics('--cache', str(self.root / key))
+            self.assertEqual(result['days'][1]['merged'], 3)
+            self.assertEqual(result['days'][0]['opened'], 8)
+            self.assertEqual(result['coverage'][key], [dict(url=self.env['FM_GH_FAIL_URL'], error=error)])
+            self.assertEqual(result['coverage']['unavailable_pr_hosts'], [])
+        self.env['FM_GH_FAIL'] = '1'
+        result = self.run_metrics('--cache', str(self.root / 'all-fail'))
+        self.assertEqual(result['coverage']['unavailable_pr_hosts'], ['github.com'])
+        self.assertIsNone(result['days'][1]['merged'])
+
+    def test_zero_duration_failed_runs_never_started(self):
+        history = self.root / 'history.jsonl'
+        history.write_text(''.join(json.dumps(dict(ts='2026-01-02T12:00:00Z', status='error', outcome='failed', agent=role, duration=duration)) + '\n'
+                                   for role, duration in [('pr-babysitter', 0), ('coder', 0.0), ('pr-babysitter', 12), ('coder', 3)]))
+        self.env['HWORKS_RUN_HISTORY'] = str(history)
+        result = self.run_metrics()
+        self.assertEqual([result['days'][1][k] for k in ('subagent_fail', 'babysitter_fail')], [1, 1])
+        self.assertEqual(result['days'][1]['runs_never_started'], 2)
 
     def test_default_subagent_directory_availability(self):
         self.env.pop('HWORKS_SUBAGENT_RUNS')
@@ -120,6 +146,16 @@ class CollectorTest(unittest.TestCase):
         result = self.run_metrics()
         self.assertIsNone(result['days'][1]['subagent_fail'])
         self.assertTrue(any('subagent runs: not found' in s for s in result['coverage']['missing_sources']))
+
+    def test_findings_from_skill_task_directories(self):
+        common = subprocess.check_output(['git', '-C', str(HERE), 'rev-parse', '--path-format=absolute', '--git-common-dir'], text=True)
+        checkout = str(Path(common.strip()).parent)
+        for skill, suffix, content in [('hansei', 'json', json.dumps({'findings': [{'title': 'private'}, {'title': 'private'}]})),
+                                       ('kaizen', 'md', '- [x] private checklist text\n- [3] K-1 title | evidence | actor | deliverable | artifact | open\n- [drop] noise | reason\n- [5] K-2 title | evidence | actor | deliverable | artifact | implemented (landed)\n')]:
+            root = Path(subprocess.check_output([str(HERE / 'task-dir.sh'), skill, checkout], env=self.env, text=True).strip())
+            (root / ('findings-2026-01-02.' + suffix)).write_text(content)
+        result = self.run_metrics()
+        self.assertEqual(result['tables']['findings'], [dict(skill='hansei', date='2026-01-02', counts={'findings': 2}), dict(skill='kaizen', date='2026-01-02', counts={'open': 1, 'dropped': 1, 'implemented': 1})])
 
     def test_churn_on_small_git_repo(self):
         repo = self.root / 'repo'; repo.mkdir()

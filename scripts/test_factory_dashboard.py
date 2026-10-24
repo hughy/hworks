@@ -77,7 +77,7 @@ class RendererTest(unittest.TestCase):
             task = fragment[:fragment.index('PRs merged per day')]
             self.assertIn('tile dim', task)
             merged = fragment[fragment.index('PRs merged per day'):fragment.index('PRs opened per day')]
-            self.assertIn('key metric: optimize: higher', merged)
+            self.assertIn('key metric: higher is better', merged)
             self.assertEqual(text.count('<tr class="krow">'), 6)
 
     def test_stack_labels_are_escaped(self):
@@ -102,9 +102,9 @@ class RendererTest(unittest.TestCase):
             path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
             text = self.run_dashboard(path)
         fragment = text[text.index('Merged with no rework, by week'):text.index('Review dispatcher verdicts against outcome')]
-        self.assertIn('2025-12-29', fragment)
-        self.assertIn('2026-01-19', fragment)
-        self.assertEqual(fragment.count('>1.0</text>'), 2)
+        self.assertIn('week of Dec 29 (5)', fragment)
+        self.assertIn('week of Jan 19 (5)', fragment)
+        self.assertEqual(fragment.count('>100%</text>'), 2)
         for week in ('2024-12-30', '2026-12-28', '2026-01-05'):
             self.assertNotIn(week, fragment)
 
@@ -125,6 +125,37 @@ class RendererTest(unittest.TestCase):
         fragment = text[text.index('Operator touches per day, by type'):text.index('Friction per merged PR', text.index('<h2>Human touches'))]
         self.assertIn('PR reviews by others', fragment)
         self.assertIn('54,321', fragment)
+
+    def test_curated_score_units_rounds_and_coverage(self):
+        data = json.loads((FIX / 'metrics.json').read_text())
+        data['tables']['token_report'] = {'loop rounds': [dict(round=1, runs=4, rounds_with_blocker=1, cost=393)],
+                                         'roles': [dict(model='test/model', first_round_clean=5, first_rounds=10)]}
+        data['coverage'] = dict(missing_prs=[dict(url='https://example.com/repo/pull/1', error='authentication failed')], unavailable_pr_hosts=['example.com'])
+        for d in data['days']:
+            d.update(pr_cost=[2], pr_fixed=1, sig_correction=1, sig_abort=0, linked=10)
+        data['days'][-1]['runs_never_started'] = 8190
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+            text = self.run_dashboard(path)
+        score = text[text.index('<h2>Scorecard'):text.index('<h2>Output')]
+        for label in ('Cost per merged PR, all spend', 'Cost per merged PR, direct (median)', 'Corrections and aborts per merged PR', 'PRs fixed within 7 days', 'Spend linked to a PR'):
+            self.assertIn('<td>' + label + '</td>', score)
+        self.assertNotIn('PRs opened per day', score)
+        self.assertNotIn('Automation runs failed', score)
+        self.assertIn('<td>Reviews</td>', score)
+        self.assertIn('PR coverage: 1 PRs missing; unavailable hosts: example.com', text)
+        self.assertIn('8,190 runs never started', text)
+        cost = text[text.index('Review-loop spend by round'):text.index('Cloud agent spend')]
+        self.assertIn('round 1', cost)
+        self.assertIn('$393', cost)
+        funnel = text[text.index('Review-loop rounds'):text.index('First review clean, by coder model')]
+        self.assertIn('fill="#222"', funnel)
+        self.assertIn('fill="#cfcfcf"', funnel)
+        self.assertIn('blocked 1', funnel)
+        self.assertIn('clean 3', funnel)
+        first = text[text.index('First review clean, by coder model'):text.index('Merged with no rework, by week')]
+        self.assertIn('model (10)', first)
+        self.assertIn('50%', first)
 
     def test_rejects_invalid_extension_at_boundary(self):
         with tempfile.TemporaryDirectory() as temp:
