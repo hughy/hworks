@@ -28,12 +28,14 @@ Sections:
             counts.
   outcomes  merged, closed unmerged, open, and draft (a subset of open) counts. One row per
             PR, worst rework first, cut by --top: state, opening session, other linking
-            sessions, commits after the PR was created, changes-requested reviews, non-empty
+            sessions, commits and distinct commit times after the PR was created,
+            changes-requested reviews, non-empty
             review and comment bodies by others than the author, failing and pending checks in
             the final rollup, and hours from creation to first review by someone else, from
             creation to merge or close, and from last commit to merge. Rework, the ordering
-            key, is commits after creation + changes-requested reviews + failing final checks;
-            each part is printed. PRs not fetched follow, with links only.
+            key, is distinct commit times after creation + changes-requested reviews + failing
+            final checks; a rebase replay counts once. Each part is printed. PRs not fetched
+            follow, with links only.
   tests     per fetched PR, lines added and deleted in test files against production files.
             A test file matches TEST_FILE in kaizen-sessions.py, sits under a test/, tests/, or
             __tests__/ directory, or ends in _test.go or .t.sol. Two leads, to read, not
@@ -325,6 +327,7 @@ def outcome(d):
     commit_dates = [x for x in (ks.to_dt(c.get("committedDate")) for c in d.get("commits") or []
                                 if c.get("committedDate")) if x]
     after = sum(1 for x in commit_dates if cdt and x > cdt)
+    distinct_after = len({x for x in commit_dates if cdt and x > cdt})
     reviews = d.get("reviews") or []
     changes = sum(1 for r in reviews if r.get("state") == "CHANGES_REQUESTED")
     feedback = sum(1 for r in reviews + (d.get("comments") or [])
@@ -333,9 +336,10 @@ def outcome(d):
     failing, pending = checks(d.get("statusCheckRollup"))
     last_commit = max(commit_dates).isoformat() if commit_dates else None
     return {"state": d.get("state"), "draft": bool(d.get("isDraft")), "title": d.get("title") or "",
-            "commits_after_create": after, "changes_requested": changes, "feedback_bodies": feedback,
+            "commits_after_create": after, "commit_dates_after_create": distinct_after,
+            "changes_requested": changes, "feedback_bodies": feedback,
             "failing_checks": failing, "pending_checks": pending,
-            "rework": after + changes + len(failing),
+            "rework": distinct_after + changes + len(failing),
             "hours_to_first_review": hours(created, others[0]) if others else None,
             "hours_to_close": hours(created, d.get("mergedAt") or d.get("closedAt")),
             "hours_last_commit_to_merge": hours(last_commit, d.get("mergedAt")),
@@ -495,12 +499,13 @@ def print_text(r, since):
         print(f"    {s}")
 
     o = r["outcomes"]
-    print("\n== outcomes ==  (from gh; rework = commits after create + changes requested + failing checks)")
+    print("\n== outcomes ==  (from gh; rework = distinct commit times after create + changes requested + failing checks)")
     print(f"  merged {o['merged']}, closed unmerged {o['closed_unmerged']}, open {o['open']} "
           f"(draft {o['draft']})")
     for p in o["rows"]:
         state = p["state"] + (" draft" if p["draft"] else "")
         print(f"  {p['url']}  [{state}] rework {p['rework']}: commits after create {p['commits_after_create']}, "
+              f"distinct commit times after create {p['commit_dates_after_create']}, "
               f"changes requested {p['changes_requested']}, failing checks {len(p['failing_checks'])}")
         print(f"      {p['title']}")
         print(f"      opened by: {p['opened_by'] or '-'}; also linked: {', '.join(p['other_sessions']) or '-'}")
