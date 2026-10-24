@@ -22,7 +22,11 @@ Sections:
   cache writes  turns whose cache read fell below half the previous turn's context, so the
                 cached prefix was written again, by cause: session start,
                 compaction, model or thinking change, context edit, system prompt change, idle
-                past the cache lifetime, or unexplained.
+                past the cache lifetime, backend cache miss, or unexplained. A backend cache
+                miss is proven when a later turn reads an entry that predates the miss, so the
+                prefix was intact and the request reached a cache without it (another region or
+                replica). Unexplained misses may have the same cause without a later turn to
+                prove it.
   loops         review-loop runs rebuilt from the parent's workflow notifications (key -> child run)
                 and the child sessions: spend by shape (reviewers, rounds) and how each run ended.
   loop rounds   per round: runs that reached it, its cost, and the blocking findings it found, by
@@ -403,6 +407,20 @@ def rewrite_cause(prev, t):
     return "unexplained"
 
 
+def backend_miss(turns, i, prev_ctx, lookahead=10):
+    """True when a later turn reads a cached prefix longer than turn i read but no longer than
+    the context before it. Turn i's own write ends past that context, so the entry read predates
+    turn i: the prefix was intact and turn i reached a cache that lacked it (another region or
+    replica), not a changed prompt."""
+    t = turns[i]
+    for u in turns[i + 1:i + 1 + lookahead]:
+        if u["events"]:
+            return False
+        if t["cr"] < u["cr"] <= prev_ctx:
+            return True
+    return False
+
+
 def session_cost(s):
     return sum(t["cost"].get("total") or 0 for t in s["turns"] if t["after"])
 
@@ -710,14 +728,15 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=
     causes = defaultdict(lambda: {"turns": 0, "tokens": 0, "cost": 0.0, "sessions": set()})
     for p, s in sessions.items():
         prev = None
-        for t in s["turns"]:
-            ctx = t["input"] + t["cr"] + t["cw"]
+        for i, t in enumerate(s["turns"]):
             prev_ctx = prev["input"] + prev["cr"] + prev["cw"] if prev else 0
             lost = prev is None or t["cr"] < REWRITE_SHARE * prev_ctx
             if t["after"] and lost and t["cw"] >= REWRITE_MIN_TOKENS:
                 cause = rewrite_cause(prev, t)
                 if cause == "session start" and s["kind"] != "main":
                     cause = "subagent start"
+                elif cause == "unexplained" and backend_miss(s["turns"], i, prev_ctx):
+                    cause = "backend cache miss"
                 c = causes[cause]
                 c["turns"] += 1
                 c["tokens"] += t["cw"]
@@ -728,16 +747,18 @@ def analyze(src, since, min_sessions=3, top=15, root=ROOT, cwd_match=(), owners=
               "tokens": v["tokens"], "cost": round(v["cost"], 2), "examples": [rel(x) for x in sorted(v["sessions"])[:3]]}
              for k, v in sorted(causes.items(), key=lambda x: -x[1]["cost"])]
 
-    upstream = [{"section": "upstream", "owner": r["owner"], "what": f"{r['kind']} {r['name']}",
-                 "evidence": f"{r['median_tokens']} tokens in every prompt of {r['sessions']} sessions, "
-                             f"{r['token_turns']} token-turns"}
-                for r in baseline if r["owner"].startswith("upstream:")]
-    for r in cache:
-        if r["cause"] == "unexplained" and r["sessions"] >= min_sessions:
-            upstream.append({"section": "upstream", "owner": "upstream:pi or provider",
-                             "what": "cache rewrite with no prefix change or idle gap",
-                             "evidence": f"{r['turns']} turns in {r['sessions']} sessions, {r['tokens']} tokens written, "
-                                         f"${r['cost']}"})
+    # Cache rewrites first: --top truncates this list and baseline rows are many.
+    flags = {"backend cache miss": ("upstream:provider routing",
+                                    "cache miss on an intact prefix: a later turn read the entry this turn missed"),
+             "unexplained": ("upstream:pi or provider", "cache rewrite with no prefix change or idle gap")}
+    upstream = [{"section": "upstream", "owner": flags[r["cause"]][0], "what": flags[r["cause"]][1],
+                 "evidence": f"{r['turns']} turns in {r['sessions']} sessions, {r['tokens']} tokens written, "
+                             f"${r['cost']}"}
+                for r in cache if r["cause"] in flags and r["sessions"] >= min_sessions]
+    upstream += [{"section": "upstream", "owner": r["owner"], "what": f"{r['kind']} {r['name']}",
+                  "evidence": f"{r['median_tokens']} tokens in every prompt of {r['sessions']} sessions, "
+                              f"{r['token_turns']} token-turns"}
+                 for r in baseline if r["owner"].startswith("upstream:")]
 
     long_rows, long_sessions = long_context_report(sessions, rel, long_context, top)
     loop_sections, loop_stats = loop_report(sessions, rel, min_sessions)

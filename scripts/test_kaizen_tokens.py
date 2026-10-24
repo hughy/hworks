@@ -274,6 +274,7 @@ class Report(unittest.TestCase):
         self.assertIn("upstream:pi or provider", owners)
         self.assertIn(("upstream:unattributed", "tool fastgrep"), {(r["owner"], r["what"]) for r in self.report["upstream"]})
 
+
     def test_long_context_share_by_threshold(self):
         rep, _ = kt.analyze({"sessions": self.sroot}, kt.ks.parse_since("2026-09-01"), min_sessions=3, top=50,
                             root=self.root, owners=self.owners, long_context=5000)
@@ -305,6 +306,36 @@ class Report(unittest.TestCase):
 WF = "99999999-0000-0000-0000-000000000000"
 
 
+class BackendMiss(unittest.TestCase):
+    @staticmethod
+    def turns(*reads, events_at=()):
+        return [{"cr": cr, "events": ["compaction"] if i in events_at else []} for i, cr in enumerate(reads)]
+
+    def test_later_read_of_an_older_entry_proves_it(self):
+        self.assertTrue(kt.backend_miss(self.turns(3000, 0, 3000), 1, prev_ctx=3500))
+
+    def test_reading_only_the_new_write_proves_nothing(self):
+        self.assertFalse(kt.backend_miss(self.turns(3000, 0, 7500), 1, prev_ctx=3500))
+
+    def test_an_event_ends_the_search(self):
+        self.assertFalse(kt.backend_miss(self.turns(3000, 0, 0, 3000, events_at=(2,)), 1, prev_ctx=3500))
+
+    def test_report_splits_proven_misses_from_unexplained(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = fake_root(d)
+            for name, after in (("proven", 3000), ("unproven", 7500)):
+                b = Builder().system(sections(root), TOOLS).user("u")
+                b.turn(usage(inp=5, cw=3000)).turn(usage(inp=5, cr=3000, cw=500))
+                b.turn(usage(inp=5, cw=4000, cost_cw=0.04)).turn(usage(inp=5, cr=after, cw=1500))
+                b.write(os.path.join(d, "sessions", "proj", f"{name}.jsonl"))
+            rep, _ = kt.analyze({"sessions": os.path.join(d, "sessions")}, kt.ks.parse_since("2026-09-01"),
+                                min_sessions=1, top=1, root=root, owners=kt.Owners(root, rules=[]))
+        causes = {r["cause"]: (r["turns"], r["cost"]) for r in rep["cache writes"]}
+        self.assertEqual(causes["backend cache miss"], (1, 0.04))
+        self.assertEqual(causes["unexplained"], (1, 0.04))
+        self.assertEqual([r["owner"] for r in rep["upstream"]], ["upstream:provider routing"])
+
+
 def child_id(n):
     return "00000000-0000-0000-0000-%012d" % n
 
@@ -324,7 +355,6 @@ def blocking(origin=None):
     if origin:
         f["origin"] = origin
     return f
-
 
 class Loops(unittest.TestCase):
     """One review-loop run: round 1 has two reviewers, only the first blocks; round 2's second
