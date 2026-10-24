@@ -41,6 +41,7 @@ Working rules:
 - Keep `mutate.py` cheap. It runs the test command once unmutated as a baseline, then once per mutant, in sequence. Set each mutant's `"test"` to the narrowest command that should kill it (one test file, or a name filter such as `go test -run`, `pytest -k`, `forge test --match-test`), not the whole suite. Pass `--no-baseline` when the gate just passed on the same tree. If one narrowed run still takes over 60 seconds, cut the mutants to the one that proves the fix, or skip the check and say why.
 - Each commit ends in a state the gate passes. Do not batch checks to the end.
 - Run the gate command yourself and paste its final lines. "Inconclusive" or a gate you could not run is not a pass. Say which it was. Tests that skipped for a missing build tag or env var (an unset service URI) did not run; report them as not run.
+- Extend an existing test before adding a new one. Keep one-time checks (installer runs, recipe walk-throughs, environment probes, or live-service verification) as evidence in the PR description or reply, not permanent tests.
 - Keep a test only if it would fail when the code under test returned a zero, empty, or default value.
 - Build a script or codemod when the change repeats across more than a few sites, and commit it.
 - Comments only for a non-obvious why. No narration comments, no TODOs, no placeholder code.
