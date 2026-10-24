@@ -11,7 +11,7 @@ import { stripData } from "./autonomy.ts";
 export const MAX_TIMEOUT_S = 1800;
 
 // Leading words that wrap a command without changing what runs.
-const WRAPPER = /^(?:\w+=\S*|env|time|nice|nohup|exec|command|caffeinate)$/;
+const WRAPPER = /^(?:\w+=\S*|env|time|nice|nohup|exec|command|caffeinate|do|then|else|if|while|until)$/;
 const PY = String.raw`(?:(?:\S*/)?python[\d.]*\s+(?:-\S+\s+)*)`;
 
 const GATES: Array<[string, RegExp]> = [
@@ -19,13 +19,14 @@ const GATES: Array<[string, RegExp]> = [
   ["python -m pytest/unittest", new RegExp(String.raw`^${PY}-m\s+(?:pytest|unittest)\b`)],
   ["pytest", /^(?:\S*\/)?pytest\b/],
   ["mutate.py", new RegExp(String.raw`^${PY}?\S*mutate\.py\b`)],
-  ["make gate target", /^make\s+(?:-\S+\s+)*\S*(?:test|check|lint|gate|ci|e2e)/],
+  ["make gate target", /^make\b.*?\s(?:[\w.]*[-_:/])?(?:tests?|check|lint|gate|ci|e2e|verify)(?:[-_:][\w.:-]*)?(?=\s|$)/],
   ["golangci-lint run", /^(?:\S*\/)?golangci-lint\s+run\b/],
-  ["package-manager test/build", /^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|check|lint|build|e2e)/],
+  ["package-manager test/build", /^(?:npm|pnpm|yarn|bun)(?:\s+--?[\w-]+(?:[=\s](?!-)\S+)?)*\s+(?:run\s+)?(?:test|check|lint|build|e2e)(?:[-:]\S*)?(?=\s|$)/],
   ["jest/vitest/playwright", /^(?:npx\s+|pnpm\s+exec\s+)?(?:jest|vitest|playwright\s+test)\b/],
   ["cargo test/build", /^cargo\s+(?:test|build|clippy|nextest)\b/],
   ["forge test/build", /^forge\s+(?:test|build|coverage)\b/],
   ["node --test", /^node\s+(?:--\S+\s+)*--test\b/],
+  ["node test file", /^node\s+(?:--\S+\s+)*\S*\.test\.[cm]?[jt]s\b/],
   ["gate script", new RegExp(String.raw`^(?:(?:ba|z)?sh\s+|${PY})?\S*\b(?:check|gate|smoke|e2e|test)[\w-]*\.sh\b`)],
   ["gate script", new RegExp(String.raw`^${PY}?\S*(?:gate|smoke|e2e)[\w-]*\.py\b`)],
 ];

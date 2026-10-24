@@ -30,6 +30,11 @@ const gates: Array<[string, string]> = [
   ["make lint target", "make lint-go"],
   ["pytest", "uvx pytest -q || pytest -q tests/"],
   ["node --test", "node --test workflows/*.test.js"],
+  ["make -C dir target", "make -C services/api test"],
+  ["make ci target", "make ci-test-race"],
+  ["npm --prefix", "npm --prefix apps/web test"],
+  ["go test in a for loop", "for pkg in a b; do go test \"$pkg\"; done"],
+  ["node test file", "node --experimental-strip-types extensions/autonomy.test.mts"],
 ];
 for (const [name, cmd] of gates) check(`gate: ${name}`, gateCommand(cmd) !== null, cmd);
 
@@ -43,6 +48,8 @@ const notGates: Array<[string, string]> = [
   ["task-dir.sh", "~/dev/hworks/scripts/task-dir.sh chain-6181"],
   ["review-pre-read", "python3 /Users/hughy/dev/hworks/scripts/review-pre-read.py origin/master HEAD"],
   ["go run", "go run /tmp/decode_check.go"],
+  ["make target containing ci", "make special && make specify && make facilities"],
+  ["npm install", "npm install"],
 ];
 for (const [name, cmd] of notGates) check(`not a gate: ${name}`, gateCommand(cmd) === null, { cmd, got: gateCommand(cmd) });
 
