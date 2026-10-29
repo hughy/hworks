@@ -93,6 +93,8 @@ test("clean on first review", async () => {
   assert.match(calls[1].task, /git diff 0123abc\.\.\.HEAD/);
   assert.match(calls[1].task, /\/r\/rubric\.md/);
   assert.match(calls[1].task, /added flag, knob, field, timer, guard, or tool that the brief did not require and nothing in the diff or brief justifies/);
+  assert.match(calls[1].task, /logic split into a new script, module, or file when it fits in or could share an existing one/);
+  assert.match(calls[1].task, /a test of a one-off process or of a script whose own run or dry run reports the failure as fast and as precisely/);
   assert.ok(state.sets.length > 0);
   assert.equal(state.sets.at(-1).key, "review-loop.fix--issue-12");
   assert.equal(state.sets.at(-1).value.phase, "clean");

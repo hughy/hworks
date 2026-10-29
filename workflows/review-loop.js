@@ -123,6 +123,8 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
   task +=
     "Mark a finding blocking only when it is a verified defect, a gap against the brief, a broken gate, " +
     "or an added flag, knob, field, timer, guard, or tool that the brief did not require and nothing in the diff or brief justifies. " +
+    "An added file the brief does not justify is blocking too: logic split into a new script, module, or file when it fits in or could share an existing one, " +
+    "a committed one-off script or codemod, or a test of a one-off process or of a script whose own run or dry run reports the failure as fast and as precisely. " +
     "Return verdict `blocked` if any finding is blocking, else `ok`. " +
     "In `checked`, list each property of the change you verified, with `evidence`: the file:line and the test or command that proves it. " +
     "Cover the behavior the brief asks for, the fact the change is safe because of, and each coder risk listed below. " +

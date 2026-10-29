@@ -119,6 +119,8 @@ When the operator corrects a mistake, add its rule here with what enforces it. A
 | Do not ask mid-task; do not run git commands that destroy history or uncommitted work. | `extensions/autonomy.ts`; `extensions/autonomy.test.mts` |
 | A gate or test in foreground bash must not die on the bash timeout. | `extensions/gate-timeout.ts` raises `timeout` to 1800 s for gate and test commands; `extensions/gate-timeout.test.mts` replays past timed-out commands |
 | `subagent({ workflow: true })` needs a fence tagged `js workflow`. | `extensions/workflow-fence.ts`; `extensions/workflow-fence.test.mts` |
+| Put new logic in the script or module that owns the job, or share one; do not split it across new files. | review-loop reviewers block an unjustified new file (`workflows/review-loop.js`, asserted in `workflows/review-loop.test.js`); hughy-router's Mechanisms list requires a reason for each new script or module |
+| Do not add tests for one-off processes or for scripts whose own run or dry run shows the failure as fast; do not commit one-off scripts or codemods. | the same review-loop blocking rule; `agents/coder.md` |
 
 ## hworks
 
