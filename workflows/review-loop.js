@@ -60,6 +60,14 @@ const reviewSchema = {
         required: ["claim", "evidence"],
       },
     },
+    addedFiles: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { path: { type: "string" }, keep: { type: "boolean" }, reason: { type: "string" } },
+        required: ["path", "keep", "reason"],
+      },
+    },
     gate: { enum: ["passed", "failed"] },
     head: { type: "string" },
   },
@@ -78,7 +86,8 @@ const RUN_TIMEOUT = /Subagent timed out after \d+ms\./;
 const runTimedOut = (r) => !r.ok && (r.timedOut === true || RUN_TIMEOUT.test(failureText(r)));
 const GATE_FAILED = /Acceptance verification 'gate' failed/;
 const nonEmpty = (v) => typeof v === "string" && v.trim() !== "";
-const hasEvidence = (out) => Array.isArray(out.checked) && out.checked.some((c) => c && nonEmpty(c.claim) && nonEmpty(c.evidence));
+const hasEvidence = (out) => Array.isArray(out.checked) && out.checked.some((c) => c && nonEmpty(c.claim) && nonEmpty(c.evidence)) &&
+  Array.isArray(out.addedFiles);
 
 const commitRules =
   "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. " +
@@ -123,12 +132,14 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
   task +=
     "Mark a finding blocking only when it is a verified defect, a gap against the brief, a broken gate, " +
     "or an added flag, knob, field, timer, guard, or tool that the brief did not require and nothing in the diff or brief justifies. " +
-    "An added file the brief does not justify is blocking too: logic split into a new script, module, or file when it fits in or could share an existing one, " +
-    "a committed one-off script or codemod, or a test of a one-off process or of a script whose own run or dry run reports the failure as fast and as precisely. " +
+    "In `addedFiles`, list every path `git diff --diff-filter=A --name-only " + args.base + "...HEAD` prints ([] when none), " +
+    "each with `keep` and the `reason`. Set `keep: false`, even when the brief names the file, for logic split into a new script, module, or file " +
+    "that fits in or could share an existing one, a committed one-off script or codemod, or a test of a one-off process " +
+    "or of a script whose own run or dry run reports the failure as fast and as precisely. Each `keep: false` blocks. " +
     "Return verdict `blocked` if any finding is blocking, else `ok`. " +
     "In `checked`, list each property of the change you verified, with `evidence`: the file:line and the test or command that proves it. " +
     "Cover the behavior the brief asks for, the fact the change is safe because of, and each coder risk listed below. " +
-    "An `ok` verdict with an empty `checked` is not accepted.";
+    "An `ok` verdict with an empty `checked` or without `addedFiles` is not accepted.";
   const openRisks = [...new Set(riskLog.map((r) => r.risk))];
   if (openRisks.length) {
     task +=
@@ -304,7 +315,12 @@ while (outcome === null) {
       reviewFailed = true;
       continue;
     }
-    const mine = out.findings.map((f) => Object.assign({ reviewer }, f));
+    const priorFiles = new Set(prior.filter((f) => f.addedFile).map((f) => f.file));
+    const dropped = (Array.isArray(out.addedFiles) ? out.addedFiles : []).filter((a) => a && a.keep === false).map((a) => ({
+      severity: "blocking", file: a.path, claim: "Added file should not exist: " + a.reason, evidence: "addedFiles verdict",
+      addedFile: true, origin: priorFiles.has(a.path) ? "prior" : "new",
+    }));
+    const mine = [...out.findings, ...dropped].map((f) => Object.assign({ reviewer }, f));
     let hard = mine.filter((f) => f.severity === "blocking");
     if (out.verdict === "blocked" && hard.length === 0) {
       hard.push({ reviewer, severity: "blocking", file: "", claim: "Reviewer returned blocked without a blocking finding.", evidence: String(review.output || "").slice(0, 2000) });
