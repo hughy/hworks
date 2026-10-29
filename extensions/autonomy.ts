@@ -144,6 +144,7 @@ const INTENTS: Array<[string, RegExp]> = [
   ["git worktree remove --force", /\bworktree\s+remove\b|\b(?:remove|delete|clean\s*up|prune)\s+(?:the\s+|these\s+|stale\s+|old\s+|all\s+)*worktrees?\b/i],
   ["git stash drop/clear", /\bstash\s+(?:drop|clear)\b|\bdrop\s+(?:the\s+|that\s+|my\s+)?stash/i],
   ["git clean -f", /\bgit\s+clean\b|\bremove\s+(?:all\s+)?untracked\s+files\b/i],
+  ["git filter-branch / filter-repo", /\bfilter-(?:branch|repo)\b|\brewrite\s+(?:the\s+)?(?:commit\s+|git\s+)?history\b/i],
 ];
 
 const NEGATION = /\b(?:don'?t|do\s+not|never|no|not|without|avoid)\b/i;

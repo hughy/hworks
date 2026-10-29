@@ -36,6 +36,10 @@ for (const [prompt, want] of [
   ["delete the merged branches and clean up stale worktrees", "git branch -D,git worktree remove --force"],
   ["hard reset to origin/main", "git reset --hard"],
   ["fix the flaky test", ""],
+  ["run git filter-repo on the temp clone", "git filter-branch / filter-repo"],
+  ["rewrite commit history to use my public email", "git filter-branch / filter-repo"],
+  ["rewrite the history and force-push", "git filter-branch / filter-repo,git push --force-with-lease"],
+  ["do not run filter-repo", ""],
 ] as const) {
   const got = g(prompt);
   if (got !== want) { bad++; console.log("GRANT   ", JSON.stringify(prompt), "->", got, "want", want); }
