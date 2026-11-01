@@ -23,6 +23,8 @@ For any PR:
 2. Resolve any conflicts and run the gate on the merged head.
 3. Push without force. A merge keeps the push a fast-forward and keeps earlier review threads attached.
 
+A sync (merge or rebase) of a reviewed branch does not go back through review; the gate is its check. When it had conflicts, check each resolved file yourself: read the branch's reviewed change and the base commits that collided with it (`git log -p <old merge-base>..origin/<base> -- <file>`), and confirm the resolution keeps both. Then record the synced head so the pre-push review skips it: `scripts/review-range.py record "$TASK_DIR" origin/<base> $(git merge-base origin/<base> HEAD) HEAD sync`. Commits made after the sync get the normal review.
+
 For stacked branches, merge the parent branch (or trunk, once the parent has merged) the same way, per `global/AGENTS.md` Pull Requests.
 
 ## Signed commits
