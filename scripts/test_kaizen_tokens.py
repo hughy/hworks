@@ -391,13 +391,16 @@ def child_id(n):
     return "00000000-0000-0000-0000-%012d" % n
 
 
-def child(agent, n, model="m1", thinking="high", verdict=None, findings=()):
+def child(agent, n, model="m1", thinking="high", verdict=None, findings=(), refused=None):
     b = Builder().system({"preamble": f'<active_agent name="{agent}"/>'}, TOOLS[:1]).user("task")
     b.event("thinking_level_change", thinkingLevel=thinking)
     b.event("session_info", name=f"subagent-{agent}-{child_id(n)}-1")
     b.turn(usage(inp=5, cw=2500, cost_cw=1.0), model=model)
     if verdict:
-        b.structured("so", {"verdict": verdict, "findings": list(findings)})
+        out = {"verdict": verdict, "findings": list(findings)}
+        if refused:
+            out["addedTests"] = [refused]
+        b.structured("so", out)
     return b
 
 
@@ -407,9 +410,13 @@ def blocking(origin=None):
         f["origin"] = origin
     return f
 
+REFUSED = {"file": "a_test.go", "name": "TestPin", "keep": False, "covers": "nothing new"}
+
+
 class Loops(unittest.TestCase):
-    """One review-loop run: round 1 has two reviewers, only the first blocks; round 2's second
-    reviewer raises only a `new` finding, which does not block. Two other workflows, one with a
+    """One review-loop run: round 1 has two reviewers, only the first blocks and refuses an added
+    test; round 2's first reviewer refuses the same test again tagged `new`, which blocks as prior,
+    and its second reviewer raises only a `new` finding, which does not block. Two other workflows, one with a
     `code-1` key among keys review-loop never uses, are not loops."""
 
     @classmethod
@@ -420,10 +427,10 @@ class Loops(unittest.TestCase):
         sroot = os.path.join(d, "sessions")
         kids = {
             "code-1": child("coder", 1),
-            "review-1-1": child("reviewer", 2, model="m1", verdict="blocked", findings=[blocking()]),
+            "review-1-1": child("reviewer", 2, model="m1", verdict="blocked", findings=[blocking()], refused=REFUSED),
             "review-1-2": child("reviewer", 3, model="m2", verdict="ok"),
             "fix-2": child("coder", 4),
-            "review-2-1": child("reviewer", 5, model="m1", verdict="ok"),
+            "review-2-1": child("reviewer", 5, model="m1", verdict="ok", refused=dict(REFUSED, origin="new")),
             "review-2-2": child("reviewer", 6, model="m2", verdict="blocked", findings=[blocking("new")]),
             "scan": child("explorer", 7),
             "other:code-1": child("coder", 8),
@@ -449,20 +456,20 @@ class Loops(unittest.TestCase):
         st = self.report["stats"]
         self.assertEqual((st["children"], st["mapped_children"], st["loops"]), (9, 9, 1))
         [loop] = self.report["loops"]
-        self.assertEqual((loop["reviewers"], loop["rounds"], loop["runs"], loop["end"]), (2, 2, 1, {"clean": 1}))
+        self.assertEqual((loop["reviewers"], loop["rounds"], loop["runs"], loop["end"]), (2, 2, 1, {"blocked": 1}))
         self.assertEqual(loop["coder_cost"], round(2 * (0.01 + 1.0), 2))
         self.assertEqual(loop["review_cost"], round(4 * (0.01 + 1.0) + 4 * (0.01 + 0.002), 2))
 
     def test_rounds_apply_the_downgrade(self):
         r1, r2 = self.report["loop rounds"]
         self.assertEqual((r1["round"], r1["reviews"], r1["rounds_with_blocker"], r1["blocking_by_origin"]),
-                         (1, 2, 1, {"untagged": 1}))
-        self.assertEqual((r2["round"], r2["rounds_with_blocker"], r2["blocking_by_origin"]), (2, 0, {}))
+                         (1, 2, 1, {"untagged": 2}))
+        self.assertEqual((r2["round"], r2["rounds_with_blocker"], r2["blocking_by_origin"]), (2, 1, {"prior": 1}))
 
     def test_second_reviewer(self):
         [row] = self.report["second reviewer"]
         self.assertEqual((row["model"], row["rounds"], row["only_first"], row["only_second"], row["neither"]),
-                         ("p/m2", 2, 1, 0, 1))
+                         ("p/m2", 2, 2, 0, 0))
 
     def test_roles_carry_model_thinking_and_outcomes(self):
         rows = {(r["agent"], r["model"], r["thinking"]): r for r in self.report["roles"]}
@@ -481,8 +488,9 @@ class Loops(unittest.TestCase):
         ok = {"verdict": "ok", "findings": [], "addedFiles": [{"path": "a.py", "keep": True}],
               "addedTests": [{"file": "a_test.py", "name": "test_x", "keep": False, "origin": "prior"},
                              {"file": "a_test.py", "name": "test_y", "keep": False, "origin": "new"}]}
-        self.assertEqual(kt.effective_blocking(ok, 2), [{"origin": "prior"}])
+        self.assertEqual([f["origin"] for f in kt.effective_blocking(ok, 2)], ["prior"])
         self.assertEqual(len(kt.effective_blocking(ok, 1)), 2)
+        self.assertEqual(len(kt.effective_blocking(ok, 2, {"a_test.py\ntest_y"})), 2)
 
 
 class FirstSystem(unittest.TestCase):

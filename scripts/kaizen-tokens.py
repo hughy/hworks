@@ -454,16 +454,21 @@ def session_model(s):
     return c.most_common(1)[0][0] if c else "?"
 
 
-def effective_blocking(review, rnd):
+def effective_blocking(review, rnd, prior_added=frozenset()):
     """Blocking findings as review-loop counts them: after round 1 a blocking finding tagged
     `new` is downgraded to non-blocking. An `addedFiles` or `addedTests` entry with `keep: false` blocks
-    under any verdict, by the same origin rule. None when the reviewer left no structured result."""
+    under any verdict by the same rule, and is `prior` when its key blocked the round before
+    (`prior_added`). None when the reviewer left no structured result."""
     if not isinstance(review, dict):
         return None
-    refused = [{"origin": a.get("origin")} for field in ("addedFiles", "addedTests") for a in review.get(field) or []
-               if isinstance(a, dict) and a.get("keep") is False]
-    out = [f for f in [*(review.get("findings") or []), *refused] if isinstance(f, dict)
-           and (f.get("severity") == "blocking" or f in refused) and not (rnd > 1 and f.get("origin") == "new")]
+    refused = []
+    for field in ("addedFiles", "addedTests"):
+        for a in review.get(field) or []:
+            if isinstance(a, dict) and a.get("keep") is False:
+                key = (a.get("path") or a.get("file") or "") + "\n" + (a.get("name") or "")
+                refused.append({"key": key, "origin": "prior" if key in prior_added else a.get("origin")})
+    found = [f for f in review.get("findings") or [] if isinstance(f, dict) and f.get("severity") == "blocking"]
+    out = [f for f in found + refused if not (rnd > 1 and f.get("origin") == "new")]
     if review.get("verdict") == "blocked" and not out and rnd == 1:
         out = [{"origin": "untagged"}]
     return out
@@ -507,7 +512,11 @@ def loop_report(sessions, rel, min_sessions):
         sh["costs"].append(c_cost + r_cost)
         sh["coder"] += c_cost
         sh["review"] += r_cost
-        finals = [effective_blocking(s["structured"], last) for (r, _), s in reviews.items() if r == last]
+        priors = {1: frozenset()}
+        for r in range(2, last + 1):
+            priors[r] = frozenset(f["key"] for (rr, _), s in reviews.items() if rr == r - 1
+                                  for f in effective_blocking(s["structured"], rr, priors[rr]) or [] if "key" in f)
+        finals = [effective_blocking(s["structured"], last, priors[last]) for (r, _), s in reviews.items() if r == last]
         if not n_rev:
             sh["end"]["gate only"] += 1
         elif not finals or any(f is None for f in finals):
@@ -524,7 +533,7 @@ def loop_report(sessions, rel, min_sessions):
                 if rr != r:
                     continue
                 pr["reviews"] += 1
-                eff = effective_blocking(s["structured"], r)
+                eff = effective_blocking(s["structured"], r, priors[r])
                 if eff is None:
                     pr["unread"] += 1
                     continue
@@ -535,7 +544,7 @@ def loop_report(sessions, rel, min_sessions):
             a, b = reviews.get((r, 1)), reviews.get((r, 2))
             if not a or not b:
                 continue
-            ea, eb = effective_blocking(a["structured"], r), effective_blocking(b["structured"], r)
+            ea, eb = effective_blocking(a["structured"], r, priors[r]), effective_blocking(b["structured"], r, priors[r])
             if ea is None or eb is None:
                 continue
             row = second[session_model(b)]
