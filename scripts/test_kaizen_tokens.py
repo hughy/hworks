@@ -482,6 +482,7 @@ class Loops(unittest.TestCase):
     def test_missing_structured_result_is_unknown(self):
         self.assertIsNone(kt.effective_blocking(None, 1))
         self.assertEqual(kt.effective_blocking({"verdict": "blocked", "findings": [blocking("new")]}, 2), [])
+        self.assertEqual(kt.effective_blocking({"verdict": "blocked", "findings": []}, 2), [{"origin": "untagged"}])
         self.assertEqual(len(kt.effective_blocking({"verdict": "blocked", "findings": [blocking("prior")]}, 2)), 1)
 
     def test_rejected_added_file_or_test_blocks_an_ok_verdict(self):

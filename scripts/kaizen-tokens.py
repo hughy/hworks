@@ -468,10 +468,9 @@ def effective_blocking(review, rnd, prior_added=frozenset()):
                 key = (a.get("path") or a.get("file") or "") + "\n" + (a.get("name") or "")
                 refused.append({"key": key, "origin": "prior" if key in prior_added else a.get("origin")})
     found = [f for f in review.get("findings") or [] if isinstance(f, dict) and f.get("severity") == "blocking"]
-    out = [f for f in found + refused if not (rnd > 1 and f.get("origin") == "new")]
-    if review.get("verdict") == "blocked" and not out and rnd == 1:
-        out = [{"origin": "untagged"}]
-    return out
+    if review.get("verdict") == "blocked" and not found + refused:
+        return [{"origin": "untagged"}]
+    return [f for f in found + refused if not (rnd > 1 and f.get("origin") == "new")]
 
 
 def loop_report(sessions, rel, min_sessions):
