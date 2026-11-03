@@ -58,7 +58,7 @@ function fakeState() {
 const baseArgs = { brief: "/tmp/brief.md", gate: "npm test", base: "0123abc", reviewers: 1, rubricDir: "/r" };
 const coded = (head) => ({ ok: true, output: "", structuredOutput: { status: "done", head, summary: "s" } });
 const checked = [{ claim: "loop ends clean", evidence: "a.js:9, review-loop.test.js" }];
-const clean = { ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [] } };
+const clean = { ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [], addedTests: [] } };
 const finding = { severity: "blocking", file: "a.js", line: 3, claim: "off by one", evidence: "a.js:3" };
 const note = { severity: "non-blocking", file: "b.js", line: 1, claim: "naming", evidence: "b.js:1" };
 const blocked = { ok: true, output: "", structuredOutput: { verdict: "blocked", findings: [finding, note] } };
@@ -96,6 +96,8 @@ test("clean on first review", async () => {
   assert.match(calls[1].task, /In `addedFiles`, list every path `git diff --diff-filter=A --name-only 0123abc\.\.\.HEAD` prints/);
   assert.match(calls[1].task, /`keep: false`, even when the brief names the file, for logic split into a new script, module, or file/);
   assert.match(calls[1].task, /a test of a one-off process or of a script whose own run or dry run reports the failure as fast and as precisely/);
+  assert.match(calls[1].task, /In `addedTests`, list every test function or test case the diff adds, in new or existing files/);
+  assert.match(calls[1].task, /fails it while every test that existed at 0123abc passes/);
   assert.ok(state.sets.length > 0);
   assert.equal(state.sets.at(-1).key, "review-loop.fix--issue-12");
   assert.equal(state.sets.at(-1).value.phase, "clean");
@@ -178,7 +180,7 @@ test("round 1 blocks on any blocking finding, whatever its origin", async () => 
 });
 
 const runnerExit = { ok: false, error: "Async runner process 1 exited with code 0 before writing a result. Marked run failed by stale-run reconciliation." };
-const gated = (gate, head) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [], gate, head } });
+const gated = (gate, head) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [], addedTests: [], gate, head } });
 
 test("a runner exit skips the retry and reviewers run the gate", async () => {
   const { out, calls } = await run({ "code-1": runnerExit, "review-1-1": gated("passed", "h1") });
@@ -409,7 +411,7 @@ test("a run timeout is recognized with prefix text, in output only, or as timedO
 test("a host gate timeout still goes to reviewers when the coder output mentions a run timeout", async () => {
   const { out, calls } = await run({
     "code-1": { ok: false, error: "Acceptance verification 'gate' timed-out.", output: "Fixed detection of " + runTimeout },
-    "review-1-1": { ok: true, structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [], gate: "passed", head: "a1" } },
+    "review-1-1": { ok: true, structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [], addedTests: [], gate: "passed", head: "a1" } },
   });
   assert.equal(out.gateBy, "reviewers");
   assert.equal(out.failure, null);
@@ -517,7 +519,7 @@ test("a relative or empty taskDir is rejected", async () => {
 const unproven = (extra) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], ...extra } });
 
 test("an ok verdict without evidence is re-asked once and ends clean when the re-ask has evidence", async () => {
-  for (const extra of [{}, { checked: [] }, { checked: [{ claim: "fine", evidence: " " }] }, { checked }]) {
+  for (const extra of [{}, { checked: [] }, { checked: [{ claim: "fine", evidence: " " }] }, { checked }, { checked, addedFiles: [] }]) {
     const { out, calls } = await run(
       { "code-1": coded("a1"), "review-1-1": clean, "review-1-2": unproven(extra), "review-1-2-reask": clean },
       { reviewers: 2, review2Model: "prov/model-b", taskDir: "/tmp/task", label: "u" },
@@ -545,13 +547,26 @@ test("a re-ask that returns ok without evidence again, or fails, ends review-fai
 test("an added file the reviewer would not keep blocks an ok verdict, and blocks again as prior", async () => {
   const kept = { path: "src/a.js", keep: true, reason: "the feature" };
   const split = { path: "scripts/b.py", keep: false, reason: "duplicates scripts/a.sh" };
-  const okWith = (addedFiles) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles } });
+  const okWith = (addedFiles) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles, addedTests: [] } });
   const { out } = await run({ "code-1": coded("a1"), "review-1-1": okWith([kept, split]), "fix-2": coded("a2"), "review-2-1": okWith([split]) }, { maxRounds: 2 });
   assert.equal(out.state, "unresolved");
   assert.equal(out.blocking.length, 1);
   assert.equal(out.blocking[0].file, "scripts/b.py");
   assert.equal(out.blocking[0].origin, "prior");
   assert.match(out.blocking[0].claim, /duplicates scripts\/a\.sh/);
+});
+
+test("an added test in an existing file that the reviewer would not keep blocks, and blocks again as prior", async () => {
+  const distinct = { file: "src/a_test.go", name: "TestRevertedFix", keep: true, covers: "fails with the fix reverted" };
+  const pin = { file: "src/a_test.go", name: "TestPinAll", keep: false, covers: "no mutant fails it alone; extend TestStored" };
+  const okWith = (addedTests) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [], addedTests } });
+  const { out } = await run({ "code-1": coded("a1"), "review-1-1": okWith([distinct, pin]), "fix-2": coded("a2"), "review-2-1": okWith([pin]) }, { maxRounds: 2 });
+  assert.equal(out.state, "unresolved");
+  assert.equal(out.blocking.length, 1);
+  assert.equal(out.blocking[0].file, "src/a_test.go");
+  assert.equal(out.blocking[0].test, "TestPinAll");
+  assert.equal(out.blocking[0].origin, "prior");
+  assert.match(out.blocking[0].claim, /extend TestStored/);
 });
 
 test("a blocked verdict needs no checked entries and is not re-asked", async () => {
