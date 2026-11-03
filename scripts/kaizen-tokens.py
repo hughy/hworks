@@ -456,11 +456,14 @@ def session_model(s):
 
 def effective_blocking(review, rnd):
     """Blocking findings as review-loop counts them: after round 1 a blocking finding tagged
-    `new` is downgraded to non-blocking. None when the reviewer left no structured result."""
+    `new` is downgraded to non-blocking. An `addedFiles` or `addedTests` entry with `keep: false` blocks
+    under any verdict, by the same origin rule. None when the reviewer left no structured result."""
     if not isinstance(review, dict):
         return None
-    out = [f for f in review.get("findings") or [] if isinstance(f, dict) and f.get("severity") == "blocking"
-           and not (rnd > 1 and f.get("origin") == "new")]
+    refused = [{"origin": a.get("origin")} for field in ("addedFiles", "addedTests") for a in review.get(field) or []
+               if isinstance(a, dict) and a.get("keep") is False]
+    out = [f for f in [*(review.get("findings") or []), *refused] if isinstance(f, dict)
+           and (f.get("severity") == "blocking" or f in refused) and not (rnd > 1 and f.get("origin") == "new")]
     if review.get("verdict") == "blocked" and not out and rnd == 1:
         out = [{"origin": "untagged"}]
     return out

@@ -477,6 +477,13 @@ class Loops(unittest.TestCase):
         self.assertEqual(kt.effective_blocking({"verdict": "blocked", "findings": [blocking("new")]}, 2), [])
         self.assertEqual(len(kt.effective_blocking({"verdict": "blocked", "findings": [blocking("prior")]}, 2)), 1)
 
+    def test_rejected_added_file_or_test_blocks_an_ok_verdict(self):
+        ok = {"verdict": "ok", "findings": [], "addedFiles": [{"path": "a.py", "keep": True}],
+              "addedTests": [{"file": "a_test.py", "name": "test_x", "keep": False, "origin": "prior"},
+                             {"file": "a_test.py", "name": "test_y", "keep": False, "origin": "new"}]}
+        self.assertEqual(kt.effective_blocking(ok, 2), [{"origin": "prior"}])
+        self.assertEqual(len(kt.effective_blocking(ok, 1)), 2)
+
 
 class FirstSystem(unittest.TestCase):
     def test_non_object_lines_are_skipped(self):
