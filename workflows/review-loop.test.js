@@ -567,6 +567,12 @@ test("an added test in an existing file that the reviewer would not keep blocks,
   assert.equal(out.blocking[0].test, "TestPinAll");
   assert.equal(out.blocking[0].origin, "prior");
   assert.match(out.blocking[0].claim, /extend TestStored/);
+  const later = (origin) => ({ file: "src/a_test.go", name: "TestOther", keep: false, covers: "duplicates TestStored", origin });
+  for (const [origin, state] of [["prior", "unresolved"], ["regression", "unresolved"], [undefined, "unresolved"], ["new", "clean"]]) {
+    const r = await run({ "code-1": coded("a1"), "review-1-1": okWith([pin]), "fix-2": coded("a2"), "review-2-1": okWith([later(origin)]) }, { maxRounds: 2 });
+    assert.equal(r.out.state, state, String(origin));
+    assert.match(r.calls.find((c) => c.key === "review-2-1").task, /entry with `keep: false`; a renamed or moved entry from below is `prior`/);
+  }
 });
 
 test("a blocked verdict needs no checked entries and is not re-asked", async () => {

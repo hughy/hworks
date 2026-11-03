@@ -64,7 +64,7 @@ const reviewSchema = {
       type: "array",
       items: {
         type: "object",
-        properties: { path: { type: "string" }, keep: { type: "boolean" }, reason: { type: "string" } },
+        properties: { path: { type: "string" }, keep: { type: "boolean" }, reason: { type: "string" }, origin: { enum: ["prior", "regression", "new"] } },
         required: ["path", "keep", "reason"],
       },
     },
@@ -72,7 +72,7 @@ const reviewSchema = {
       type: "array",
       items: {
         type: "object",
-        properties: { file: { type: "string" }, name: { type: "string" }, keep: { type: "boolean" }, covers: { type: "string" } },
+        properties: { file: { type: "string" }, name: { type: "string" }, keep: { type: "boolean" }, covers: { type: "string" }, origin: { enum: ["prior", "regression", "new"] } },
         required: ["file", "name", "keep", "covers"],
       },
     },
@@ -160,7 +160,7 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
   }
   if (round > 1) {
     task +=
-      "\n\nThis is review round " + round + ", after a fix. Set `origin` on every finding. " +
+      "\n\nThis is review round " + round + ", after a fix. Set `origin` on every finding and on every `addedFiles` or `addedTests` entry with `keep: false`; a renamed or moved entry from below is `prior`. " +
       "`prior`: one of the findings below that still holds (omit the ones now fixed). " +
       "`regression`: a defect introduced by the fix, `git diff " + (priorHead || args.base) + "...HEAD`. " +
       "`new`: anything else; it is reported but does not block this loop.\n" + JSON.stringify(prior, null, 2);
@@ -328,13 +328,14 @@ while (outcome === null) {
       continue;
     }
     const priorAdded = new Set(prior.filter((f) => f.added).map((f) => f.file + "\n" + (f.test || "")));
-    const drop = (file, test, claim, evidence) => ({
-      severity: "blocking", file, test, claim, evidence, added: true, origin: priorAdded.has(file + "\n" + (test || "")) ? "prior" : "new",
+    // An untagged refusal keeps blocking, like an untagged finding.
+    const drop = (file, test, claim, evidence, origin) => ({
+      severity: "blocking", file, test, claim, evidence, added: true, origin: priorAdded.has(file + "\n" + (test || "")) ? "prior" : origin,
     });
     const refused = (list) => (Array.isArray(list) ? list : []).filter((a) => a && a.keep === false);
     const dropped = [
-      ...refused(out.addedFiles).map((a) => drop(a.path, undefined, "Added file should not exist: " + a.reason, "addedFiles verdict")),
-      ...refused(out.addedTests).map((a) => drop(a.file, a.name, "Added test " + a.name + " should not exist: " + a.covers, "addedTests verdict")),
+      ...refused(out.addedFiles).map((a) => drop(a.path, undefined, "Added file should not exist: " + a.reason, "addedFiles verdict", a.origin)),
+      ...refused(out.addedTests).map((a) => drop(a.file, a.name, "Added test " + a.name + " should not exist: " + a.covers, "addedTests verdict", a.origin)),
     ];
     const mine = [...out.findings, ...dropped].map((f) => Object.assign({ reviewer }, f));
     let hard = mine.filter((f) => f.severity === "blocking");
