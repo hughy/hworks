@@ -64,8 +64,16 @@ const reviewSchema = {
       type: "array",
       items: {
         type: "object",
-        properties: { path: { type: "string" }, keep: { type: "boolean" }, reason: { type: "string" } },
+        properties: { path: { type: "string" }, keep: { type: "boolean" }, reason: { type: "string" }, origin: { enum: ["prior", "regression", "new"] } },
         required: ["path", "keep", "reason"],
+      },
+    },
+    addedTests: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { file: { type: "string" }, name: { type: "string" }, keep: { type: "boolean" }, covers: { type: "string" }, origin: { enum: ["prior", "regression", "new"] } },
+        required: ["file", "name", "keep", "covers"],
       },
     },
     gate: { enum: ["passed", "failed"] },
@@ -87,7 +95,7 @@ const runTimedOut = (r) => !r.ok && (r.timedOut === true || RUN_TIMEOUT.test(fai
 const GATE_FAILED = /Acceptance verification 'gate' failed/;
 const nonEmpty = (v) => typeof v === "string" && v.trim() !== "";
 const hasEvidence = (out) => Array.isArray(out.checked) && out.checked.some((c) => c && nonEmpty(c.claim) && nonEmpty(c.evidence)) &&
-  Array.isArray(out.addedFiles);
+  Array.isArray(out.addedFiles) && Array.isArray(out.addedTests);
 
 const commitRules =
   "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. " +
@@ -134,12 +142,16 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
     "or an added flag, knob, field, timer, guard, or tool that the brief did not require and nothing in the diff or brief justifies. " +
     "In `addedFiles`, list every path `git diff --diff-filter=A --name-only " + args.base + "...HEAD` prints ([] when none), " +
     "each with `keep` and the `reason`. Set `keep: false`, even when the brief names the file, for logic split into a new script, module, or file " +
-    "that fits in or could share an existing one, a committed one-off script or codemod, or a test of a one-off process " +
-    "or of a script whose own run or dry run reports the failure as fast and as precisely. Each `keep: false` blocks. " +
+    "that fits in or could share an existing one, or a committed one-off script or codemod. Each `keep: false` blocks. " +
+    "In `addedTests`, list every test function or test case the diff adds, in new or existing files ([] when none), " +
+    "each with `keep` and in `covers` the behavior only it catches: a mutant of the code, or the reverted fix, that fails it while every test " +
+    "that existed at " + args.base + " passes, and the command you ran. Set `keep: false` when no such mutant exists " +
+    "(name the existing test to extend instead), or for a test of a one-off process or of a script whose own run or dry run " +
+    "reports the failure as fast and as precisely. A test that fails with a defect fix reverted covers a distinct behavior. Each `keep: false` blocks. " +
     "Return verdict `blocked` if any finding is blocking, else `ok`. " +
     "In `checked`, list each property of the change you verified, with `evidence`: the file:line and the test or command that proves it. " +
     "Cover the behavior the brief asks for, the fact the change is safe because of, and each coder risk listed below. " +
-    "An `ok` verdict with an empty `checked` or without `addedFiles` is not accepted.";
+    "An `ok` verdict with an empty `checked`, or without `addedFiles` or `addedTests`, is not accepted.";
   const openRisks = [...new Set(riskLog.map((r) => r.risk))];
   if (openRisks.length) {
     task +=
@@ -148,7 +160,7 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
   }
   if (round > 1) {
     task +=
-      "\n\nThis is review round " + round + ", after a fix. Set `origin` on every finding. " +
+      "\n\nThis is review round " + round + ", after a fix. Set `origin` on every finding and on every `addedFiles` or `addedTests` entry with `keep: false`; a renamed or moved entry from below is `prior`. " +
       "`prior`: one of the findings below that still holds (omit the ones now fixed). " +
       "`regression`: a defect introduced by the fix, `git diff " + (priorHead || args.base) + "...HEAD`. " +
       "`new`: anything else; it is reported but does not block this loop.\n" + JSON.stringify(prior, null, 2);
@@ -315,11 +327,16 @@ while (outcome === null) {
       reviewFailed = true;
       continue;
     }
-    const priorFiles = new Set(prior.filter((f) => f.addedFile).map((f) => f.file));
-    const dropped = (Array.isArray(out.addedFiles) ? out.addedFiles : []).filter((a) => a && a.keep === false).map((a) => ({
-      severity: "blocking", file: a.path, claim: "Added file should not exist: " + a.reason, evidence: "addedFiles verdict",
-      addedFile: true, origin: priorFiles.has(a.path) ? "prior" : "new",
-    }));
+    const priorAdded = new Set(prior.filter((f) => f.added).map((f) => f.file + "\n" + (f.test || "")));
+    // An untagged refusal keeps blocking, like an untagged finding.
+    const drop = (file, test, claim, evidence, origin) => ({
+      severity: "blocking", file, test, claim, evidence, added: true, origin: priorAdded.has(file + "\n" + (test || "")) ? "prior" : origin,
+    });
+    const refused = (list) => (Array.isArray(list) ? list : []).filter((a) => a && a.keep === false);
+    const dropped = [
+      ...refused(out.addedFiles).map((a) => drop(a.path, undefined, "Added file should not exist: " + a.reason, "addedFiles verdict", a.origin)),
+      ...refused(out.addedTests).map((a) => drop(a.file, a.name, "Added test " + a.name + " should not exist: " + a.covers, "addedTests verdict", a.origin)),
+    ];
     const mine = [...out.findings, ...dropped].map((f) => Object.assign({ reviewer }, f));
     let hard = mine.filter((f) => f.severity === "blocking");
     if (out.verdict === "blocked" && hard.length === 0) {
