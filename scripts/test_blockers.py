@@ -110,6 +110,28 @@ class Friction(unittest.TestCase):
         out = self.run_script("--since", "2026-01-01").stdout
         self.assertIn("friction / reviewer / missed-defect", out)
 
+    def test_log_prints_decisions_and_corrections_by_task_over_all_history(self):
+        write(os.path.join(self.tasks, "github.com--o--alpha", "main", "t1", ".task"),
+              "created=2026-09-30T10:00:00Z\nrepo=github.com--o--alpha\nbranch=Hughy/Main\nslug=t1\n")
+        write(os.path.join(self.tasks, "github.com--o--alpha", "main", "t1", "open-questions.md"),
+              "- [ambiguous-brief] split the router? | one module | router.go:12 has one caller | split later | deferred:reversed\n")
+        out = self.run_script("--log", "--cwd-match", "alpha").stdout
+        self.assertIn("## github.com--o--alpha @ Hughy/Main: t1\n", out)
+        self.assertIn("created 2026-09-30", out)
+        self.assertIn("- [ambiguous-brief] split the router? (deferred:reversed)\n    chose: one module\n"
+                      "    evidence: router.go:12 has one caller\n    reverse: split later\n", out)
+        self.assertIn("- correction [missed-defect] approve not reset after a reverted router call (caught by reviewer, "
+                      "2026-10-02)\n    cost: 1 review round\n    would have helped: an invariant test template\n", out)
+        self.assertIn("- correction [toolchain] stale entry (caught by ci, 2020-01-01)", out)
+        self.assertNotIn("beta", out)
+
+    def test_grep_matches_full_entry_text(self):
+        write(os.path.join(self.tasks, "github.com--o--beta", "dev", "t2", "open-questions.md"),
+              f"- [tooling] where does pricing live | quote pkg | {'x' * 250} internal/quote/price.go | move it | deferred\n")
+        got = self.rows("--grep", "INTERNAL/QUOTE", "--grep", "rate limit")
+        self.assertEqual(sorted((r["source"], r["rule"]) for r in got), [("friction", "env"), ("open-questions", "tooling")])
+        self.assertEqual(got[0]["cwd"], got[1]["cwd"])
+
 
 if __name__ == "__main__":
     unittest.main()
