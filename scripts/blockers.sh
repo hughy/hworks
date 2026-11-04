@@ -16,12 +16,12 @@
 #   HWORKS_RUN_HISTORY         pi-subagents run history (default ~/.pi/agent/run-history.jsonl)
 #   HWORKS_HARNESS_AUDIT_LOG   a harness guard audit log: JSONL rows with ts, action, rule (unset by default)
 # adapters/local/blockers.env, when present, is sourced first to set any of these. A linked worktree without
-# adapters/local reads the main checkout's, where install scripts link it.
+# adapters/local reads the main checkout's, where install scripts link it. HWORKS_LOCAL_DIR overrides both.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-local_dir="$root/adapters/local"
-if [ ! -d "$local_dir" ] && common=$(unset $(git rev-parse --local-env-vars); git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
+local_dir="${HWORKS_LOCAL_DIR:-$root/adapters/local}"
+if [ -z "${HWORKS_LOCAL_DIR:-}" ] && [ ! -d "$local_dir" ] && common=$(unset $(git rev-parse --local-env-vars); git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
   [ "${common##*/}" = .git ] && [ -d "${common%/.git}/adapters/local" ]; then
   local_dir="${common%/.git}/adapters/local"
 fi
