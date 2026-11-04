@@ -1,6 +1,7 @@
 import errno
 import json
 import os
+import select
 import shutil
 import signal
 import subprocess
@@ -35,6 +36,21 @@ def write(path, data):
 def read(path):
     with open(path, "rb") as f:
         return f.read()
+
+
+def await_stderr(proc, text, timeout=60):
+    """Read proc's stderr until text appears, so a test releases a held lock only after the waiter
+    reached it; a fixed sleep races a slow interpreter start."""
+    seen, fd, deadline = b"", proc.stderr.fileno(), time.monotonic() + timeout
+    while text.encode() not in seen:
+        left = deadline - time.monotonic()
+        if left <= 0 or proc.poll() is not None or not select.select([fd], [], [], left)[0]:
+            raise AssertionError(f"{text!r} not in stderr: {seen.decode(errors='replace')}")
+        chunk = os.read(fd, 4096)
+        if not chunk:
+            raise AssertionError(f"{text!r} not in stderr: {seen.decode(errors='replace')}")
+        seen += chunk
+    return seen.decode()
 
 
 class MutateTest(unittest.TestCase):
@@ -353,7 +369,7 @@ class MutateTest(unittest.TestCase):
             while not os.path.exists(marker):
                 self.assertLess(time.monotonic(), deadline, "the first run never started")
                 time.sleep(0.05)
-        time.sleep(1)
+        await_stderr(procs[1], "waiting for another in-place run")
         self.assertIsNone(procs[1].poll(), "the second run did not wait for the first")
         write(release, "")
         for p in procs:
@@ -363,7 +379,6 @@ class MutateTest(unittest.TestCase):
             p.stderr.close()
             self.assertEqual(p.returncode, 0, out + err)
             self.assertEqual(json.loads(out)[0]["verdict"], "killed")
-        self.assertIn("waiting for another in-place run", err)
         self.assertEqual(read(self.calc), CALC.encode())
         self.assertEqual(git(self.repo, "status", "--porcelain", "--", "calc.py"), "")
 
@@ -533,7 +548,7 @@ class MutateTest(unittest.TestCase):
             while not os.path.exists(marker):
                 self.assertLess(time.monotonic(), deadline, "the first run never started")
                 time.sleep(0.05)
-        time.sleep(1)
+        await_stderr(procs[1], "waiting for another in-place run")
         self.assertIsNone(procs[1].poll(), "the overlay run did not wait for the in-place run")
         write(release, "")
         outs = []
@@ -544,7 +559,6 @@ class MutateTest(unittest.TestCase):
             p.stderr.close()
             self.assertEqual(p.returncode, 0, out + err)
             outs.append(json.loads(out)[0])
-        self.assertIn("waiting for another in-place run", err)
         log = read(outs[1]["log"]).decode()
         self.assertIn("a - b", log)
         self.assertNotIn("a * b", log)
