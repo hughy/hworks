@@ -16,7 +16,7 @@ Sources (each optional; a missing one is reported, not fatal):
   HWORKS_TOOL_DIRS     extra colon-separated dirs whose entry names count as existing tools,
                        besides this repo's scripts/ and skills/ (unset by default)
 adapters/local/*.env, when present, is read first to set any of these; values already in the
-environment win.
+environment win. HWORKS_LOCAL_DIR names another dir to read instead (tests point it at an empty one).
 
 Scope: --cwd-match keeps only sessions whose working directory (from the transcript header,
 else the transcript path) contains the text, case-insensitively; repeat it to keep any of
@@ -148,7 +148,9 @@ def to_dt(v):
 
 def local_dir(root=ROOT):
     """adapters/local under root, or the main checkout's when root is a linked worktree without
-    one: install scripts link local adapters into the main checkout only."""
+    one: install scripts link local adapters into the main checkout only. HWORKS_LOCAL_DIR overrides both."""
+    if os.environ.get("HWORKS_LOCAL_DIR"):
+        return os.environ["HWORKS_LOCAL_DIR"]
     own = os.path.join(root, "adapters", "local")
     if os.path.isdir(own):
         return own

@@ -27,7 +27,7 @@ class CollectorTest(unittest.TestCase):
         artifact.mkdir()
         shutil.copy(FIX / 'child.jsonl', artifact / 'duplicate.jsonl')
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('HWORKS_')}
-        self.env.update(HOME=str(self.root), HWORKS_PI_SESSIONS=str(self.sessions),
+        self.env.update(HOME=str(self.root), HWORKS_LOCAL_DIR=str(self.root / 'no-local'), HWORKS_PI_SESSIONS=str(self.sessions),
                         HWORKS_TASKS_DIR=str(self.root / 'missing'), HWORKS_RUN_HISTORY=str(self.root / 'missing-history'),
                         HWORKS_SUBAGENT_RUNS=str(self.root / 'missing-runs'),
                         HWORKS_FM_TZ='UTC', HWORKS_FM_SESSION_RULES='[{"pattern":"factory", "class":"factory"}]',
