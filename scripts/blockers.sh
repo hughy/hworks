@@ -105,7 +105,7 @@ def add(source, kind, rule, ts, session=None, cwd=None, detail="", verdict=None,
         return
     if (only_source and source != only_source) or (only_kind and kind != only_kind):
         return
-    if grep and not any(g in f"{cwd or ''} {session or ''} {detail or ''}".lower() for g in grep):
+    if grep and not any(g in f"{cwd or ''} {session or ''} [{rule}] {detail or ''}".lower() for g in grep):
         return
     rows.append({"ts": dt.isoformat(timespec="seconds"), "source": source, "kind": kind, "rule": rule,
                  "session": session, "cwd": cwd, "detail": re.sub(r"\s+", " ", str(detail or ""))[:200],

@@ -131,6 +131,7 @@ class Friction(unittest.TestCase):
         got = self.rows("--grep", "INTERNAL/QUOTE", "--grep", "rate limit")
         self.assertEqual(sorted((r["source"], r["rule"]) for r in got), [("friction", "env"), ("open-questions", "tooling")])
         self.assertEqual(got[0]["cwd"], got[1]["cwd"])
+        self.assertEqual([r["rule"] for r in self.rows("--grep", "[wrong-assumption]")], ["wrong-assumption"])
 
 
 if __name__ == "__main__":
