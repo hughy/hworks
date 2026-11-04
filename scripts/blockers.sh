@@ -4,8 +4,11 @@
 # how the operator judged them (kept or reversed), and friction (work the operator, a reviewer,
 # a test, or CI caught and sent back).
 # Read-only. Feed the output to /skill:correct to fix recurring classes.
-# usage: blockers.sh [--since YYYY-MM-DD|7d] [--cwd-match TEXT]... [--source S] [--kind K] [--json]
+# --log prints the decision log instead: every open-questions.md decision and friction.md correction in full,
+# grouped by repo, branch, and task, over all history unless --since is given.
+# usage: blockers.sh [--since YYYY-MM-DD|7d] [--cwd-match TEXT]... [--grep TEXT]... [--source S] [--kind K] [--json|--log]
 #   --cwd-match keeps events whose cwd or task path contains TEXT, case-insensitively.
+#   --grep keeps events whose task path or full entry text contains TEXT, case-insensitively (a file, module, or topic).
 #   --source and --kind keep events with that exact source or kind (e.g. --source friction --kind operator).
 #
 # Sources (each optional; a missing one is reported, not fatal):
@@ -28,20 +31,24 @@ fi
 # shellcheck disable=SC1091
 [ -f "$local_dir/blockers.env" ] && . "$local_dir/blockers.env"
 
-since=7d; json=0; match=; source=; kind=
+since=; json=0; log=0; match=; grep=; source=; kind=
 while [ $# -gt 0 ]; do
   case "$1" in
     --since) since=${2:?--since needs a value}; shift 2 ;;
     --json) json=1; shift ;;
+    --log) log=1; shift ;;
     --cwd-match) match="$match${match:+$'\n'}${2:?--cwd-match needs a value}"; shift 2 ;;
+    --grep) grep="$grep${grep:+$'\n'}${2:?--grep needs a value}"; shift 2 ;;
     --source) source=${2:?--source needs a value}; shift 2 ;;
     --kind) kind=${2:?--kind needs a value}; shift 2 ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-export BLOCKERS_SINCE=$since BLOCKERS_JSON=$json BLOCKERS_MATCH=$match BLOCKERS_SOURCE=$source BLOCKERS_KIND=$kind
+[ "$json$log" = 11 ] && { echo "--json and --log are exclusive" >&2; exit 2; }
+export BLOCKERS_SINCE=$since BLOCKERS_JSON=$json BLOCKERS_LOG=$log BLOCKERS_MATCH=$match BLOCKERS_GREP=$grep
+export BLOCKERS_SOURCE=$source BLOCKERS_KIND=$kind
 export HWORKS_TASKS_DIR=${HWORKS_TASKS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-tasks}
 export HWORKS_BLOCKERS_LOG=${HWORKS_BLOCKERS_LOG:-$HWORKS_TASKS_DIR/blockers.jsonl}
 export HWORKS_SUBAGENT_RUNS=${HWORKS_SUBAGENT_RUNS:-${TMPDIR:-/tmp}/pi-subagents-uid-$(id -u)/async-subagent-runs}
@@ -82,12 +89,15 @@ def jsonl(path):
     except OSError:
         return
 
-since = parse_since(os.environ["BLOCKERS_SINCE"])
+log_view, since_arg = os.environ["BLOCKERS_LOG"] == "1", os.environ["BLOCKERS_SINCE"]
+all_history = datetime.min.replace(tzinfo=timezone.utc)
+since = parse_since(since_arg) if since_arg else all_history if log_view else parse_since("7d")
 match = [m.lower() for m in os.environ["BLOCKERS_MATCH"].split("\n") if m]
+grep = [g.lower() for g in os.environ["BLOCKERS_GREP"].split("\n") if g]
 only_source, only_kind = os.environ["BLOCKERS_SOURCE"], os.environ["BLOCKERS_KIND"]
 rows, notes = [], []
 
-def add(source, kind, rule, ts, session=None, cwd=None, detail="", verdict=None):
+def add(source, kind, rule, ts, session=None, cwd=None, detail="", verdict=None, fields=None, meta=None):
     dt = to_dt(ts)
     if dt is None or dt < since:
         return
@@ -95,9 +105,24 @@ def add(source, kind, rule, ts, session=None, cwd=None, detail="", verdict=None)
         return
     if (only_source and source != only_source) or (only_kind and kind != only_kind):
         return
+    if grep and not any(g in f"{cwd or ''} {session or ''} [{rule}] {detail or ''}".lower() for g in grep):
+        return
     rows.append({"ts": dt.isoformat(timespec="seconds"), "source": source, "kind": kind, "rule": rule,
                  "session": session, "cwd": cwd, "detail": re.sub(r"\s+", " ", str(detail or ""))[:200],
                  "verdict": verdict})
+    if fields is not None:
+        rows[-1].update(fields=fields, meta=meta or {})
+
+def task_meta(task_dir):
+    meta = {}
+    try:
+        for line in open(os.path.join(task_dir, ".task"), errors="replace"):
+            k, sep, v = line.rstrip("\n").partition("=")
+            if sep:
+                meta[k] = v
+    except OSError:
+        pass
+    return meta
 
 def need(path, label):
     if path and os.path.exists(path):
@@ -125,9 +150,11 @@ if need(d, "open questions"):
                 fields = [x.strip() for x in m.group(2).split("|")]
                 sm = state.match(fields[-1].lower()) if len(fields) >= 5 else None
                 stage, verdict = (sm.group(1), sm.group(2) or "open") if sm else ("unrecorded", None)
-                add("open-questions", stage, m.group(1), mtime, None, task, m.group(2), verdict)
+                add("open-questions", stage, m.group(1), mtime, None, task, m.group(2), verdict, fields,
+                    task_meta(os.path.dirname(f)))
             elif line.lstrip().startswith("- "):
-                add("open-questions", "unrecorded", "uncategorized", mtime, None, task, line.strip()[2:])
+                add("open-questions", "unrecorded", "uncategorized", mtime, None, task, line.strip()[2:], None,
+                    [line.strip()[2:]], task_meta(os.path.dirname(f)))
 
 friction = re.compile(r"^\s*-\s*(?:(\d{4}-\d{2}-\d{2})\s+)?\[([a-z0-9-]+)\]\s*(.*)$")
 if os.path.isdir(d):
@@ -139,7 +166,8 @@ if os.path.isdir(d):
             if m:
                 fields = [x.strip() for x in m.group(3).split("|")]
                 caught = fields[1].lower() if len(fields) > 1 and fields[1] else "unknown"
-                add("friction", caught, m.group(2), m.group(1) or mtime, None, task, m.group(3))
+                add("friction", caught, m.group(2), m.group(1) or mtime, None, task, m.group(3), None, fields,
+                    task_meta(os.path.dirname(f)))
 
 d = os.environ["HWORKS_SUBAGENT_RUNS"]
 if need(d, "subagent runs"):
@@ -174,6 +202,43 @@ if need(p, "harness audit log"):
 rows.sort(key=lambda r: r["ts"])
 for n in notes:
     print(f"\nnote: {n}", file=sys.stderr)
+
+def show(label, value):
+    if value and value != "-":
+        print(f"    {label}: {value}")
+
+if log_view:
+    tasks = defaultdict(list)
+    for r in rows:
+        if "fields" in r:
+            tasks[r["cwd"]].append(r)
+    kept = [r for rs in tasks.values() for r in rs]
+    window = "all history" if since == all_history else f"since {since.date()}"
+    print(f"Decision log, {window}: {sum(r['source'] == 'open-questions' for r in kept)} decisions, "
+          f"{sum(r['source'] == 'friction' for r in kept)} corrections, {len(tasks)} tasks")
+    for task, rs in tasks.items():
+        meta, parts = rs[0]["meta"], task.split("/")
+        repo = meta.get("repo") or parts[0]
+        branch = meta.get("branch") or (parts[1] if len(parts) >= 3 else "-")
+        print(f"\n## {repo} @ {branch}: {meta.get('slug') or parts[-1]}")
+        span = f"created {meta['created'][:10]}, " if meta.get("created") else ""
+        print(f"task dir {task}, {span}last entry {max(r['ts'] for r in rs)[:10]}")
+        for r in rs:
+            if r["source"] != "open-questions":
+                continue
+            f = r["fields"][:-1] if r["verdict"] else r["fields"]
+            state = r["kind"] if r["verdict"] in (None, "open") else f"{r['kind']}:{r['verdict']}"
+            print(f"- [{r['rule']}] {f[0]} ({state})")
+            rest = f[1:3] + [" | ".join(f[3:])]
+            for label, value in zip(("chose", "evidence", "reverse"), rest):
+                show(label, value)
+        for r in rs:
+            if r["source"] == "friction":
+                f = r["fields"] + [""] * 4
+                print(f"- correction [{r['rule']}] {f[0]} (caught by {r['kind']}, {r['ts'][:10]})")
+                show("cost", f[2])
+                show("would have helped", " | ".join(x for x in f[3:] if x))
+    sys.exit(0)
 if os.environ["BLOCKERS_JSON"] == "1":
     for r in rows:
         print(json.dumps(r))
