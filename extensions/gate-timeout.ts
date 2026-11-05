@@ -59,6 +59,8 @@ const GATES: Array<[string, { test(h: string): boolean }]> = [
   ["python -m pytest/unittest", new RegExp(String.raw`^${PY}-m\s+(?:pytest|unittest)\b`)],
   ["pytest", /^(?:\S*\/)?pytest\b/],
   ["mutate.py", new RegExp(String.raw`^${PY}?\S*mutate\.py\b`)],
+  // review-loop emits its gate wrapped in heavy.py; the quoted inner command is invisible after stripData.
+  ["heavy.py", new RegExp(String.raw`^${PY}?\S*heavy\.py\b`)],
   ["make gate target", { test: makeRunsGate }],
   ["golangci-lint run", /^(?:\S*\/)?golangci-lint\s+run\b/],
   ["package-manager test/build", /^(?:npm|pnpm|yarn|bun)(?:\s+--?[\w-]+(?:[=\s](?!-)\S+)?)*\s+(?:run\s+)?(?:test|check|lint|build|e2e)(?:[-:]\S*)?(?=\s|$)/],
@@ -89,8 +91,12 @@ function heredocOpenerRests(command: string): string[] {
   return [...command.matchAll(/<<-?\s*(['"]?)\w+\1([^\n]*)/g)].map((m) => stripData(m[2]));
 }
 
+// review-loop-args.sh quotes the heavy.py path when it holds shell metacharacters, and stripData empties quotes.
+const QUOTED_HEAVY = /(?:^|[;&|(\n]\s*)(?:\w+=\S*\s+)*(?:\S*\/)?python[\d.]*\s+(['"])[^'"\n]*\/heavy\.py\1(?=\s|$)/;
+
 // Returns the name of the gate the command runs, or null.
 export function gateCommand(command: string): string | null {
+  if (QUOTED_HEAVY.test(command)) return "heavy.py";
   const code = [stripData(command), ...heredocOpenerRests(command)].join("\n");
   for (const segment of code.split(/[;&|\n]+|\$\(|`/)) {
     const h = head(segment);

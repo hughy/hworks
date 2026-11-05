@@ -7,11 +7,13 @@
 #   worktree: where the children run (default: the current directory); emitted as cwd when given
 #   task-dir: directory for each child's output file (created if missing); emitted as an absolute taskDir when given
 #   env GATE_TIMEOUT_MS: host gate timeout in ms, emitted as gateTimeoutMs when set (workflow default: 600000)
+# The gate is emitted wrapped in scripts/heavy.py, so the coder's, the host's, and each reviewer's gate runs share
+# the host's heavy-job slots with every other loop on the machine; HWORKS_HEAVY_SLOTS=0 at run time turns that off.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-if [ $# -lt 4 ] || [ $# -gt 6 ]; then sed -n '2,9p' "$0" >&2; exit 2; fi
+if [ $# -lt 4 ] || [ $# -gt 6 ]; then sed -n '2,11p' "$0" >&2; exit 2; fi
 brief=$1; gate=$2; base=$3; effort=$4; worktree=${5:-}; task_dir=${6:-}
 
 case "$effort" in
@@ -99,7 +101,10 @@ if [ "$reviewers" -eq 2 ]; then
 fi
 
 node -e '
-  const [brief, gate, base, reviewers, review2, coderModel, cwd, rubricDir, taskDir, gateTimeout, preRead] = process.argv.slice(1);
+  const [brief, rawGate, base, reviewers, review2, coderModel, cwd, rubricDir, taskDir, gateTimeout, preRead, heavy] = process.argv.slice(1);
+  const q = (s) => "\x27" + s.replace(/\x27/g, "\x27\\\x27\x27") + "\x27";
+  // A bare path keeps gate-timeout.ts able to see heavy.py; it cannot see inside quotes.
+  const gate = "python3 " + (/^[\w.\/-]+$/.test(heavy) ? heavy : q(heavy)) + " sh -c " + q(rawGate);
   const args = { brief, gate, base, reviewers: Number(reviewers), rubricDir, preRead };
   if (review2) args.review2Model = review2;
   if (coderModel) args.coderModel = coderModel;
@@ -107,4 +112,4 @@ node -e '
   if (taskDir) args.taskDir = taskDir;
   if (gateTimeout) args.gateTimeoutMs = Number(gateTimeout);
   process.stdout.write(JSON.stringify(args) + "\n");
-' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/skills/interrogate/references" "$task_dir" "$gate_timeout" "$root/scripts/review-pre-read.py"
+' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/skills/interrogate/references" "$task_dir" "$gate_timeout" "$root/scripts/review-pre-read.py" "$root/scripts/heavy.py"
