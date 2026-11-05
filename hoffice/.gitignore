@@ -1,0 +1,12 @@
+# Instance-local files when a test or user copies templates/instance here
+AGENTS.local.md
+
+# Renderer dependencies
+node_modules/
+
+# Scratch
+.tmp/
+.worktrees/
+
+# OS
+.DS_Store
