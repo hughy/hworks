@@ -22,6 +22,7 @@ are also loaded by the existing reporter loader.
     existing reporter variables, with their existing defaults and definitions.
 Cache defaults to ${XDG_CACHE_HOME:-$HOME/.cache}/hworks/factory-metrics.
 Closed/merged PR payloads are immutable cache entries; open PRs always refetch.
+Per-commit git churn counts are immutable entries under churn/ in the cache.
 --no-fetch uses cached terminal PRs only. PR discovery uses kaizen-prs transcript
 links, not an organization-wide search. Unlinked PRs/fixes are not observable.
 
@@ -437,7 +438,7 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
             ids = None if repo['class'] == 'factory' else {p['mergeCommit']['oid'] for p in prs.values() if p.get('mergeCommit')}
             if ids == set() and not complete:
                 raise RuntimeError('product merge OIDs unavailable')
-            result = churn.collect(path, since, until, tz, ids, repo.get('exclude', []))
+            result = churn.collect(path, since, until, tz, ids, repo.get('exclude', []), cache / 'churn')
             tables['churn'][path] = result
             cov['sources'].append('git: ' + path)
             for dd in days.values():

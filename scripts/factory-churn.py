@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """First-parent churn primitives for factory-metrics.py. No network or working-tree writes."""
-import json, os, re, subprocess, sys, fnmatch
+import fnmatch, hashlib, json, os, re, subprocess, sys
 from datetime import datetime, timezone
 
 EMPTY = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -34,19 +34,46 @@ def excluded_path(repo, path, extra_dirs):
 _gen_cache = {}
 
 
-def generated_header(repo, rev, path):
+def generated_header(repo, rev, path, failures=None):
     k = (os.path.realpath(repo), rev, path)
     if k not in _gen_cache:
-        head = git(repo, "show", f"{rev}:{path}", check=False)[:2000]
-        _gen_cache[k] = bool(GEN_RE.search("\n".join(head.splitlines()[:5])))
+        r = subprocess.run(["git", "-C", repo, "show", f"{rev}:{path}"], capture_output=True, text=True, errors="replace")
+        found = bool(GEN_RE.search("\n".join(r.stdout[:2000].splitlines()[:5])))
+        if r.returncode:
+            if failures is not None:
+                failures.append(f"show {rev}:{path}")
+            return found
+        _gen_cache[k] = found
     return _gen_cache[k]
 
 
-def blame(repo, rev, path, extra=()):
-    """Return {final_line_no: origin_sha} using --first-parent so origins are landed changes."""
-    out = git(repo, "blame", "-w", "--first-parent", *extra, "--porcelain", rev, "--", path, check=False)
+def line_ranges(lines):
+    """Return git blame -L arguments covering lines, merging consecutive numbers."""
+    args, start, prev = [], None, None
+    for n in sorted(set(lines)):
+        if prev is not None and n == prev + 1:
+            prev = n
+            continue
+        if start is not None:
+            args += ["-L", f"{start},{prev}"]
+        start = prev = n
+    if start is not None:
+        args += ["-L", f"{start},{prev}"]
+    return args
+
+
+def blame(repo, rev, path, extra=(), lines=None, failures=None):
+    """Return {final_line_no: origin_sha} using --first-parent so origins are landed changes.
+
+    lines limits blame to those line numbers. A git failure returns {} and, when
+    failures is a list, appends to it so callers can avoid caching the result."""
+    rng = line_ranges(lines) if lines is not None else []
+    r = subprocess.run(["git", "-C", repo, "blame", "-w", "--first-parent", *extra, *rng, "--porcelain", rev, "--", path],
+                       capture_output=True, text=True, errors="replace")
+    if r.returncode and failures is not None:
+        failures.append(f"blame {rev} {path}")
     res = {}
-    for line in out.splitlines():
+    for line in r.stdout.splitlines():
         m = re.match(r"^([0-9a-f]{40}) (\d+) (\d+)", line)
         if m:
             res[int(m.group(3))] = m.group(1)
@@ -87,7 +114,78 @@ def parse_diff(text):
     return files
 
 
-def collect(repo, since, until, zone, merge_ids=None, extra_dirs=()):
+COUNTS = ("added", "deleted", "churn21", "churn7", "moved")
+# Bump when EXCL_*, GEN_RE, blame options or the counts commit_counts returns change.
+SCHEMA = 1
+
+
+def commit_counts(repo, sha, parent, ts, times, extra_dirs):
+    """Return (counts, failures) for one first-parent commit: COUNTS, touched paths,
+    and excluded {path: reason}. failures lists git calls that failed."""
+    counts = dict.fromkeys(COUNTS, 0)
+    touched, excluded, failures = set(), {}, []
+    for f in parse_diff(git(repo, "diff", "-M", "-U0", "--no-color", "--no-ext-diff", parent, sha)):
+        path = f["new"] or f["old"]
+        reason = ("binary" if f["binary"] else "submodule" if f["gitlink"] else
+                  excluded_path(repo, path, extra_dirs))
+        rev, fp = (sha, f["new"]) if f["new"] else (parent, f["old"])
+        if not reason and generated_header(repo, rev, fp, failures):
+            reason = "generated header"
+        if reason:
+            excluded[path] = reason
+            continue
+        touched.update(p for p in (f["old"], f["new"]) if p)
+        counts["added"] += len(f["add"])
+        counts["deleted"] += len(f["del"])
+        if f["del"] and f["old"] and parent != EMPTY:
+            origins = blame(repo, parent, f["old"], lines=f["del"], failures=failures)
+            for ln in f["del"]:
+                age = ts - times.get(origins.get(ln), -10**15)
+                counts["churn21"] += 0 <= age <= 21 * DAY
+                counts["churn7"] += 0 <= age <= 7 * DAY
+        if f["add"] and f["new"] and parent != EMPTY:
+            origins = blame(repo, sha, f["new"], ("-M", "-C"), lines=f["add"], failures=failures)
+            counts["moved"] += sum(bool(origins.get(ln)) and origins[ln] != sha for ln in f["add"])
+    return dict(counts, touched=sorted(touched), excluded=excluded), failures
+
+
+class CommitCache:
+    """Per-commit counts on disk. Every input is content-addressed (the parent..sha
+    diff, first-parent blame from fixed revs, and timestamps of first-parent
+    ancestors), so entries never go stale; rewritten history only misses."""
+
+    def __init__(self, repo, cache_dir, extra_dirs):
+        common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        self.dir = os.path.join(cache_dir, f"v{SCHEMA}")
+        self.base = [os.path.realpath(common), sorted(extra_dirs)]
+
+    def path(self, sha, parent):
+        key = hashlib.sha256(json.dumps([*self.base, sha, parent]).encode()).hexdigest()
+        return os.path.join(self.dir, key[:2], key + ".json")
+
+    def get(self, sha, parent):
+        try:
+            with open(self.path(sha, parent)) as fh:
+                counts = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        ok = isinstance(counts, dict) and all(isinstance(counts.get(k), int) for k in COUNTS) \
+            and isinstance(counts.get("touched"), list) and isinstance(counts.get("excluded"), dict)
+        return counts if ok else None
+
+    def put(self, sha, parent, counts):
+        path = self.path(sha, parent)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{os.getpid()}.tmp"
+            with open(tmp, "w") as fh:
+                json.dump(counts, fh)
+            os.replace(tmp, path)
+        except OSError as e:
+            print(f"factory-churn: cache write {path}: {e}", file=sys.stderr)
+
+
+def collect(repo, since, until, zone, merge_ids=None, extra_dirs=(), cache_dir=None):
     """Factory: every first-parent default-branch commit. Product: supplied PR merge OIDs.
 
     churn21/7 count deleted lines originated <=21/7 days earlier by first-parent
@@ -95,6 +193,7 @@ def collect(repo, since, until, zone, merge_ids=None, extra_dirs=()):
     counts changes touching a file touched by a counted change in the prior 7d.
     Exclude lock/generated names, generated headers, vendored/fixture directories,
     binaries and submodules. Diffs use rename detection and zero context.
+    cache_dir, when set, holds one entry per commit (see CommitCache).
     """
     remote = git(repo, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD', check=False).strip()
     local = remote.replace('refs/remotes/origin/', 'refs/heads/', 1) if remote else ''
@@ -108,34 +207,19 @@ def collect(repo, since, until, zone, merge_ids=None, extra_dirs=()):
     times = {sha: ts for sha, _, ts in commits}
     counted = {sha for sha, _, ts in commits if merge_ids is None or sha in merge_ids}
     rows, excluded = [], {}
+    store = CommitCache(repo, cache_dir, extra_dirs) if cache_dir else None
     for sha, parent, ts in reversed(commits):
         if sha not in counted or not since.timestamp() - 7 * DAY <= ts < until.timestamp():
             continue
+        counts = store.get(sha, parent) if store else None
+        if counts is None:
+            counts, failures = commit_counts(repo, sha, parent, ts, times, list(extra_dirs))
+            if store and not failures:
+                store.put(sha, parent, counts)
+        excluded.update(counts["excluded"])
+        touched = set(counts["touched"])
         row = dict(date=datetime.fromtimestamp(ts, zone).date().isoformat(), t=ts,
-                   added=0, deleted=0, churn21=0, churn7=0, moved=0, revisit_changes=0, changes=1)
-        touched = set()
-        for f in parse_diff(git(repo, "diff", "-M", "-U0", "--no-color", "--no-ext-diff", parent, sha)):
-            path = f["new"] or f["old"]
-            reason = ("binary" if f["binary"] else "submodule" if f["gitlink"] else
-                      excluded_path(repo, path, list(extra_dirs)))
-            rev, fp = (sha, f["new"]) if f["new"] else (parent, f["old"])
-            if not reason and generated_header(repo, rev, fp):
-                reason = "generated header"
-            if reason:
-                excluded[path] = reason
-                continue
-            touched.update(p for p in (f["old"], f["new"]) if p)
-            row["added"] += len(f["add"])
-            row["deleted"] += len(f["del"])
-            if f["del"] and f["old"] and parent != EMPTY:
-                origins = blame(repo, parent, f["old"])
-                for ln in f["del"]:
-                    age = ts - times.get(origins.get(ln), -10**15)
-                    row["churn21"] += 0 <= age <= 21 * DAY
-                    row["churn7"] += 0 <= age <= 7 * DAY
-            if f["add"] and f["new"] and parent != EMPTY:
-                origins = blame(repo, sha, f["new"], ("-M", "-C"))
-                row["moved"] += sum(bool(origins.get(ln)) and origins[ln] != sha for ln in f["add"])
+                   **{k: counts[k] for k in COUNTS}, revisit_changes=0, changes=1)
         row["revisit_changes"] = int(any(touched & oldfiles for oldts, oldfiles, _ in rows
                                         if ts - 7 * DAY <= oldts < ts))
         rows.append((ts, touched, row))
