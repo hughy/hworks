@@ -1,6 +1,6 @@
 # hoffice agent instructions
 
-This repo is the hoffice engine. Read `README.md` for the layout and how launchers find the engine and instance, and `docs/extensions.md` before naming any external system. Instances (project content) live in other repos and never here.
+This directory is the hoffice engine. Read `README.md` for the layout and how launchers find the engine and instance, and `docs/extensions.md` before naming any external system. Instances (project content) live at a repository root or a directory inside another repo, never here.
 
 ## Rules
 

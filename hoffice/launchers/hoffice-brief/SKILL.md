@@ -18,7 +18,7 @@ Arguments: `[project]`. This launcher discovers roots and syncs the instance; th
 
 Fetch `git -C "$INSTANCE" fetch origin`. Resolve the instance's default remote branch with `git -C "$INSTANCE" symbolic-ref --short refs/remotes/origin/HEAD`, falling back to `origin/main`; call it `base`, and its name without `origin/` `default_branch`.
 
-Only when the instance checkout is clean and already on `default_branch`, run `git -C "$INSTANCE" pull --ff-only origin "$default_branch"`. Otherwise leave the checkout on its current branch and read it as-is. Do not switch branches or stash changes. A fetch or fast-forward failure is nonfatal for this read-only launcher: read local state and say it may be behind. Do not claim freshness without a successful fetch and a revision comparison.
+The instance may be a subdirectory: branch, revision, and cleanliness checks apply to its entire containing repository, while content reads remain relative to `$INSTANCE`. Only when the instance checkout is clean and already on `default_branch`, run `git -C "$INSTANCE" pull --ff-only origin "$default_branch"`. Otherwise leave the checkout on its current branch and read it as-is. Do not switch branches or stash changes. A fetch or fast-forward failure is nonfatal for this read-only launcher: read local state and say it may be behind. Do not claim freshness without a successful fetch and a revision comparison.
 
 ## 3. Brief
 

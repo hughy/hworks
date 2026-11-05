@@ -95,6 +95,14 @@ elif [ "$check" = 1 ]; then say missing "$tasks"; status=1
 else mkdir -p "$tasks"; say created "$tasks"
 fi
 
+# Instance paths are supplied by the operator; never repoint the engine during hworks setup.
+hoffice_config=${HOFFICE_CONFIG_DIR:-$HOME/.config/hoffice}
+hoffice_home=$(cat "$hoffice_config/home" 2>/dev/null || true)
+if [ -f "$root/hoffice/scripts/install.sh" ] && { [ -z "$hoffice_home" ] || [ "$(resolved "$hoffice_home")" != "$(resolved "$root/hoffice")" ]; }; then
+  printf -v hoffice_install '%q/scripts/install.sh <instance...>' "$root/hoffice"
+  say note "hoffice setup is separate; run: $hoffice_install"
+fi
+
 if [ -n "$profile" ] && [ "$check" = 0 ]; then "$root/scripts/models.sh" "$profile"; fi
 if [ "$check" = 0 ] && [ "$status" = 0 ]; then echo "installed; run /reload in pi or start a new session"; fi
 exit "$status"

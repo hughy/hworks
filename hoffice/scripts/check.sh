@@ -5,8 +5,8 @@ set -u
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root" || exit 2
-if [ "$(git rev-parse --show-toplevel 2>/dev/null)" != "$(pwd -P)" ]; then
-  echo "check.sh: $root is not the top of a git worktree; file discovery needs git" >&2
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
+  echo "check.sh: $root is not inside a git worktree; file discovery needs git" >&2
   exit 2
 fi
 command -v rg >/dev/null || { echo "check.sh: rg (ripgrep) is required" >&2; exit 2; }

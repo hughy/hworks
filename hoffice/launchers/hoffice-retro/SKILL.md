@@ -28,22 +28,26 @@ Read `"$HOFFICE_HOME"/procedures/retro/SKILL.md` for window, slug, and audience 
 base=$(git -C "$INSTANCE" symbolic-ref --short refs/remotes/origin/HEAD) || base=origin/main
 default_branch=${base#origin/}
 branch="retro/<project>/$(date +%F)-<slug>"
+prefix=$(git -C "$INSTANCE" rev-parse --show-prefix)
 wt="$INSTANCE/.worktrees/$branch"
 git -C "$INSTANCE" worktree add --no-track -b "$branch" "$wt" "$base"
+wt_instance="$wt/${prefix%/}"
 ```
 
-All content writes go to `$wt`, not the primary checkout. Evidence scratch goes in `"$INSTANCE"/.tmp/<YYYY-MM-DD>-retro-<slug>/` so it survives worktree removal. Never stage scratch or raw transcripts.
+All content writes go to `$wt_instance`, not the primary checkout. Evidence scratch goes in `"$INSTANCE"/.tmp/<YYYY-MM-DD>-retro-<slug>/` so it survives worktree removal. Never stage scratch or raw transcripts.
 
 ## 4. Write and publish
 
-1. Follow `"$HOFFICE_HOME"/procedures/retro/SKILL.md` with `$wt` as instance root, the engine root, resolved inputs, the primary instance's local instructions path, and the scratch path. The procedure reads the instance's evidence extension; missing evidence sources are method gaps, not fatal errors. Stop at draft approval until the user approves.
+1. Follow `"$HOFFICE_HOME"/procedures/retro/SKILL.md` with `$wt_instance` as instance root, the engine root, resolved inputs, the primary instance's local instructions path, and the scratch path. The procedure reads the instance's evidence extension; missing evidence sources are method gaps, not fatal errors. Stop at draft approval until the user approves.
 2. Unless `--draft`, read `"$HOFFICE_HOME"/procedures/publish/SKILL.md` and follow it for the same worktree, project, and slug. It owns scanning, rendering, publication approval, metadata, and the registry row. Do not bypass its approval or guess a publisher. If no publisher is configured, retain the rendered local artifact, report that publication stopped, and ask whether to ship the record as an unpublished draft. Do not claim it was published.
 
 If the user declines the draft or publication prompt, stop, leave the worktree, and report its path. `--draft` is the explicit route for shipping without publishing.
 
 ## 5. Commit and ship
 
-Read `"$wt"/extensions/ship.md` when present for commit trailers, extra PR body lines, and post-PR tracking. Without it, use a plain commit and PR with no invented trailers or tracking steps. Review the worktree status and diff, stage only the approved source, metadata, and registry changes, and commit with subject `retro(<project>): <title> v<version>` using the recorded version. For `--draft` or an approved unpublished record, use `retro(<project>): draft <title>` instead; do not invent a published version.
+Review status and diffs from the repository worktree root `$wt` to catch changes outside the instance. Stop if any changed or staged file is outside the approved instance files. Stage explicit instance-relative file paths with `git -C "$wt_instance" add -- <files>`; never stage the whole repository. Content procedures receive `$wt_instance`, while worktree removal uses `$wt`.
+
+Read `"$wt_instance"/extensions/ship.md` when present for commit trailers, extra PR body lines, and post-PR tracking. Without it, use a plain commit and PR with no invented trailers or tracking steps. Review the worktree status and diff, stage only the approved source, metadata, and registry changes, and commit with subject `retro(<project>): <title> v<version>` using the recorded version. For `--draft` or an approved unpublished record, use `retro(<project>): draft <title>` instead; do not invent a published version.
 
 For direct push, run each command only after the previous succeeds:
 

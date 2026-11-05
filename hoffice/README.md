@@ -2,7 +2,7 @@
 
 hoffice keeps project context for coding agents: what each project is, where it stands, what was decided, and which external documents govern it. Sessions write dated summaries into a shared repository, so the next session, on any machine, starts with what the last one learned.
 
-hoffice is the engine: templates, procedures, launchers, and scripts. Your projects live in an instance, a separate git repository that holds only content. One engine can serve several instances, for example one for work and one for personal projects. Anything specific to an employer or a toolset (a document host, a chat system, an issue tracker) is an extension the instance supplies; see [docs/extensions.md](docs/extensions.md).
+hoffice is the engine: templates, procedures, launchers, and scripts. Your projects live in an instance, a git repository root or a directory inside a larger git repository, marked by `HOFFICE.md`. One engine can serve several instances, for example one for work and one for personal projects. Anything specific to an employer or a toolset (a document host, a chat system, an issue tracker) is an extension the instance supplies; see [docs/extensions.md](docs/extensions.md).
 
 ## Layout
 
@@ -53,16 +53,18 @@ Everything is organized by project. Work that spans projects is filed under the 
 
 `scripts/hoffice-project-for-repo.sh [path]` matches a checkout's origin against the `Origin` field of each instance's repo cards and prints one `<instance root><TAB><project>` line per match, exiting 1 with no output when nothing matches. With several instances, the match also picks the instance.
 
-Launchers work in a worktree of the instance at `<instance>/.worktrees/<branch>`, branched from the instance's default branch: `git symbolic-ref --short refs/remotes/origin/HEAD`, else `origin/main`.
+For a directory instance, all paths in the shape above are relative to its `HOFFICE.md`, not the git toplevel.
+
+Launchers work in a worktree of the instance's containing repository at `<instance>/.worktrees/<branch>`, branched from the instance's default branch: `git symbolic-ref --short refs/remotes/origin/HEAD`, else `origin/main`. Content lives at the same instance prefix inside that worktree; staging stays limited to instance files.
 
 ## Install
 
 For an existing project-memory repository, follow [the migration guide](docs/migrating.md).
 
 ```bash
-git clone https://github.com/hughy/hoffice ~/dev/hoffice
-cp -R ~/dev/hoffice/templates/instance ~/dev/my-projects   # then git init it and fill in HOFFICE.md
-~/dev/hoffice/scripts/install.sh ~/dev/my-projects
+git clone https://github.com/hughy/hworks ~/dev/hworks
+cp -R ~/dev/hworks/hoffice/templates/instance ~/dev/my-projects   # then git init it and fill in HOFFICE.md
+~/dev/hworks/hoffice/scripts/install.sh ~/dev/my-projects
 ```
 
 `install.sh` links each launcher into `~/.agents/skills/`, writes the engine path to `~/.config/hoffice/home`, and adds each instance path given to `~/.config/hoffice/instances`. Re-run it after pulling hoffice if a launcher was added.

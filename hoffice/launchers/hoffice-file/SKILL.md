@@ -24,19 +24,23 @@ base=$(git -C "$INSTANCE" symbolic-ref --short refs/remotes/origin/HEAD) || base
 default_branch=${base#origin/}
 slug=<2-5 lowercase words, hyphenated>
 branch="session/<project>/$(date +%F)-$slug"
+prefix=$(git -C "$INSTANCE" rev-parse --show-prefix)
 wt="$INSTANCE/.worktrees/$branch"
 git -C "$INSTANCE" worktree add --no-track -b "$branch" "$wt" "$base"
+wt_instance="$wt/${prefix%/}"
 ```
 
-File work spanning projects under the project it most concerns. All content writes go to `$wt`, never the primary checkout. If scratch is needed, use `"$INSTANCE"/.tmp/<date>-<slug>/` and keep it uncommitted.
+File work spanning projects under the project it most concerns. All content writes go to `$wt_instance`, never the primary checkout. If scratch is needed, use `"$INSTANCE"/.tmp/<date>-<slug>/` and keep it uncommitted.
 
 ## 3. Write the content
 
-Read `"$HOFFICE_HOME"/procedures/summarize-session/SKILL.md` and follow it with `$wt` as instance root, the engine root, the resolved project, and the primary instance's local instructions path. The procedure produces an append-only session, proposed state and registry changes, decisions, and approval-gated tracker offers. Show the state diff and wait; do not shortcut approval. If the user declines to save, leave the worktree and report its path.
+Read `"$HOFFICE_HOME"/procedures/summarize-session/SKILL.md` and follow it with `$wt_instance` as instance root, the engine root, the resolved project, and the primary instance's local instructions path. The procedure produces an append-only session, proposed state and registry changes, decisions, and approval-gated tracker offers. Show the state diff and wait; do not shortcut approval. If the user declines to save, leave the worktree and report its path.
 
 ## 4. Commit and ship
 
-Read `"$wt"/extensions/ship.md` when present and follow it for commit trailers, PR body additions, and post-PR steps. Without it, use a plain commit and PR; invent no trailers or tracking steps. Review `git -C "$wt" status` and the diff, then stage only the session and approved content files. Commit with subject `session(<project>): <title>` and any extension-supplied trailers.
+Review status and diffs from the repository worktree root `$wt` to catch changes outside the instance. Stop if any changed or staged file is outside the approved instance files. Stage explicit instance-relative file paths with `git -C "$wt_instance" add -- <files>`; never stage the whole repository. Content procedures receive `$wt_instance`, while worktree removal uses `$wt`.
+
+Read `"$wt_instance"/extensions/ship.md` when present and follow it for commit trailers, PR body additions, and post-PR steps. Without it, use a plain commit and PR; invent no trailers or tracking steps. Review `git -C "$wt" status` and the diff, then stage only the session and approved content files. Commit with subject `session(<project>): <title>` and any extension-supplied trailers.
 
 For the default direct-push flow, run each command only after the previous succeeds:
 

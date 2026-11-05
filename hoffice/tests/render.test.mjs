@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, cpSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ import { parseFrontmatter, rewriteRelativeLinks } from '../scripts/lib/render-co
 const engine = fileURLToPath(new URL('../', import.meta.url));
 const web = 'https://code.example.test/org/context';
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'hoffice-render-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'hoffice-render-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   git('init', '-b', 'main');
@@ -44,11 +44,12 @@ function success(result) {
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 }
 
+for (const prefix of ['', 'memory space/hoffice/']) {
 for (const authority of ['draft', 'authoritative: deployment policy']) {
-  test(`published CLI renders ${authority} metadata, tables, diagrams, and source-relative links outside the engine`, (t) => {
+  test(`published CLI at ${prefix || "root"} renders ${authority} metadata, tables, diagrams, and source-relative links outside the engine`, (t) => {
     const f = fixture(t);
     f.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
-    const src = f.write('projects/demo/published/report.md', `---
+    const src = f.write(`${prefix}projects/demo/published/report.md`, `---
 title: Progress <review>
 audience: Readers & writers
 authority: ${authority}
@@ -64,7 +65,7 @@ As of 2026-05-02.
 <figure class="fig"><div class="node base">Flow</div></figure>
 `);
     const out = join(f.root, 'report.html');
-    symlinkSync(join(f.root, 'projects'), join(f.root, 'alias'), 'dir');
+    symlinkSync(join(f.root, prefix, 'projects'), join(f.root, prefix, 'alias'), 'dir');
     const result = f.run('render-published.mjs', src.replace('/projects/', '/alias/'), out);
     success(result);
     const html = readFileSync(out, 'utf8');
@@ -73,10 +74,12 @@ As of 2026-05-02.
     assert.match(html, /<h2>Changes<\/h2>/);
     assert.match(html, /<td>Ready<\/td>/);
     assert.match(html, /<figure class="fig"><div class="node base">Flow/);
-    assert.ok(html.includes(`href="${web}/blob/trunk/projects/demo/notes/design.md#choice"`));
+    assert.ok(html.includes(`href="${web}/blob/trunk/${encodeURI(prefix)}projects/demo/notes/design.md#choice"`));
     assert.ok(html.includes('href="https://docs.example.test/"'));
     assert.match(result.stdout, /1 h2, 1 figures, 1 tables/);
   });
+}
+
 }
 
 test('relative-link rewriting preserves anchors, external links, and source paths with parent segments', (t) => {
@@ -147,21 +150,32 @@ test('default link check catches PR numbers and bare URLs and ignores linked art
   assert.match(passed.stdout, /0 unlinked artifact\(s\)/);
 });
 
-test('digest renders rolling history, newest status, quiet note, and open-ref sources with relative links', (t) => {
+for (const prefix of ['', 'memory space/hoffice/']) {
+test(`digest and discovery at ${prefix || 'root'} render rolling history and open-ref sources with relative links`, (t) => {
   const f = fixture(t);
-  f.write('digests/demo/DIGEST.md', '---\ntitle: Demo log\nrolling_days: 2\n---\n');
-  f.write('digests/demo/2026-05-01-daily.md', digest('2026-05-01', 'Old status', 'Old summary'));
-  f.write('digests/demo/2026-05-02-daily.md', digest('2026-05-02', 'Middle status', 'Middle summary'));
+  const instance = resolve(f.root, prefix);
+  cpSync(join(engine, 'templates/instance'), instance, { recursive: true });
+  const write = (path, text) => f.write(`${prefix}${path}`, text);
+  write('repos/org--context.md', '| Origin | `https://code.example.test/org/context.git` |\n| Projects | `projects/demo/` |\n');
+  mkdirSync(join(instance, 'projects/demo'), { recursive: true });
+  const env = { ...process.env, HOFFICE_DIR: instance };
+  const discovered = execFileSync(join(engine, 'scripts/hoffice-instances.sh'), { env, encoding: 'utf8' });
+  assert.equal(discovered, `${instance}\n`);
+  const project = execFileSync(join(engine, 'scripts/hoffice-project-for-repo.sh'), [f.root], { env, encoding: 'utf8' });
+  assert.equal(project, `${instance}\tdemo\n`);
+  write('digests/demo/DIGEST.md', '---\ntitle: Demo log\nrolling_days: 2\n---\n');
+  write('digests/demo/2026-05-01-daily.md', digest('2026-05-01', 'Old status', 'Old summary'));
+  write('digests/demo/2026-05-02-daily.md', digest('2026-05-02', 'Middle status', 'Middle summary'));
   f.git('add', '.');
   f.git('-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-m', 'test: baseline');
   f.git('switch', '-c', 'digest/demo/pending');
-  f.write('digests/demo/2026-05-03-daily.md', digest('2026-05-03', 'Latest status', '[Decision](../../projects/demo/decisions/one.md#why)'));
-  f.write('digests/demo/archive/2026-05-10-daily.md', digest('2026-05-10', 'Archived status', 'Archived summary'));
+  write('digests/demo/2026-05-03-daily.md', digest('2026-05-03', 'Latest status', '[Decision](../../projects/demo/decisions/one.md#why)'));
+  write('digests/demo/archive/2026-05-10-daily.md', digest('2026-05-10', 'Archived status', 'Archived summary'));
   f.git('add', '.');
   f.git('-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-m', 'test: pending digest');
   f.git('switch', 'main');
   const out = join(f.root, 'digest.html');
-  const rendered = f.run('render-digest.mjs', 'demo', out, '--instance', f.root, '--ref', 'digest/demo/pending', '--quiet', 'No changes <today>');
+  const rendered = f.run('render-digest.mjs', 'demo', out, '--instance', instance, '--ref', 'digest/demo/pending', '--quiet', 'No changes <today>');
   success(rendered);
   const html = readFileSync(out, 'utf8');
   assert.match(html, /<h1>Demo log<\/h1>/);
@@ -171,16 +185,19 @@ test('digest renders rolling history, newest status, quiet note, and open-ref so
   assert.match(html, /Middle summary/);
   assert.match(html, /PR open/);
   assert.match(html, /<span class="chip">baseline<\/span>/);
-  assert.ok(html.includes(`href="${web}/blob/digest/demo/pending/digests/demo/2026-05-03-daily.md">source</a>`));
-  assert.ok(html.includes(`href="${web}/blob/digest/demo/pending/projects/demo/decisions/one.md#why"`));
+  assert.ok(html.includes(`href="${web}/blob/digest/demo/pending/${prefix}digests/demo/2026-05-03-daily.md">source</a>`));
+  assert.ok(html.includes(`href="${web}/blob/digest/demo/pending/${encodeURI(prefix)}projects/demo/decisions/one.md#why"`));
   assert.ok(html.indexOf('2026-05-03-daily') < html.indexOf('2026-05-02-daily'));
   assert.match(rendered.stdout, /2 digest\(s\), newest 2026-05-03-daily.md, quiet note/);
   assert.match(html, /Older digests:/);
-  f.write('digests/demo/2026-05-04-daily.md', digest('2026-05-04', '#99', 'New summary'));
-  const stopped = f.run('render-digest.mjs', 'demo', out, '--instance', f.root);
+  assert.ok(html.includes(`href="${web}/tree/main/${prefix}digests/demo"`));
+  assert.ok(html.includes(`href="${web}/blob/main/${prefix}digests/demo/2026-05-02-daily.md">source</a>`));
+  write('digests/demo/2026-05-04-daily.md', digest('2026-05-04', '#99', 'New summary'));
+  const stopped = f.run('render-digest.mjs', 'demo', out, '--instance', instance);
   assert.equal(stopped.status, 1);
   assert.match(stopped.stderr, /render stopped: 2026-05-04-daily.md has 1 unlinked artifact/);
 });
+}
 
 test('explicit missing or invalid pattern config fails rather than silently using defaults', (t) => {
   const f = fixture(t);

@@ -15,17 +15,19 @@ Run `<engine>/scripts/hoffice-instances.sh` for configured instance roots. An ex
 
 Fetch `git -C "$instance" fetch origin`. On failure stop. Do not switch, pull, stash, or alter the instance checkout's own working tree. Resolve the default base with `git -C "$instance" symbolic-ref --short refs/remotes/origin/HEAD`, falling back to `origin/main`; the target branch is that ref without `origin/`.
 
+Derive `prefix=$(git -C "$instance" rev-parse --show-prefix)` (empty for a root instance). Git tree paths and blob URLs must include this prefix; content paths remain relative to the instance.
+
 ## Prepare and publish
 
 Resolve project from arguments or the lookup result; ask if absent or ambiguous. Resolve slug from arguments or the intended source; propose a lowercase hyphenated slug if needed and confirm. Slugs are permanent after publication. If this is a repo's implementation document, stop and direct the user to publish from that repo, registering only the result here.
 
-Create branch `publish/<project>/<YYYY-MM-DD>-<slug>` and worktree `<instance>/.worktrees/<branch>` from the default base with `git worktree add --no-track -b`. On a name collision stop rather than reuse another run's worktree. All writes go to this worktree.
+Create branch `publish/<project>/<YYYY-MM-DD>-<slug>` and worktree `<instance>/.worktrees/<branch>` from the default base with `git worktree add --no-track -b`. On a name collision stop rather than reuse another run's worktree. All writes go to this worktree. Set `wt` to the repository worktree path and `wt_instance="$wt/${prefix%/}"`. All content reads and writes, including extensions, use `$wt_instance`; worktree operations use `$wt`.
 
-Read `<engine>/procedures/publish/SKILL.md` and follow it with the worktree as instance root. If publication is declined, fails, or lacks an extension, report the HTML/source paths and stop this launcher before commit or delivery. Preserve any draft in the worktree for the user; do not claim publication or invent bookkeeping.
+Read `<engine>/procedures/publish/SKILL.md` and follow it with `$wt_instance` as instance root. If publication is declined, fails, or lacks an extension, report the HTML/source paths and stop this launcher before commit or delivery. Preserve any draft in the worktree for the user; do not claim publication or invent bookkeeping.
 
 ## Commit and deliver
 
-Show `git status` and verify only the intended published source and DOCS.md changed. Stage those files explicitly, then commit `publish: <project> <title> v<version>`, adding only the instance's ship requirements.
+Show `git -C "$wt" status` and the full repository diff; verify only the intended published source and DOCS.md inside `$wt_instance` changed or are staged. Stage those files explicitly with `git -C "$wt_instance" add -- <instance-relative files>`, then commit `publish: <project> <title> v<version>`, adding only the instance's ship requirements.
 
 With `--pr`, push the branch and open a draft PR against the default target, using the instance remote without a hardcoded host. Include URL, audience, first publication or replacement, and change summary. Follow `extensions/ship.md` after opening it, if present.
 

@@ -1,5 +1,7 @@
 # Extension points
 
+An instance may be a repository root or a directory inside a larger git repository. Its `HOFFICE.md` marks the instance root; content and extension paths are relative to that directory. Worktrees belong to the containing repository, with instance content at the same prefix.
+
 The engine names no document host, chat system, issue tracker, scheduler, or agent evidence toolset. Where a procedure needs one, it reads an extension file from the instance, `<instance>/extensions/<point>.md`, and follows it. An extension file is instructions for an agent: which tool to call, with what arguments, and what to do when the tool is missing in the current session.
 
 A missing extension file is normal. Each procedure says what it does without one, and never guesses a system.

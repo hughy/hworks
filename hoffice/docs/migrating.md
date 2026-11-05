@@ -1,5 +1,7 @@
 # Convert an existing repository into an instance
 
+An instance may be a repository root or a directory inside a larger git repository. Its `HOFFICE.md` marks the instance root; content and extension paths are relative to that directory. Worktrees belong to the containing repository, with instance content at the same prefix.
+
 Use this guide for a project-memory repository that carries its own templates, scripts, skills, or system-specific instructions. Keep its content and history; let hoffice own the machinery. For a new repository, start with `templates/instance/` instead.
 
 Paths starting with `templates/`, `scripts/`, or `docs/` below are relative to the engine checkout. Other paths are relative to the instance. Review the migration diff before committing, especially deletions, so project content is not lost with old tooling.

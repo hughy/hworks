@@ -1,5 +1,7 @@
 # Instance agent instructions
 
+An instance may be a repository root or a directory inside a larger git repository. Its `HOFFICE.md` marks the instance root; content and extension paths are relative to that directory. Worktrees belong to the containing repository, with instance content at the same prefix.
+
 This repository is shared project memory, not application code. Code and deployed configuration win when they disagree with this repository; propose the corresponding context update.
 
 ## Repository role

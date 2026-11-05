@@ -58,7 +58,7 @@ export function parseFrontmatter(text, { legacyScalars = false } = {}) {
 export function rewriteRelativeLinks(markdown, srcFile, { root, blobBase }) {
   const srcDir = realpathSync(dirname(resolve(srcFile)));
   const repoRoot = realpathSync(root);
-  return markdown.replace(/\]\((\.\.?\/[^)#\s]+)/g, (_, rel) => `](${blobBase}${relative(repoRoot, resolve(srcDir, rel))}`);
+  return markdown.replace(/\]\((\.\.?\/[^)#\s]+)/g, (_, rel) => `](${blobBase}${encodeURI(relative(repoRoot, resolve(srcDir, rel)))}`);
 }
 
 export const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');

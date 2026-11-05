@@ -5,7 +5,7 @@ description: Write a daily or weekly digest of configured remote sources and ren
 
 # Digest
 
-Inputs: instance root, engine root, digest directory name, optional cadence, `period_start`, `period_end`, open digest branch `refs`, and `unattended`. The caller owns discovery and git. Read only remote shared activity, never local checkouts or `local` documents. All instance paths below are relative to the input root; templates and scripts are engine paths.
+Inputs: instance root, engine root, digest directory name, optional cadence, `period_start`, `period_end`, open digest branch `refs`, and `unattended`. The caller owns discovery and git. Read only remote shared activity, never local checkouts or `local` documents. All instance paths below are relative to the input root (which may be a subdirectory of a repository); when reading refs with git, prepend `git -C <instance> rev-parse --show-prefix` to tree paths, and include it in blob URLs; templates and scripts are engine paths.
 
 ## Steps
 

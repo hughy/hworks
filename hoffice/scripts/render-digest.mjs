@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, basename } from 'node:path';
+import { join, basename, relative } from 'node:path';
 import { loadMarked, repoInfo, parseFrontmatter, rewriteRelativeLinks, esc, page } from './lib/render-common.mjs';
 
 const LOG_SECTIONS = [
@@ -116,7 +116,8 @@ if (!project || !out || !opts.instance) {
 }
 
 const repo = repoInfo(opts.instance);
-const dir = join(repo.root, 'digests', project);
+const dir = join(realpathSync(opts.instance), 'digests', project);
+const digestPath = relative(repo.root, dir);
 const configPath = join(dir, 'DIGEST.md');
 if (!existsSync(configPath)) throw new Error(`missing ${configPath}`);
 const config = parseFrontmatter(readFileSync(configPath, 'utf8')).fm;
@@ -125,7 +126,7 @@ const rollingDays = Number(config.rolling_days || 14);
 const digests = new Map();
 for (const name of existsSync(dir) ? readdirSync(dir) : []) {
   if (FILE_RE.test(name)) {
-    digests.set(name, { text: readFileSync(join(dir, name), 'utf8'), url: `${repo.blobBase}digests/${project}/${name}` });
+    digests.set(name, { text: readFileSync(join(dir, name), 'utf8'), url: `${repo.blobBase}${digestPath}/${name}` });
   }
 }
 const git = (...args) => execFileSync('git', args, { cwd: repo.root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -133,14 +134,14 @@ for (const ref of opts.refs) {
   const branch = ref.replace(/^origin\//, '');
   let paths;
   try {
-    paths = git('ls-tree', '-r', '--name-only', ref, `digests/${project}/`).split('\n').filter(Boolean);
+    paths = git('ls-tree', '-r', '--name-only', ref, `${digestPath}/`).split('\n').filter(Boolean);
   } catch {
     console.error(`warning: skipped unreadable ref ${ref}`);
     continue;
   }
   for (const path of paths) {
     const name = basename(path);
-    if (path !== `digests/${project}/${name}` || !FILE_RE.test(name) || digests.has(name)) continue;
+    if (path !== `${digestPath}/${name}` || !FILE_RE.test(name) || digests.has(name)) continue;
     digests.set(name, { text: git('show', `${ref}:${path}`), url: `${repo.webBase}/blob/${branch}/${path}`, branch });
   }
 }
@@ -193,7 +194,7 @@ for (const d of shown) {
 }
 
 if (digests.size > shown.length) {
-  parts.push(`<p class="muted">Older digests: <a href="${esc(`${repo.treeBase}digests/${project}`)}">digests/${esc(project)}/ source</a>.</p>`);
+  parts.push(`<p class="muted">Older digests: <a href="${esc(`${repo.treeBase}${digestPath}`)}">digests/${esc(project)}/ source</a>.</p>`);
 }
 
 const title = config.title || `${project} digest`;

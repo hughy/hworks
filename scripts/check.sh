@@ -36,6 +36,10 @@ for f in "$root"/extensions/*.test.mts; do
   add "mts:$(basename "$f" .test.mts)" "$root" "node --experimental-strip-types extensions/$(basename "$f")"
 done
 
+if [ -f "$root/hoffice/scripts/check.sh" ]; then
+  add "hoffice" "$root/hoffice" "scripts/check.sh"
+fi
+
 if [ ${#names[@]} -eq 0 ]; then
   echo "check.sh: no checks found under $root" >&2
   exit 2
