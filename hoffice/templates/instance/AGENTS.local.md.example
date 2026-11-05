@@ -1,0 +1,23 @@
+# Local setup
+
+Copy to `AGENTS.local.md` (gitignored). Use this file for per-machine paths only.
+
+## Checkouts
+
+| Repo (host/org/repo) | Path |
+|---|---|
+| code.example.org/example/service | ~/dev/example/service |
+
+## Local documents
+
+Rows in project `DOCS.md` files with `Agent access: local` resolve here. Read them in place; never copy or publish them.
+
+| Doc (as named in DOCS.md) | Path |
+|---|---|
+| Service design | ~/Documents/service-design.md |
+
+## Environment
+
+- Platform:
+- Shell:
+- Notes:

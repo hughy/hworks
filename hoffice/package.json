@@ -1,0 +1,9 @@
+{
+  "name": "hoffice",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "marked": "15.0.12",
+    "yaml": "2.9.1"
+  }
+}

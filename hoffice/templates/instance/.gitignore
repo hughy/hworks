@@ -1,0 +1,17 @@
+# Per-machine agent config
+AGENTS.local.md
+CLAUDE.local.md
+
+# In-repo agent scratch and worktrees
+.tmp/
+.worktrees/
+
+# Agent tool local state
+.claude/projects/
+.claude/scratch/
+.claude/worktrees/
+.claude/settings.local.json
+.pi/sessions/
+
+# OS
+.DS_Store
