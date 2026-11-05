@@ -199,6 +199,67 @@ class CollectorTest(unittest.TestCase):
                 self.assertEqual(partial['tables']['churn'][str(repo)]['totals']['churn21_ratio'], .25)
                 self.assertTrue(any('missing-repo' in s for s in partial['coverage']['missing_sources']))
 
+    def test_churn_cache_skips_blame_on_warm_run(self):
+        repo = self.root / 'repo'; repo.mkdir()
+        def git(*args, **env):
+            p = subprocess.run(['git', '-C', str(repo), *args], env={**os.environ, **env}, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+        git('init'); git('config', 'user.email', '<EMAIL_ADDRESS_1>'); git('config', 'user.name', 'Test')
+        (repo / 'file.py').write_text('one\ntwo\nthree\nfour\nfive\n')
+        git('add', '.'); git('commit', '-m', 'feat: initial', GIT_AUTHOR_DATE='2026-01-01T12:00:00Z', GIT_COMMITTER_DATE='2026-01-01T12:00:00Z')
+        (repo / 'file.py').write_text('one\nTWO\nthree\nFOUR\nfive\n')
+        git('add', '.'); git('commit', '-m', 'fix: update', GIT_AUTHOR_DATE='2026-01-03T12:00:00Z', GIT_COMMITTER_DATE='2026-01-03T12:00:00Z')
+        bin_dir = self.root / 'bin'; bin_dir.mkdir()
+        log = self.root / 'git-calls'
+        real = shutil.which('git')
+        (bin_dir / 'git').write_text(f'#!/bin/sh\necho "$*" >> {log}\n'
+                                     f'case "$*" in *" blame "*) [ -n "$FAIL_BLAME" ] && exit 1;; esac\nexec {real} "$@"\n')
+        (bin_dir / 'git').chmod(0o755)
+        self.env.update(PATH=f"{bin_dir}{os.pathsep}{self.env['PATH']}",
+                        HWORKS_FM_REPOS=json.dumps([dict(path=str(repo), **{'class': 'factory'})]))
+        fields = ('added', 'deleted', 'churn21', 'churn7', 'moved', 'revisit_changes', 'changes')
+        def run():
+            log.write_text('')
+            result = self.run_metrics()
+            return [result['days'][2][k] for k in fields], log.read_text().count(' blame ')
+        self.env['FAIL_BLAME'] = '1'
+        self.assertEqual(run(), ([2, 2, 0, 0, 0, 1, 1], 2))
+        del self.env['FAIL_BLAME']
+        self.assertEqual(run(), ([2, 2, 2, 2, 0, 1, 1], 2))
+        self.assertEqual(run(), ([2, 2, 2, 2, 0, 1, 1], 0))
+
+    def load_churn(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('factory_churn', HERE / 'factory-churn.py')
+        churn = importlib.util.module_from_spec(spec); spec.loader.exec_module(churn)
+        return churn
+
+    def test_churn_cache_skips_shallow_clones_and_keeps_exclude_order(self):
+        from datetime import datetime, timezone
+        churn = self.load_churn()
+        repo = self.root / 'repo'; (repo / 'pkg/private').mkdir(parents=True)
+        def git(*args, cwd=repo, **env):
+            p = subprocess.run(['git', '-C', str(cwd), *args], env={**os.environ, **env}, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+        git('init'); git('config', 'user.email', '<EMAIL_ADDRESS_1>'); git('config', 'user.name', 'Test')
+        for day, text in (('01', 'a\n'), ('02', 'b\n'), ('03', 'c\n')):
+            (repo / 'pkg/private/f.py').write_text(text); (repo / 'g.py').write_text(text)
+            git('add', '.'); git('commit', '-m', day, GIT_AUTHOR_DATE=f'2026-01-{day}T12:00:00Z', GIT_COMMITTER_DATE=f'2026-01-{day}T12:00:00Z')
+        since, until = datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 4, tzinfo=timezone.utc)
+        cache = self.root / 'churn'
+        reasons = [churn.collect(str(repo), since, until, timezone.utc, extra_dirs=dirs, cache_dir=str(cache))['excluded']['pkg/private/f.py']
+                   for dirs in (['pkg/', 'private/'], ['private/', 'pkg/'])]
+        self.assertEqual(reasons, ['vendored/fixture dir pkg/', 'vendored/fixture dir private/'])
+        shallow = self.root / 'shallow'
+        git('clone', '-q', '--depth', '2', f'file://{repo}', str(shallow), cwd=self.root)
+        churn.collect(str(shallow), since, until, timezone.utc, cache_dir=str(self.root / 'shallow-cache'))
+        self.assertFalse((self.root / 'shallow-cache').exists())
+
+    def test_blame_line_ranges(self):
+        churn = self.load_churn()
+        self.assertEqual(churn.line_ranges([7, 1, 3, 2, 5, 2]), ['-L', '1,3', '-L', '5,5', '-L', '7,7'])
+        self.assertEqual(churn.line_ranges([]), [])
+
 
 if __name__ == '__main__':
     unittest.main()
