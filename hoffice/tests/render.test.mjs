@@ -82,13 +82,16 @@ As of 2026-05-02.
 
 }
 
-test('relative-link rewriting preserves anchors, external links, and source paths with parent segments', (t) => {
-  const f = fixture(t);
-  const src = f.write('projects/demo/published/a.md', 'Source');
-  const actual = rewriteRelativeLinks('[parent](../notes/a.md#part) [local](./b.md) [anchor](#here) [remote](https://docs.example.test/x)',
-    src, { root: f.root, blobBase: `${web}/blob/main/` });
-  assert.equal(actual, `[parent](${web}/blob/main/projects/demo/notes/a.md#part) [local](${web}/blob/main/projects/demo/published/b.md) [anchor](#here) [remote](https://docs.example.test/x)`);
-});
+for (const prefix of ['', 'memory %20 space/hoffice/']) {
+  test(`relative-link rewriting at ${prefix || 'root'} preserves escapes, anchors, external links, and parent segments`, (t) => {
+    const f = fixture(t);
+    const src = f.write(`${prefix}projects/demo/published/a.md`, 'Source');
+    const actual = rewriteRelativeLinks('[parent](../notes/a.md#part) [design](../notes/design%20doc.md#part) [local](./b.md) [anchor](#here) [remote](https://docs.example.test/x)',
+      src, { root: f.root, blobBase: `${web}/blob/main/` });
+    const urlPrefix = prefix ? 'memory%20%2520%20space/hoffice/' : '';
+    assert.equal(actual, `[parent](${web}/blob/main/${urlPrefix}projects/demo/notes/a.md#part) [design](${web}/blob/main/${urlPrefix}projects/demo/notes/design%20doc.md#part) [local](${web}/blob/main/${urlPrefix}projects/demo/published/b.md) [anchor](#here) [remote](https://docs.example.test/x)`);
+  });
+}
 
 for (const [format, patterns] of [
   ['JSON', String.raw`[{"kind":"work item","pattern":"TASK-\\d+"},{"kind":"room","pattern":"room: #[a-z]+"}]`],

@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { dirname, resolve, relative } from 'node:path';
+import { dirname, resolve, relative, posix } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseDocument, isMap, isScalar } from 'yaml';
 
@@ -58,7 +58,8 @@ export function parseFrontmatter(text, { legacyScalars = false } = {}) {
 export function rewriteRelativeLinks(markdown, srcFile, { root, blobBase }) {
   const srcDir = realpathSync(dirname(resolve(srcFile)));
   const repoRoot = realpathSync(root);
-  return markdown.replace(/\]\((\.\.?\/[^)#\s]+)/g, (_, rel) => `](${blobBase}${encodeURI(relative(repoRoot, resolve(srcDir, rel)))}`);
+  const srcPath = encodeURI(relative(repoRoot, srcDir));
+  return markdown.replace(/\]\((\.\.?\/[^)#\s]+)/g, (_, rel) => `](${blobBase}${posix.join(srcPath, rel)}`);
 }
 
 export const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
