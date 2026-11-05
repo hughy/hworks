@@ -144,7 +144,8 @@ def commit_counts(repo, sha, parent, ts, times, extra_dirs):
                 counts["churn21"] += 0 <= age <= 21 * DAY
                 counts["churn7"] += 0 <= age <= 7 * DAY
         if f["add"] and f["new"] and parent != EMPTY:
-            origins = blame(repo, sha, f["new"], ("-M", "-C"), lines=f["add"], failures=failures)
+            # Whole file: -M/-C score moves per blame chunk, so -L ranges change some origins.
+            origins = blame(repo, sha, f["new"], ("-M", "-C"), failures=failures)
             counts["moved"] += sum(bool(origins.get(ln)) and origins[ln] != sha for ln in f["add"])
     return dict(counts, touched=sorted(touched), excluded=excluded), failures
 
