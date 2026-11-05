@@ -179,7 +179,7 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(args["cwd"], self.wt("A"))
         self.assertEqual(args["base"], sh(self.repo, "rev-parse", "main"))
         self.assertEqual(args["reviewers"], 1)
-        self.assertEqual(args["gate"], "true")
+        self.assertRegex(args["gate"], r"^python3 \S+/scripts/heavy\.py sh -c 'true'$")
         self.assertEqual(args["taskDir"], os.path.realpath(os.path.join(self.store, "outputs", "A", "a1")))
         self.assertTrue(os.path.isdir(args["taskDir"]))
         with open(args["brief"]) as f:

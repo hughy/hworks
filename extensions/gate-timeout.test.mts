@@ -28,6 +28,8 @@ const gates: Array<[string, string]> = [
   ["forge build (600 s)", "(cd lib/smart-wallet && git checkout -q a8c6456) ; forge build 2>&1 | tail -15; git status --short"],
   ["repo check script", "bash scripts/check.sh"],
   ["make lint target", "make lint-go"],
+  ["review-loop gate wrapped in heavy.py", "python3 /Users/me/dev/hworks/scripts/heavy.py sh -c 'make lint-go && make ci-test-race'"],
+  ["review-loop gate wrapped in heavy.py at a quoted path", "python3 '/Users/me/my dev/hworks/scripts/heavy.py' sh -c 'make lint-go'"],
   ["pytest", "uvx pytest -q || pytest -q tests/"],
   ["node --test", "node --test workflows/*.test.js"],
   ["make -C dir target", "make -C services/api test"],

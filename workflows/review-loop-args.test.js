@@ -13,6 +13,7 @@ function fixture() {
   const root = path.join(dir, "root");
   fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
   fs.copyFileSync(realScript, path.join(root, "scripts", "review-loop-args.sh"));
+  fs.copyFileSync(path.join(path.dirname(realScript), "heavy.py"), path.join(root, "scripts", "heavy.py"));
   fs.writeFileSync(path.join(root, "scripts", "models.sh"), '#!/usr/bin/env bash\nprintf "%s\\n" "$MODELS_SHOW"\n', { mode: 0o755 });
   const repo = path.join(dir, "repo");
   fs.mkdirSync(repo);
@@ -165,6 +166,19 @@ test("a task dir is created and emitted as an absolute taskDir", () => {
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.json.taskDir, path.join(fs.realpathSync(fx.repo), "out", "u1"));
   assert.ok(fs.statSync(r.json.taskDir).isDirectory());
+});
+
+test("the gate runs through heavy.py beside the script with its quoting intact", () => {
+  const fx = fixture();
+  const raw = "printf %s \"it's\" > out.txt && test -n \"$HWORKS_HEAVY_HELD\"";
+  const r = runArgs(fx, [fx.brief, raw, "main", "standard", fx.repo], { models: pinned });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.json.gate.includes(path.join(fx.root, "scripts", "heavy.py")), r.json.gate);
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "heavy-state-"));
+  const run = spawnSync("sh", ["-c", r.json.gate], { cwd: fx.repo, encoding: "utf8",
+    env: { ...process.env, XDG_STATE_HOME: state, HWORKS_HEAVY_SLOTS: "1", HWORKS_HEAVY_HELD: "" } });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(fs.readFileSync(path.join(fx.repo, "out.txt"), "utf8"), "it's");
 });
 
 test("GATE_TIMEOUT_MS sets gateTimeoutMs; unset emits none; invalid fails", () => {
