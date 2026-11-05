@@ -153,12 +153,14 @@ def commit_counts(repo, sha, parent, ts, times, extra_dirs):
 class CommitCache:
     """Per-commit counts on disk. Every input is content-addressed (the parent..sha
     diff, first-parent blame from fixed revs, and timestamps of first-parent
-    ancestors), so entries never go stale; rewritten history only misses."""
+    ancestors), so entries never go stale; rewritten history only misses. Shallow
+    clones are not cached: blame stops at the boundary, which a fetch can move.
+    extra_dirs keep their order because the first match names the exclusion reason."""
 
     def __init__(self, repo, cache_dir, extra_dirs):
         common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
         self.dir = os.path.join(cache_dir, f"v{SCHEMA}")
-        self.base = [os.path.realpath(common), sorted(extra_dirs)]
+        self.base = [os.path.realpath(common), list(extra_dirs)]
 
     def path(self, sha, parent):
         key = hashlib.sha256(json.dumps([*self.base, sha, parent]).encode()).hexdigest()
@@ -208,7 +210,8 @@ def collect(repo, since, until, zone, merge_ids=None, extra_dirs=(), cache_dir=N
     times = {sha: ts for sha, _, ts in commits}
     counted = {sha for sha, _, ts in commits if merge_ids is None or sha in merge_ids}
     rows, excluded = [], {}
-    store = CommitCache(repo, cache_dir, extra_dirs) if cache_dir else None
+    shallow = git(repo, "rev-parse", "--is-shallow-repository").strip() == "true"
+    store = CommitCache(repo, cache_dir, extra_dirs) if cache_dir and not shallow else None
     for sha, parent, ts in reversed(commits):
         if sha not in counted or not since.timestamp() - 7 * DAY <= ts < until.timestamp():
             continue
