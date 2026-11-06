@@ -557,6 +557,7 @@ export function pages(ctx) { return [{ path: 'extra/all.html', title: 'All', cru
   for (const [body, error] of [
     [`export function pages() { return [{ path: '../escape.html', title: 'x', body: '' }]; }`, /must stay inside the output/],
     [`export function pages() { return [{ path: 'index.html', title: 'x', body: '' }]; }`, /two pages render to index\.html/],
+    [`export function pages() { return [{ path: './/index.html', title: 'x', body: '' }]; }`, /two pages render to index\.html/],
   ]) {
     const out = join(f.out, 'bad');
     const bad = f.write('bad.mjs', body);
@@ -599,6 +600,17 @@ test('render-prototypes refuses an empty variant folder without writing a manife
   assert.equal(result.status, 1);
   assert.match(result.stderr, /no variant modules/);
   assert.equal(readFileSync(join(f.instance, 'prototypes.json'), 'utf8'), 'sentinel');
+});
+
+test('render-prototypes refuses an output inside the instance even when the variant dir is a symlink out', (t) => {
+  const f = variantFixture(t);
+  f.write('prototypes.json', 'sentinel');
+  symlinkSync(f.out, join(f.instance, 'baseline'));
+  const result = f.run('render-prototypes.mjs', '--instance', f.instance, '--out', f.instance, '--baseline');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /must be outside the instance/);
+  assert.equal(readFileSync(join(f.instance, 'prototypes.json'), 'utf8'), 'sentinel');
+  assert.deepEqual(readdirSync(f.out), []);
 });
 
 test('render-prototypes refuses a symlinked manifest before rendering anything', (t) => {

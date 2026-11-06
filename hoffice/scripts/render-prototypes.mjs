@@ -4,7 +4,7 @@
 import { readdirSync, statSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join, basename, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { renderDashboard } from './lib/dashboard.mjs';
+import { renderDashboard, checkOutput } from './lib/dashboard.mjs';
 
 const usage = 'usage: render-prototypes.mjs --instance <instance-root> --out <directory> [--baseline] [--title <text>] <variant.mjs | directory>...';
 const args = process.argv.slice(2);
@@ -26,7 +26,8 @@ const modules = inputs.flatMap(input => statSync(input).isDirectory()
 try {
   // Rendering checks that the output stays clear of the instance; with nothing to render that check never runs.
   if (!modules.length && !options.baseline) throw new Error(`no variant modules in ${inputs.join(', ')}`);
-  const out = resolve(options.out);
+  // Each variant checks its own subdirectory, which a symlink can point elsewhere; the manifest lands in out itself.
+  const { out } = checkOutput(options.instance, options.out);
   const manifest = join(out, 'prototypes.json');
   // The manifest is written last, so check it before any variant renders.
   try { if (lstatSync(manifest).isSymbolicLink()) throw new Error(`output destination must not be a symlink: ${manifest}`); }

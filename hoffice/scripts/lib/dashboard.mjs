@@ -1,6 +1,6 @@
 // The project dashboard: an instance model plus default pages that variant modules can restyle or replace.
 import { readFileSync, readdirSync, statSync, lstatSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
-import { dirname, resolve, relative, isAbsolute, join, basename } from 'node:path';
+import { dirname, resolve, relative, isAbsolute, join, basename, posix } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { loadMarked, parseFrontmatter, esc } from './render-common.mjs';
 
@@ -188,7 +188,8 @@ const withinPath = (parent, child) => {
 // `variant` may supply: css (appended to baseCss, or the whole sheet with replaceCss), head, script,
 // bodyClass, shell(page, ctx), index(ctx), project(project, ctx), doc(doc, ctx), and pages(ctx)
 // returning extra { path, title, crumbs, body } pages. Each renderer returns { title, crumbs, body }.
-export function renderDashboard({ instance: instanceArg, out: outArg, variant = {}, now = new Date() }) {
+// Resolves the instance root and an output directory, refusing an output that overlaps the instance.
+export function checkOutput(instanceArg, outArg) {
   const instance = realpathSync(resolve(instanceArg));
   if (!exists(join(instance, 'HOFFICE.md'))) throw new Error('instance root must contain HOFFICE.md');
   const out = resolve(outArg);
@@ -200,6 +201,11 @@ export function renderDashboard({ instance: instanceArg, out: outArg, variant = 
   }
   const resolvedOut = resolve(realpathSync(ancestor), relative(ancestor, out));
   if (withinPath(instance, resolvedOut) || withinPath(resolvedOut, instance)) throw new Error('output directory must be outside the instance and must not contain it');
+  return { instance, out };
+}
+
+export function renderDashboard({ instance: instanceArg, out: outArg, variant = {}, now = new Date() }) {
+  const { instance, out } = checkOutput(instanceArg, outArg);
 
   // Each instance Markdown file gets a readable page at source/<instance path>.html.
   const docPages = new Map(markdownFiles(instance).map(path => [path, `source/${relative(instance, path)}.html`]));
@@ -425,8 +431,10 @@ ${remoteNote}
   for (const doc of docs) add(doc.page, (variant.doc ?? defaults.doc)(doc, ctx));
   add('index.html', (variant.index ?? defaults.index)(ctx));
   for (const page of variant.pages?.(ctx) ?? []) {
-    if (isAbsolute(page.path) || page.path.split('/').includes('..')) throw new Error(`variant page path must stay inside the output: ${page.path}`);
-    add(page.path, page);
+    // Normalized, so ./index.html cannot slip past the duplicate check and replace index.html.
+    const path = posix.normalize(page.path);
+    if (isAbsolute(path) || path.split('/').includes('..') || path === '.' || path.endsWith('/')) throw new Error(`variant page path must stay inside the output: ${page.path}`);
+    add(path, page);
   }
 
   // Preflight every destination and its intermediate directories before writing anything.
