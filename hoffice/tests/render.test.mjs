@@ -591,6 +591,16 @@ export const css = shared;`);
   }
 });
 
+test('render-prototypes refuses an empty variant folder without writing a manifest', (t) => {
+  const f = variantFixture(t);
+  f.write('prototypes.json', 'sentinel');
+  f.write('empty/_helper.mjs', '');
+  const result = f.run('render-prototypes.mjs', '--instance', f.instance, '--out', f.instance, join(f.instance, 'empty'));
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /no variant modules/);
+  assert.equal(readFileSync(join(f.instance, 'prototypes.json'), 'utf8'), 'sentinel');
+});
+
 test('render-prototypes refuses a symlinked manifest before rendering anything', (t) => {
   const f = variantFixture(t);
   const victim = f.write('victim.txt', 'keep');

@@ -24,6 +24,8 @@ const modules = inputs.flatMap(input => statSync(input).isDirectory()
   ? readdirSync(input).filter(n => n.endsWith('.mjs') && !n.startsWith('_')).sort().map(n => join(input, n))
   : [input]);
 try {
+  // Rendering checks that the output stays clear of the instance; with nothing to render that check never runs.
+  if (!modules.length && !options.baseline) throw new Error(`no variant modules in ${inputs.join(', ')}`);
   const out = resolve(options.out);
   const manifest = join(out, 'prototypes.json');
   // The manifest is written last, so check it before any variant renders.
