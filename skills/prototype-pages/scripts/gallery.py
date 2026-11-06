@@ -16,7 +16,8 @@ each prototype's pages get a small fixed badge with its letter that links back t
 overlap. Restamping replaces the old badge.
 
 --shots <dir> then screenshots each prototype with headless Chrome: its entry page plus the first
---inner-pages pages under its dir that the entry links to, at every --viewports size. --print-shots
+--inner-pages pages under its dir (pages the entry links to first, then the rest in path order),
+at every --viewports size. --print-shots
 lists those screenshots without running Chrome.
 """
 import argparse
