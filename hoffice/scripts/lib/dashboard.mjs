@@ -235,6 +235,8 @@ export function renderDashboard({ instance: instanceArg, out: outArg, variant = 
         // Character references decode to what they show; other named ones (no entity table here) drop out.
         const plain = html.replace(/<[^>]*>/g, '').replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z][a-z0-9]*));/gi, (_, dec, hex, name) => {
           const code = dec ? Number(dec) : hex ? parseInt(hex, 16) : NaN;
+          // HTML reads &#128; to &#159; as windows-1252 (&#140; is Œ).
+          if (code >= 0x80 && code <= 0x9f) return new TextDecoder('windows-1252').decode(Uint8Array.of(code));
           if (!Number.isNaN(code)) return code <= 0x10ffff ? String.fromCodePoint(code) : '';
           return { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }[name.toLowerCase()] ?? '';
         });
@@ -428,8 +430,12 @@ ${remoteNote}
   const css = variant.replaceCss ? (variant.css ?? '') : baseCss + (variant.css ?? '');
   const shell = variant.shell ? page => variant.shell(page, ctx) : undefined;
   const pages = new Map();
+  // Compare case-folded, so INDEX.html cannot overwrite index.html on a case-insensitive filesystem.
+  const taken = new Set();
   const add = (destination, page) => {
-    if (pages.has(destination)) throw new Error(`two pages render to ${destination}`);
+    const key = destination.normalize('NFC').toLowerCase();
+    if (taken.has(key)) throw new Error(`two pages render to ${destination}`);
+    taken.add(key);
     pages.set(destination, htmlPage({ ...page, css, head: variant.head ?? '', script: variant.script ?? '', bodyClass: variant.bodyClass ?? '', shell }));
   };
   for (const project of projects) add(project.page, (variant.project ?? defaults.project)(project, ctx));
