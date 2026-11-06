@@ -567,21 +567,22 @@ export function pages(ctx) { return [{ path: 'extra/all.html', title: 'All', cru
   }
 });
 
-test('render-prototypes renders every bundled variant with a manifest and working local links', (t) => {
+test('render-prototypes renders a variant folder in name order with a manifest and working local links', (t) => {
   const f = variantFixture(t);
-  const variants = join(engine, 'prototypes', 'dashboard');
-  const result = f.run('render-prototypes.mjs', '--instance', f.instance, '--out', f.out, '--baseline', variants);
-  success(result);
+  f.write('variants/_helper.mjs', `export const css = '.shared{}';`);
+  f.write('variants/02-plain.mjs', `export function index(ctx) { return { title: 'Plain', crumbs: ['Plain'], body: ctx.projects.map(p => ctx.link(p.title, ctx.hrefTo('index.html', p.page))).join('') }; }`);
+  f.write('variants/01-cards.mjs', `import { css as shared } from './_helper.mjs';
+export const meta = { id: 'card-grid', title: 'Cards', approach: 'One card per project.', differences: ['Cards'], features: ['Scannable'] };
+export const css = shared;`);
+  const variants = join(f.instance, 'variants');
+  success(f.run('render-prototypes.mjs', '--instance', f.instance, '--out', f.out, '--baseline', variants));
   const manifest = JSON.parse(readFileSync(join(f.out, 'prototypes.json'), 'utf8'));
-  const modules = readdirSync(variants).filter(n => n.endsWith('.mjs') && !n.startsWith('_'));
-  assert.equal(manifest.prototypes.length, modules.length + 1);
+  assert.deepEqual(manifest.prototypes.map(p => p.id), ['baseline', 'card-grid', 'plain']);
   assert.equal(manifest.prototypes[0].baseline, true);
-  const ids = [...readFileSync(join(f.out, 'workspace', 'index.html'), 'utf8').matchAll(/<div class="view" id="([^"]+)"/g)].map(m => m[1]);
-  assert.equal(new Set(ids).size, ids.length, `workspace view ids collide: ${ids}`);
-  assert.equal(ids.length, 5);
+  assert.deepEqual(manifest.prototypes[1], { id: 'card-grid', title: 'Cards', approach: 'One card per project.', differences: ['Cards'], features: ['Scannable'], entry: 'card-grid/index.html', dir: 'card-grid' });
+  assert.deepEqual(manifest.prototypes[2], { id: 'plain', title: '02-plain', approach: '', differences: [], features: [], entry: 'plain/index.html', dir: 'plain' });
+  assert.match(readFileSync(join(f.out, 'card-grid', 'index.html'), 'utf8'), /\.shared\{\}/);
   for (const p of manifest.prototypes) {
-    assert.ok(p.title && p.entry === `${p.id}/index.html`, JSON.stringify(p));
-    if (!p.baseline) assert.ok(p.approach && p.differences.length && p.features.length, `${p.id} needs approach, differences and features`);
     for (const page of ['index.html', 'projects/alpha.html', 'projects/beta.html', 'projects/q"<s>.html', 'source/projects/alpha/STATE.md.html']) {
       const html = readFileSync(join(f.out, p.id, page), 'utf8');
       assert.doesNotMatch(html, /<way>|<one>|q"<|n"<|<s>|<k>/, `${p.id}/${page} leaks unescaped source HTML`);

@@ -85,10 +85,10 @@ The command creates `index.html`, `projects/<project>.html`, and `source/<instan
 `--variant <module.mjs>` renders the same model through a variant module that can restyle the pages or replace the index, project, and source layouts and add pages (see `scripts/lib/dashboard.mjs`). To compare several, render them all with a manifest:
 
 ```sh
-node hoffice/scripts/render-prototypes.mjs --instance "/path/to/project memory" --out /tmp/prototypes --baseline hoffice/prototypes/dashboard
+node hoffice/scripts/render-prototypes.mjs --instance "/path/to/project memory" --out /tmp/prototypes --baseline /path/to/variants
 ```
 
-Each variant renders into `<out>/<id>/`, and `<out>/prototypes.json` lists them for a gallery tool. `prototypes/dashboard/` holds ten example variants.
+A variants directory contributes its `*.mjs` files in name order; files starting with `_` are shared helpers, not variants. A variant's optional `meta` export gives its `id`, `title`, `approach`, `differences`, and `features`. Each variant renders into `<out>/<id>/`, and `<out>/prototypes.json` lists them for a gallery tool. Variants are per-task output and live outside the engine.
 
 The index lists directories under `projects/`, with titles and registry fields from each project's `README.md`, open and done next-step counts and authored review dates from `STATE.md`, and links to the latest associated digests. Project pages add:
 
