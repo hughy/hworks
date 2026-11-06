@@ -85,27 +85,24 @@ Choose the form first. A repository root suits an instance of its own. A directo
 
 ## Local project dashboard
 
-Render an instance's local registry as static HTML. Install the renderer dependencies once from the engine checkout:
+Render an instance as a static, split-pane workspace. Install the existing renderer dependencies once from the engine checkout:
 
 ```bash
 npm ci --ignore-scripts --prefix hoffice
 node hoffice/scripts/render-dashboard.mjs --instance "/path/to/project memory" "/path/to/dashboard output"
 ```
 
-Run these commands from the directory containing `hoffice/`, or use the engine's absolute script path from any working directory. `--instance` must point to the directory containing `HOFFICE.md`, whether that directory is the git root or nested inside a repository. The output directory must neither contain the instance nor be inside it, including when reached through a symlink. The renderer rejects symlinks at `index.html`, the output's `projects/` directory, or any generated project page before writing.
+Run from the directory containing `hoffice/`, or use the absolute script path from any working directory. `--instance` points to the directory containing `HOFFICE.md`, whether at the git root or nested inside a repository. Output must neither contain the instance nor be inside it, including through symlinks. Before writing, the renderer rejects symlinks in generated destinations and case-insensitive page-path collisions.
 
-The command creates `index.html` and `projects/<project>.html`, overwrites those pages on subsequent runs, and prints the index's `file:` URL. Open that URL in a browser. It does not edit the instance or publish anything. Pages link to local source files through absolute `file:` URLs, so keep the sources available on the machine where you view the dashboard. Treat the output as private instance content.
+Open the printed `file:` URL. The left pane lists Overview and projects ranked by how many attention reasons they have, with last activity, open steps, and a health dot (hover for reasons). A selected project's documents appear underneath in folded groups by kind, newest first. The filter searches project names and document titles.
 
-The index lists directories under `projects/`, with titles and registry fields from each project's `README.md`, authored review dates from `STATE.md`, and links to the latest associated digests. Project pages add:
+The right pane starts with Overview: attention reasons, the next open step, and last activity. Each project view has a health strip, next steps as read-only checkboxes (completed items folded), open questions, six recent activity rows with summaries, findings and PR links, and folded STATE sections with first-sentence previews. Daily digests fold into one activity row. Properties, repositories and sources are folded below. Expand all and Collapse all affect only that project's view.
 
-- Repository cards whose `Projects` field lists that project.
-- The `Summary`, `Open questions`, and `Next steps` sections from `STATE.md`.
-- `DOCS.md` rows whose `Authority` starts with `authoritative:`.
-- Each associated digest's latest summary and source link.
+Keys: `j` / `k` move through the visible project list (including Overview); `/` focuses the filter; Escape clears it. URL hashes select views, so a view can be bookmarked. At narrow widths the panes stack. Without JavaScript, Overview still shows and each project is reachable through the sidebar’s project-page links.
 
-Digest association comes from `projects[].name` in `digests/<digest>/DIGEST.md`, not the digest directory name. See [the digest config template](templates/digest-config.md). The dashboard selects the dated Markdown entry with the latest valid `period_end` in each digest directory, ignoring archive subdirectories. It skips invalid entries and configs with a diagnostic on stderr. Missing optional files and fields appear as unavailable; a review date is authored source data, not a refresh timestamp.
+The renderer writes `index.html`, `projects/<slug>.html` (the same workspace with only that project's view), and `source/<path>.html` for every regular instance Markdown file, skipping hidden directories, `node_modules`, and symlinks. Local Markdown links, heading anchors and code-span paths point to these readable pages; each source page links back to the original file. Unsafe link targets are dropped. Generated pages are overwritten on later renders; sources are never edited and nothing is published. Treat the output as private instance content.
 
-This phase reads local files only. Remote health, milestones, issue counts, PR counts, factory state, weekly goals, and briefings are unavailable. Links to remote sources do not mean those sources were queried.
+Digest association comes from `projects[].name` in `digests/<digest>/DIGEST.md`, not the directory name. See [the digest config template](templates/digest-config.md). The latest digest age uses the latest valid `period_end`, ignoring archive subdirectories; invalid entries and configs are skipped with a diagnostic on stderr. Dated notes supply recent activity and the 12-week sparkline. STATE review dates are authored data, not refresh timestamps. Attention signals are derived from these local files only, not remote service health. Remote sources are never queried.
 
 ## Source of truth
 
