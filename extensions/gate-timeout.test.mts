@@ -88,7 +88,7 @@ function call(input: any, toolName = "bash") {
   check("non-gate gets no timeout", !("timeout" in input), input);
 }
 {
-  const { input } = call({ command: "go test ./..." }, "bg_process");
+  const { input } = call({ command: "go test ./..." }, "other_tool");
   check("other tools untouched", !("timeout" in input), input);
 }
 {
