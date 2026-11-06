@@ -1,5 +1,7 @@
 """The prototype kit script works on a bare page in headless Chrome."""
+import html
 import importlib.util
+import json
 import subprocess
 import tempfile
 import unittest
@@ -44,6 +46,34 @@ class PrototypeKitTest(unittest.TestCase):
         self.assertIn('class="panel on" id="one"', dom)
         self.assertIn('id="n1" class="cursor"', dom)
         self.assertNotIn('id="n2" class="cursor"', dom)
+
+    @unittest.skipUnless(chrome(), "no headless Chrome")
+    def test_keys_leave_form_fields_alone_and_follow_the_filter(self):
+        page = f"""<!DOCTYPE html><html><head><style>{(ASSETS / "kit.css").read_text()}</style></head><body>
+<input data-filter><textarea id="t"></textarea><button data-facet="due-soon=yes" id="f">Due</button>
+<p data-nav data-search="alpha" id="a"><a href="#alpha">alpha</a></p><p data-nav data-search="beta" data-due-soon="yes" id="b"><a href="#beta">beta</a></p>
+<pre id="out"></pre><script>{(ASSETS / "kit.js").read_text()}</script>
+<script>
+const key = (el, k) => el.dispatchEvent(new KeyboardEvent('keydown', {{key: k, bubbles: true, cancelable: true}}));
+const out = {{}}, t = document.getElementById('t'), box = document.querySelector('[data-filter]');
+t.focus(); out.slashPrevented = !key(t, '/'); out.active = document.activeElement.id;
+t.blur(); key(document.body, 'j'); out.first = document.querySelector('.cursor')?.id;
+box.value = 'beta'; box.dispatchEvent(new Event('input')); box.blur();
+key(document.body, 'Enter'); out.hashAfterHiddenEnter = location.hash;
+key(document.body, 'j'); out.afterFilter = [...document.querySelectorAll('.cursor')].map(e => e.id);
+box.value = ''; box.dispatchEvent(new Event('input'));
+out.afterClear = [...document.querySelectorAll('.cursor')].map(e => e.id);
+document.getElementById('f').click(); out.facetHidesA = document.getElementById('a').hidden; out.facetKeepsB = !document.getElementById('b').hidden;
+document.getElementById('out').textContent = JSON.stringify(out);
+</script></body></html>"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "page.html"
+            path.write_text(page)
+            result = subprocess.run([chrome(), "--headless=new", "--disable-gpu", "--no-first-run", f"--user-data-dir={tmp}/profile",
+                                     "--virtual-time-budget=2000", "--dump-dom", path.as_uri()], capture_output=True, text=True, timeout=60)
+        out = json.loads(html.unescape(result.stdout.split('<pre id="out">')[1].split("</pre>")[0]))
+        self.assertEqual(out, {"slashPrevented": False, "active": "t", "first": "a", "hashAfterHiddenEnter": "",
+                               "afterFilter": ["b"], "afterClear": ["b"], "facetHidesA": True, "facetKeepsB": True})
 
 
 if __name__ == "__main__":
