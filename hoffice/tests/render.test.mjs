@@ -461,6 +461,17 @@ test('dashboard rejects invalid invocation, unmarked roots and output paths that
   assert.deepEqual(filesUnder(f.instance), before);
 });
 
+test('dashboard rejects ancestor output without overwriting instance files', (t) => {
+  const f = dashboardFixture(t, 'projects/');
+  f.write('projects/alpha/README.md', '# Alpha\n');
+  f.write('alpha.html', 'SENTINEL');
+  const before = filesUnder(f.instance);
+  const result = f.run('render-dashboard.mjs', '--instance', f.instance, f.root);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /output directory must be outside the instance/);
+  assert.deepEqual(filesUnder(f.instance), before);
+});
+
 for (const destination of ['index.html', 'projects', 'projects/alpha.html']) {
   test(`dashboard rejects a symlink at output ${destination} before writing any pages`, (t) => {
     const f = dashboardFixture(t);

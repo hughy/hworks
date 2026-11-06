@@ -78,7 +78,7 @@ npm ci --ignore-scripts --prefix hoffice
 node hoffice/scripts/render-dashboard.mjs --instance "/path/to/project memory" "/path/to/dashboard output"
 ```
 
-Run these commands from the directory containing `hoffice/`, or use the engine's absolute script path from any working directory. `--instance` must point to the directory containing `HOFFICE.md`, whether that directory is the git root or nested inside a repository. The output directory must be outside the instance, including when reached through a symlink. The renderer rejects symlinks at `index.html`, the output's `projects/` directory, or any generated project page before writing.
+Run these commands from the directory containing `hoffice/`, or use the engine's absolute script path from any working directory. `--instance` must point to the directory containing `HOFFICE.md`, whether that directory is the git root or nested inside a repository. The output directory must neither contain the instance nor be inside it, including when reached through a symlink. The renderer rejects symlinks at `index.html`, the output's `projects/` directory, or any generated project page before writing.
 
 The command creates `index.html` and `projects/<project>.html`, overwrites those pages on subsequent runs, and prints the index's `file:` URL. Open that URL in a browser. It does not edit the instance or publish anything. Pages link to local source files through absolute `file:` URLs, so keep the sources available on the machine where you view the dashboard. Treat the output as private instance content.
 

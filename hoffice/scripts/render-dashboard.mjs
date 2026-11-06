@@ -55,11 +55,15 @@ try {
   // Check resolved ancestors so output symlinks cannot overwrite instance sources.
   let ancestor = out;
   while (true) {
-    try { ancestor = realpathSync(ancestor); break; }
+    try { realpathSync(ancestor); break; }
     catch (error) { if (error.code !== 'ENOENT') throw error; ancestor = dirname(ancestor); }
   }
-  const inside = relative(instance, ancestor);
-  if (!inside || (inside !== '..' && !inside.startsWith('../') && !isAbsolute(inside))) throw new Error('output directory must be outside the instance');
+  const resolvedOut = resolve(realpathSync(ancestor), relative(ancestor, out));
+  const within = (parent, child) => {
+    const path = relative(parent, child);
+    return !path || (path !== '..' && !path.startsWith('../') && !isAbsolute(path));
+  };
+  if (within(instance, resolvedOut) || within(resolvedOut, instance)) throw new Error('output directory must be outside the instance and must not contain it');
   function href(raw, source) {
     try {
       const url = new URL(raw, pathToFileURL(source));
