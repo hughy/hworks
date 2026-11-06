@@ -232,7 +232,12 @@ export function renderDashboard({ instance: instanceArg, out: outArg, variant = 
       renderer.heading = function ({ tokens, depth }) {
         const html = this.parser.parseInline(tokens);
         // Slug the visible text, so a link's destination never becomes part of the id.
-        const plain = html.replace(/<[^>]*>/g, '').replace(/&(?:amp|lt|gt|quot|#39);/g, '');
+        // Character references decode to what they show; other named ones (no entity table here) drop out.
+        const plain = html.replace(/<[^>]*>/g, '').replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z][a-z0-9]*));/gi, (_, dec, hex, name) => {
+          const code = dec ? Number(dec) : hex ? parseInt(hex, 16) : NaN;
+          if (!Number.isNaN(code)) return code <= 0x10ffff ? String.fromCodePoint(code) : '';
+          return { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }[name.toLowerCase()] ?? '';
+        });
         const base = plain.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s/g, '-');
         let id = base;
         for (let n = 1; used.has(id); n++) id = `${base}-${n}`;
