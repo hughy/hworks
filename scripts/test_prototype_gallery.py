@@ -233,6 +233,17 @@ class PrototypeShotsTest(unittest.TestCase):
         self.assertNotIn("first.html", one)
         self.assertNotIn("one/z.html", self.run_cli("--print-shots", "--inner-pages", "0").stdout)
 
+    def test_print_shots_skips_the_gallery_and_needs_no_chrome(self):
+        (self.root / "entry.html").write_text("<html><body></body></html>")
+        (self.root / "inner.html").write_text("<html><body></body></html>")
+        self.manifest.write_text(json.dumps({"prototypes": [{"id": "flat", "title": "flat", "entry": "entry.html", "dir": "."}]}))
+        result = subprocess.run([sys.executable, SCRIPT, str(self.manifest), "--shots", str(self.shots), "--print-shots",
+                                 "--chrome", "no-such-chrome-xyz", "--inner-pages", "1"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = [line.split()[2] for line in result.stdout.splitlines() if line.startswith("  shot ")]
+        self.assertEqual(listed[0], "entry.html")
+        self.assertNotIn("index.html", listed)
+
     def test_shots_report_each_png_and_fail_when_chrome_writes_none(self):
         result = self.run_cli()
         self.assertEqual(result.returncode, 1)

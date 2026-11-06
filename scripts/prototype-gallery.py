@@ -293,13 +293,14 @@ def linked_paths(text):
     return parser.paths
 
 
-def shot_pages(root, p, inner):
-    """The entry page, then up to inner pages it owns: those the entry links to first, then the rest in path order."""
+def shot_pages(root, p, inner, gallery):
+    """The entry page, then up to inner pages it owns other than the gallery: those the entry links to first, then the rest in path order."""
     entry = inside(root, p["entry"], "entry")
     if p.get("dir") is None or inner <= 0:
         return [entry]
     owned = {page.resolve(): page for page in pages_for(root, p)}
     owned.pop(entry.resolve(), None)
+    owned.pop(gallery.resolve(), None)
     picked = []
     for rel in linked_paths(entry.read_text()):
         page = owned.get((entry.parent / rel).resolve())
@@ -309,10 +310,10 @@ def shot_pages(root, p, inner):
     return [entry] + picked[:inner]
 
 
-def shot_jobs(root, data, out_dir, sizes, inner):
+def shot_jobs(root, data, out_dir, sizes, inner, gallery):
     return [{"label": p["label"], "page": page, "rel": os.path.relpath(page, root), "size": f"{w}x{h}",
              "png": out_dir / f"{p['anchor']}-{n}-{w}x{h}.png"}
-            for p in data["prototypes"] for n, page in enumerate(shot_pages(root, p, inner)) for w, h in sizes]
+            for p in data["prototypes"] for n, page in enumerate(shot_pages(root, p, inner, gallery)) for w, h in sizes]
 
 
 def frame_html(job):
@@ -367,7 +368,7 @@ def main(argv=None):
             raise ValueError("--print-shots needs --shots <dir>")
         if args.shots:
             sizes = parse_viewports(args.viewports)
-            chrome = chrome_path(args.chrome)
+            chrome = None if args.print_shots else chrome_path(args.chrome)
         out = Path(os.path.abspath(args.out)) if args.out else root / "index.html"
         if out.is_symlink():
             raise ValueError(f"gallery output must not be a symlink: {out}")
@@ -395,7 +396,7 @@ def main(argv=None):
         print(f"  {p['label']:>8}  {p['title']}  {(root / p['entry']).as_uri()}")
     if args.shots:
         shots = Path(os.path.abspath(args.shots))
-        jobs = shot_jobs(root, data, shots, sizes, args.inner_pages)
+        jobs = shot_jobs(root, data, shots, sizes, args.inner_pages, out)
         if args.print_shots:
             for job in jobs:
                 print(f"  shot {job['label']:>8}  {job['rel']}  {job['size']}  {job['png']}")
