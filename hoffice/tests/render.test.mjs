@@ -516,3 +516,64 @@ for (const destination of ['index.html', 'projects', 'projects/alpha.html', 'sou
     }
   });
 }
+
+function variantFixture(t) {
+  const f = dashboardFixture(t);
+  f.write('projects/alpha/README.md', '# Alpha <one>\n\nAlpha lead.\n\n| Field | Value |\n|---|---|\n| Tracker | [Board](https://tracker.example.test/alpha) |\n');
+  f.write('projects/alpha/STATE.md', '# Alpha state\n\nLast reviewed: 2026-05-01 by test.\n\n## Summary\n\nAlpha summary.\n\n## Open questions\n\n- Which <way>?\n\n## Next steps\n\n- [x] Ship the first part\n- Write the [design](notes/design.md)\n');
+  f.write('projects/alpha/notes/design.md', '# Design note\n');
+  f.write('projects/alpha/sessions/2026-05-02-kickoff.md', '# Kickoff\n');
+  f.write('projects/beta/README.md', '# Beta\n');
+  f.write('projects/beta/STATE.md', '# Beta state\n\n## Next steps\n\nNone agreed.\n');
+  return f;
+}
+
+test('a variant module restyles and replaces dashboard pages and adds its own pages', (t) => {
+  const f = variantFixture(t);
+  const variant = f.write('variant.mjs', `export const css = '.mine{}';
+export const script = 'window.mine = 1;';
+export function index(ctx) { return { title: 'Mine', crumbs: ['Mine'], body: ctx.projects.map(p => ctx.link(p.title, ctx.hrefTo('index.html', p.page)) + p.stepItems.length).join('') }; }
+export function project(p, ctx) { const page = ctx.defaults.project(p, ctx); return { ...page, body: '<p id="custom"></p>' + page.body }; }
+export function pages(ctx) { return [{ path: 'extra/all.html', title: 'All', crumbs: [ctx.indexCrumb('extra/all.html')], body: String(ctx.docs.length) }]; }
+`);
+  success(f.run('render-dashboard.mjs', '--instance', f.instance, '--variant', variant, f.out));
+  const index = f.html();
+  assert.match(index, /\.mine\{\}/);
+  assert.match(index, /<script>window\.mine = 1;<\/script>/);
+  assert.match(index, />Alpha &lt;one><\/a>2/);
+  assert.match(f.html('projects/alpha.html'), /<p id="custom"><\/p><div class="head"><h1>Alpha &lt;one><\/h1>/);
+  assert.match(f.html('extra/all.html'), /<a href="\.\.\/index\.html">Projects<\/a>/);
+  for (const page of ['index.html', 'projects/alpha.html', 'extra/all.html']) assertLocalHrefsWork(f.html(page), join(f.out, page));
+
+  for (const [body, error] of [
+    [`export function pages() { return [{ path: '../escape.html', title: 'x', body: '' }]; }`, /must stay inside the output/],
+    [`export function pages() { return [{ path: 'index.html', title: 'x', body: '' }]; }`, /two pages render to index\.html/],
+  ]) {
+    const out = join(f.out, 'bad');
+    const bad = f.write('bad.mjs', body);
+    const result = f.run('render-dashboard.mjs', '--instance', f.instance, '--variant', bad, out);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, error);
+    assert.throws(() => statSync(out), /ENOENT/);
+  }
+});
+
+test('render-prototypes renders every bundled variant with a manifest and working local links', (t) => {
+  const f = variantFixture(t);
+  const variants = join(engine, 'prototypes', 'dashboard');
+  const result = f.run('render-prototypes.mjs', '--instance', f.instance, '--out', f.out, '--baseline', variants);
+  success(result);
+  const manifest = JSON.parse(readFileSync(join(f.out, 'prototypes.json'), 'utf8'));
+  const modules = readdirSync(variants).filter(n => n.endsWith('.mjs') && !n.startsWith('_'));
+  assert.equal(manifest.prototypes.length, modules.length + 1);
+  assert.equal(manifest.prototypes[0].baseline, true);
+  for (const p of manifest.prototypes) {
+    assert.ok(p.title && p.entry === `${p.id}/index.html`, JSON.stringify(p));
+    if (!p.baseline) assert.ok(p.approach && p.differences.length && p.features.length, `${p.id} needs approach, differences and features`);
+    for (const page of ['index.html', 'projects/alpha.html', 'projects/beta.html', 'source/projects/alpha/STATE.md.html']) {
+      const html = readFileSync(join(f.out, p.id, page), 'utf8');
+      assert.doesNotMatch(html, /<way>|<one>/, `${p.id}/${page} leaks unescaped source HTML`);
+      assertLocalHrefsWork(html, join(f.out, p.id, page));
+    }
+  }
+});

@@ -82,6 +82,14 @@ Run these commands from the directory containing `hoffice/`, or use the engine's
 
 The command creates `index.html`, `projects/<project>.html`, and `source/<instance path>.html` for every Markdown file in the instance, skipping dot directories and symlinks. It overwrites those pages on later runs, leaves pages for deleted sources in place, and prints the index's `file:` URL. Open that URL in a browser. It does not edit the instance or publish anything. Links to instance Markdown open the rendered `source/` page, and each rendered page links to its raw file through an absolute `file:` URL. Other local links use `file:` URLs directly, so keep the sources available on the machine where you view the dashboard. Treat the output as private instance content.
 
+`--variant <module.mjs>` renders the same model through a variant module that can restyle the pages or replace the index, project, and source layouts and add pages (see `scripts/lib/dashboard.mjs`). To compare several, render them all with a manifest:
+
+```sh
+node hoffice/scripts/render-prototypes.mjs --instance "/path/to/project memory" --out /tmp/prototypes --baseline hoffice/prototypes/dashboard
+```
+
+Each variant renders into `<out>/<id>/`, and `<out>/prototypes.json` lists them for a gallery tool. `prototypes/dashboard/` holds ten example variants.
+
 The index lists directories under `projects/`, with titles and registry fields from each project's `README.md`, open and done next-step counts and authored review dates from `STATE.md`, and links to the latest associated digests. Project pages add:
 
 - Repository cards whose `Projects` field lists that project.
