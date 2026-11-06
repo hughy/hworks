@@ -222,12 +222,16 @@ export function renderDashboard({ instance: instanceArg, out: outArg, variant = 
     const renderer = new marked.Renderer();
     if (anchors) {
       // GitHub-style heading ids, so links like notes/design.md#choice land on the heading.
-      const used = new Map();
-      renderer.heading = function ({ tokens, depth, text }) {
-        const base = text.toLowerCase().replace(/<[^>]*>/g, '').replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s/g, '-');
-        const n = used.get(base) ?? 0;
-        used.set(base, n + 1);
-        return `<h${depth} id="${esc(n ? `${base}-${n}` : base)}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
+      const used = new Set();
+      renderer.heading = function ({ tokens, depth }) {
+        const html = this.parser.parseInline(tokens);
+        // Slug the visible text, so a link's destination never becomes part of the id.
+        const plain = html.replace(/<[^>]*>/g, '').replace(/&(?:amp|lt|gt|quot|#39);/g, '');
+        const base = plain.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s/g, '-');
+        let id = base;
+        for (let n = 1; used.has(id); n++) id = `${base}-${n}`;
+        used.add(id);
+        return `<h${depth} id="${esc(id)}">${html}</h${depth}>\n`;
       };
     }
     renderer.html = ({ text }) => esc(text);

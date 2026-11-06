@@ -521,7 +521,7 @@ function variantFixture(t) {
   const f = dashboardFixture(t);
   f.write('projects/alpha/README.md', '# Alpha <one>\n\nAlpha lead.\n\n| Field | Value |\n|---|---|\n| Tracker | [Board](https://tracker.example.test/alpha) |\n');
   f.write('projects/alpha/STATE.md', '# Alpha state\n\nLast reviewed: 2026-05-01 by test.\n\n## Summary\n\nAlpha summary.\n\n## Open questions\n\n- Which <way>?\n\n## Next steps\n\n- [x] Ship the first part\n- Write the [design](notes/design.md#the-choice)\n');
-  f.write('projects/alpha/notes/design.md', '# Design note\n\n## The choice\n\n## The choice\n');
+  f.write('projects/alpha/notes/design.md', '# Design note\n\n## The choice\n\n## The choice\n\n## The choice-1\n\n## See [the plan](https://plan.example.test/x)\n');
   f.write('projects/alpha/sessions/2026-05-02-kickoff.md', '# Kickoff\n');
   f.write('projects/beta/README.md', '# Beta\n');
   f.write('projects/beta/STATE.md', '# Beta state\n\n## Next steps\n\nNone agreed. [bad](file:///tmp/%2Fbad)\n');
@@ -552,7 +552,7 @@ export function pages(ctx) { return [{ path: 'extra/all.html', title: 'All', cru
   assert.match(f.html('extra/all.html'), /<a href="\.\.\/index\.html">Projects<\/a>/);
   for (const page of ['index.html', 'projects/alpha.html', 'extra/all.html']) assertLocalHrefsWork(f.html(page), join(f.out, page));
   assert.match(f.html('projects/alpha.html'), /href="\.\.\/source\/projects\/alpha\/notes\/design\.md\.html#the-choice"/);
-  assert.match(f.html('source/projects/alpha/notes/design.md.html'), /<h2 id="the-choice">The choice<\/h2>\n<h2 id="the-choice-1">/);
+  assert.match(f.html('source/projects/alpha/notes/design.md.html'), /<h2 id="the-choice">The choice<\/h2>\n<h2 id="the-choice-1">The choice<\/h2>\n<h2 id="the-choice-1-1">The choice-1<\/h2>\n<h2 id="see-the-plan">/);
 
   for (const [body, error] of [
     [`export function pages() { return [{ path: '../escape.html', title: 'x', body: '' }]; }`, /must stay inside the output/],
