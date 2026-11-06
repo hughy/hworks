@@ -52,7 +52,7 @@ class PrototypeKitTest(unittest.TestCase):
         page = f"""<!DOCTYPE html><html><head><style>{(ASSETS / "kit.css").read_text()}</style></head><body>
 <input data-filter><textarea id="t"></textarea><button data-facet="due-soon=yes" id="f">Due</button>
 <p data-nav data-search="alpha" id="a"><a href="#alpha">alpha</a></p><p data-nav data-search="beta" data-due-soon="yes" id="b"><a href="#beta">beta</a></p>
-<pre id="out"></pre><script>{(ASSETS / "kit.js").read_text()}</script>
+<a href="#other" id="o">other</a><pre id="out"></pre><script>{(ASSETS / "kit.js").read_text()}</script>
 <script>
 const key = (el, k) => el.dispatchEvent(new KeyboardEvent('keydown', {{key: k, bubbles: true, cancelable: true}}));
 const out = {{}}, t = document.getElementById('t'), box = document.querySelector('[data-filter]');
@@ -63,6 +63,8 @@ key(document.body, 'Enter'); out.hashAfterHiddenEnter = location.hash;
 key(document.body, 'j'); out.afterFilter = [...document.querySelectorAll('.cursor')].map(e => e.id);
 box.value = ''; box.dispatchEvent(new Event('input'));
 out.afterClear = [...document.querySelectorAll('.cursor')].map(e => e.id);
+key(document.getElementById('o'), 'Enter'); out.hashAfterFocusedEnter = location.hash;
+key(document.body, 'Enter'); out.hashAfterEnter = location.hash;
 document.getElementById('f').click(); out.facetHidesA = document.getElementById('a').hidden; out.facetKeepsB = !document.getElementById('b').hidden;
 document.getElementById('out').textContent = JSON.stringify(out);
 </script></body></html>"""
@@ -72,7 +74,7 @@ document.getElementById('out').textContent = JSON.stringify(out);
             result = subprocess.run([chrome(), "--headless=new", "--disable-gpu", "--no-first-run", f"--user-data-dir={tmp}/profile",
                                      "--virtual-time-budget=2000", "--dump-dom", path.as_uri()], capture_output=True, text=True, timeout=60)
         out = json.loads(html.unescape(result.stdout.split('<pre id="out">')[1].split("</pre>")[0]))
-        self.assertEqual(out, {"slashPrevented": False, "active": "t", "first": "a", "hashAfterHiddenEnter": "",
+        self.assertEqual(out, {"slashPrevented": False, "active": "t", "first": "a", "hashAfterHiddenEnter": "", "hashAfterFocusedEnter": "", "hashAfterEnter": "#beta",
                                "afterFilter": ["b"], "afterClear": ["b"], "facetHidesA": True, "facetKeepsB": True})
 
 

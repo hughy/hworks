@@ -96,6 +96,20 @@ class PrototypeGalleryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("would both stamp", result.stderr)
 
+    def test_an_existing_page_at_the_gallery_path_is_kept_and_a_gallery_is_replaced(self):
+        (self.root / "start.html").write_text('<html><body><a href="index.html">detail</a></body></html>')
+        (self.root / "index.html").write_text("<html><body>detail</body></html>")
+        self.write_manifest([{"id": "a", "title": "a", "entry": "start.html", "dir": "."}])
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not a gallery", result.stderr)
+        self.assertEqual((self.root / "index.html").read_text(), "<html><body>detail</body></html>")
+        self.assertNotIn(">A</span>", (self.root / "start.html").read_text())
+        (self.root / "index.html").unlink()
+        self.write_manifest([{"id": "a", "title": "a", "entry": "one/index.html", "dir": "one"}])
+        self.assertEqual(self.run_cli().returncode, 0)
+        self.assertEqual(self.run_cli().returncode, 0)
+
     def test_paths_outside_the_manifest_directory_or_through_symlinks_fail_before_writing(self):
         outside = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(outside))

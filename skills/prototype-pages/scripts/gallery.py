@@ -188,6 +188,9 @@ COMPARE_JS = """
 """
 
 
+GENERATOR = '<meta name="generator" content="prototype-pages gallery">'
+
+
 def gallery_html(data, out_dir, root):
     e = html.escape
     protos = data["prototypes"]
@@ -215,7 +218,7 @@ def gallery_html(data, out_dir, root):
     default = (f"{len(lettered)} prototypes, labelled {lettered[0]['label']} to {lettered[-1]['label']}. " if lettered else "") + \
         "Every page carries its label in the bottom-left corner; click it to come back here."
     return f"""<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{GENERATOR}
 <title>{e(data.get("title", "Prototypes"))}</title><style>{CSS}</style></head>
 <body><main>
 <h1>{e(data.get("title", "Prototypes"))}</h1>
@@ -384,6 +387,9 @@ def main(argv=None):
                 if page in owners:
                     raise ValueError(f"prototypes {owners[page]} and {p['id']} would both stamp {page}; give them separate dirs")
                 owners[page] = p["id"]
+        # Rerunning replaces an earlier gallery; any other file there (an inner page of a flat layout) is someone's work.
+        if out.exists() and GENERATOR not in out.read_text(errors="replace"):
+            raise ValueError(f"gallery would overwrite {out}, which is not a gallery; choose another path with --out")
         page = gallery_html(data, out.parent, root)
         out.parent.mkdir(parents=True, exist_ok=True)
         stamped = 0 if args.no_stamp else sum(stamp(root, p, out) for p in data["prototypes"])

@@ -6,7 +6,8 @@
 // get aria-pressed="true". Elements with data-count show the visible count; a data-group container hides
 // when none of its data-search elements is visible. Press / to focus the box.
 // Keyboard: j and k move a .cursor through rendered [data-nav] rows, skipping hidden groups and tab panels; Enter opens
-// the selected row's first link while it is visible. Keys typed in form fields and with modifiers are left alone.
+// the selected row's first link while it is visible. Keys typed in form fields or with modifiers, and Enter on a focused
+// link or button, are left alone.
 // Tabs: links in .tabs show the .panel whose id matches their hash (the panel gets .on); the URL hash keeps it.
 (() => {
   const box = document.querySelector('[data-filter]');
@@ -49,7 +50,7 @@
     const list = rows(), i = list.indexOf(cur);
     if (e.key === 'j') move(list[Math.min(list.length - 1, i + 1)]);
     if (e.key === 'k') move(list[Math.max(0, i - 1)]);
-    if (e.key === 'Enter' && i >= 0) cur.querySelector('a')?.click();
+    if (e.key === 'Enter' && i >= 0 && !e.target.closest?.('a, button, summary, [tabindex]')) cur.querySelector('a')?.click();
   });
 })();
 
