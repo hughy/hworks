@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, cpSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, cpSync, realpathSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { parseFrontmatter, rewriteRelativeLinks } from '../scripts/lib/render-common.mjs';
 
@@ -228,3 +228,255 @@ test('explicit missing or invalid pattern config fails rather than silently usin
   assert.equal(malformedYaml.status, 1);
   assert.match(malformedYaml.stderr, /invalid frontmatter:/);
 });
+
+function dashboardFixture(t, prefix = '') {
+  const f = fixture(t);
+  f.git('remote', 'remove', 'origin'); // Rendering needs only the local registry.
+  const instance = resolve(f.root, prefix);
+  const write = (path, text) => f.write(`${prefix}${path}`, text);
+  write('HOFFICE.md', '---\nname: Example registry\n---\n');
+  const out = realpathSync(mkdtempSync(join(tmpdir(), 'hoffice-dashboard output-')));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  const render = () => f.run('render-dashboard.mjs', '--instance', instance, out);
+  const html = (path = 'index.html') => readFileSync(join(out, path), 'utf8');
+  return { ...f, instance, out, write, render, html };
+}
+
+function filesUnder(root) {
+  return Object.fromEntries(readdirSync(root, { recursive: true }).sort()
+    .filter(path => !path.split('/').includes('.git') && statSync(join(root, path)).isFile())
+    .map(path => [path, readFileSync(join(root, path), 'utf8')]));
+}
+
+function assertLocalHrefsWork(html, page) {
+  const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map(match => match[1].replaceAll('&amp;', '&'));
+  assert.ok(hrefs.length > 0, `no links in ${page}`);
+  for (const href of hrefs) {
+    const url = new URL(href, pathToFileURL(page));
+    assert.ok(['file:', 'https:', 'http:'].includes(url.protocol), `unsafe href: ${href}`);
+    if (url.protocol === 'file:') assert.ok(statSync(fileURLToPath(url)).isFile(), `broken local href: ${href}`);
+  }
+}
+
+for (const prefix of ['', 'memory space/hoffice/']) {
+  test(`dashboard at ${prefix || 'root'} renders a multi-project registry with deterministic output and working local hrefs`, (t) => {
+    const f = dashboardFixture(t, prefix);
+    // Write in reverse order to catch filesystem-order-dependent output.
+    f.write('projects/zeta/README.md', '# Zeta example\n\n| Field | Value |\n|---|---|\n| Owner | Second owner |\n');
+    f.write('projects/alpha/README.md', `# Alpha example
+| Field | Value |
+|---|---|
+| Owner | First owner |
+| Repos | \`repos/shared.md\` |
+| Documents | \`DOCS.md\` |
+| Tracker | [Work queue](https://tracker.example.test/alpha) |
+| Channels | [Discussion](https://chat.example.test/alpha) |
+`);
+    f.write('projects/alpha/STATE.md', `# Current state
+Last reviewed: 2026-05-02 by Example author.
+## Summary
+Authored summary with [design](notes/design%20notes.md#choice).
+## Open questions
+Who reviews the draft?
+## Next steps
+- Review the draft.
+## Architecture
+Architecture stays in the source.
+`);
+    f.write('projects/alpha/notes/design notes.md', '# Design\n\n## Choice\n');
+    f.write('projects/alpha/DOCS.md', '# Registry\n');
+    f.write('repos/shared.md', '# Shared repository\n\n| Field | Value |\n|---|---|\n| Origin | [Source](https://code.example.test/org/shared) |\n| Projects | `projects/alpha/`, `projects/zeta/` |\n');
+    f.write('repos/alpha.md', '# Alpha repository\n\n| Field | Value |\n|---|---|\n| Projects | `projects/alpha/` |\n');
+    f.write('repos/unrelated.md', '# Unrelated repository\n\n| Field | Value |\n|---|---|\n| Projects | `projects/alphabeta/` |\n');
+    const before = filesUnder(f.instance);
+    success(f.render());
+    const index = f.html(), alpha = f.html('projects/alpha.html'), zeta = f.html('projects/zeta.html');
+    assert.ok(index.indexOf('Alpha example') < index.indexOf('Zeta example'));
+    assert.ok(index.includes('href="projects/alpha.html"'));
+    assert.ok(index.includes('href="projects/zeta.html"'));
+    assert.match(index, /2026-05-02/);
+    assert.match(index, /Dates below are authored STATE review dates, not refresh times/);
+    assert.ok(index.includes('href="https://tracker.example.test/alpha"'));
+    assert.ok(index.includes('href="https://chat.example.test/alpha"'));
+    assert.match(alpha, /First owner/);
+    assert.match(alpha, /Authored summary/);
+    assert.match(alpha, /Who reviews the draft\?/);
+    assert.match(alpha, /Review the draft/);
+    assert.doesNotMatch(alpha, /Architecture stays in the source|Unrelated repository|Second owner/);
+    assert.match(alpha, /Alpha repository/);
+    assert.match(alpha, /Shared repository/);
+    assert.match(zeta, /Shared repository/);
+    assert.doesNotMatch(zeta, /Alpha repository|Unrelated repository|First owner/);
+    assert.ok(alpha.includes(`href="${pathToFileURL(join(f.instance, 'projects/alpha/notes/design notes.md')).href}#choice"`));
+    assert.ok(alpha.includes(`href="${pathToFileURL(join(f.instance, 'repos/shared.md')).href}"`));
+    for (const [path, html] of [['index.html', index], ['projects/alpha.html', alpha], ['projects/zeta.html', zeta]]) {
+      assert.match(html, /Registry only/);
+      assert.match(html, /No remote sources were queried/);
+      assertLocalHrefsWork(html, join(f.out, path));
+    }
+    const firstOutput = filesUnder(f.out);
+    assert.deepEqual(Object.keys(firstOutput), ['index.html', 'projects/alpha.html', 'projects/zeta.html']);
+    success(f.render());
+    assert.deepEqual(filesUnder(f.out), firstOutput, 'unchanged inputs produce byte-identical pages');
+    assert.deepEqual(filesUnder(f.instance), before, 'rendering does not change instance sources');
+  });
+}
+
+test('dashboard tolerates absent optional project files and empty registries without inventing status', (t) => {
+  const f = dashboardFixture(t);
+  success(f.render());
+  assert.match(f.html(), /No projects registered/);
+  mkdirSync(join(f.instance, 'projects/bare'), { recursive: true });
+  f.write('projects/minimal/README.md', '# Minimal example\n');
+  f.write('projects/minimal/STATE.md', '# State\nLast reviewed: 2026-02-30\n');
+  success(f.render());
+  for (const slug of ['bare', 'minimal']) {
+    const html = f.html(`projects/${slug}.html`);
+    assert.match(html, /Registry fields unavailable/);
+    assert.match(html, /No repository cards registered/);
+    assert.match(html, /Authoritative documents unavailable/);
+    assert.match(html, /Last reviewed: <span class="muted">Unavailable<\/span>/);
+    assert.match(html, /<h3>summary<\/h3><p>Unavailable\.<\/p>/);
+    assert.match(html, /<h2>Latest digests<\/h2><p><span class="muted">Unavailable<\/span>/);
+    assert.doesNotMatch(html, /2026-02-30|href="[^"]*(?:DOCS|DIGEST)\.md/);
+    assertLocalHrefsWork(html, join(f.out, `projects/${slug}.html`));
+  }
+  assert.match(f.html('projects/bare.html'), /<h1>bare<\/h1>/);
+});
+
+test('dashboard associates digests through config and selects the latest valid period_end, not filename', (t) => {
+  const f = dashboardFixture(t);
+  for (const slug of ['alpha', 'beta', 'daily']) f.write(`projects/${slug}/README.md`, `# ${slug}\n`);
+  f.write('digests/daily/DIGEST.md', '---\ntitle: Shared activity\nprojects:\n  - name: alpha\n  - name: beta\n---\n');
+  const latest = f.write('digests/daily/2026-01-01-daily.md', digest('2026-05-03T23:00:00Z', 'Status not summary', 'Newest valid summary'));
+  f.write('digests/daily/2026-12-31-daily.md', digest('2026-05-03T01:00:00Z', 'Old status', 'Older same-day summary'));
+  f.write('digests/daily/2026-12-30-daily.md', digest('2026-02-30', 'Invalid status', 'Invalid date summary'));
+  f.write('digests/daily/2026-12-30-daily.md', digest('2026-11-31', 'Invalid status', 'Invalid date summary'));
+  f.write('digests/daily/2026-12-28-daily.md', '# No frontmatter\n## Summary\nMissing metadata summary\n');
+  f.write('digests/daily/archive/2026-12-31-daily.md', digest('2026-12-31', 'Archived', 'Archived summary'));
+  f.write('digests/daily/README.md', digest('2026-12-31', 'Not an entry', 'Undated file summary'));
+  f.write('digests/unconfigured/2026-12-31-daily.md', digest('2026-12-31', 'Unconfigured', 'Unconfigured summary'));
+  f.write('digests/broken/DIGEST.md', '---\nprojects: [\n---\n');
+  const result = f.render();
+  success(result);
+  assert.match(result.stderr, /skipped digest: invalid period_end/);
+  assert.match(result.stderr, /skipped digest: missing frontmatter/);
+  assert.match(result.stderr, /skipped digest configuration/);
+  for (const slug of ['alpha', 'beta']) {
+    const html = f.html(`projects/${slug}.html`);
+    assert.match(html, /Shared activity \(2026-05-03\)/);
+    assert.match(html, /Newest valid summary/);
+    assert.ok(html.includes(`href="${pathToFileURL(latest).href}"`));
+    assert.doesNotMatch(html, /Older same-day summary|Invalid date summary|Malformed date summary|Missing metadata summary|Archived summary|Undated file summary|Unconfigured summary|Status not summary/);
+    assertLocalHrefsWork(html, join(f.out, `projects/${slug}.html`));
+  }
+  assert.doesNotMatch(f.html('projects/daily.html'), /Shared activity|Newest valid summary/);
+});
+
+test('dashboard shows only explicitly authoritative document rows', (t) => {
+  const f = dashboardFixture(t);
+  f.write('projects/alpha/README.md', '# Alpha\n');
+  f.write('projects/alpha/DOCS.md', `# Documents
+| Doc | Type | Link | Owner | Authority |
+|---|---|---|---|---|
+| Accepted design | TDD | [Design](https://docs.example.test/design#choice) | Example owner | authoritative: architecture |
+| Accepted policy | spec | [Policy](https://docs.example.test/policy) | Policy owner | Authoritative: policy |
+| Draft design | TDD | [Draft](https://docs.example.test/draft) | Draft owner | draft |
+| Background note | research note | [Note](https://docs.example.test/note) | Note owner | informational |
+| Retired spec | spec | [Old](https://docs.example.test/old) | Old owner | superseded |
+| Unscoped authority | spec | [Unscoped](https://docs.example.test/unscoped) | Unknown | authoritative |
+`);
+  f.write('projects/beta/README.md', '# Beta\n');
+  f.write('projects/beta/DOCS.md', '| Doc | Authority |\n|---|---|\n| Draft only | draft |\n');
+  success(f.render());
+  const html = f.html('projects/alpha.html');
+  assert.match(html, /Accepted design/);
+  assert.match(html, /Example owner/);
+  assert.match(html, /authoritative: architecture/);
+  assert.match(html, /Accepted policy/);
+  assert.ok(html.includes('href="https://docs.example.test/design#choice"'));
+  assert.doesNotMatch(html, /Draft design|Background note|Retired spec|Unscoped authority|docs\.example\.test\/(draft|note|old|unscoped)/);
+  assert.match(f.html('projects/beta.html'), /No authoritative documents registered/);
+});
+
+test('dashboard escapes source content and drops unsafe or missing link targets without losing labels', (t) => {
+  const f = dashboardFixture(t, 'memory space/hoffice/');
+  f.write('projects/unsafe/README.md', `# Example <script>alert(1)</script> & "review"
+| Field | Value |
+|---|---|
+| Owner | <img src=x onerror=alert(1)> |
+| Tracker | [Unsafe tracker](javascript:alert%281%29) |
+| Channels | [Safe channel](https://chat.example.test/?a=1&b=2) |
+`);
+  f.write('projects/unsafe/STATE.md', `# State
+## Summary
+<script>alert(2)</script>
+[Unsafe script](javascript:alert%282%29) [Unsafe data](data:text/html,evil) [Unsafe file transfer](ftp://files.example.test/x)
+[Missing local](notes/missing.md) ![Image label](https://images.example.test/x.png)
+## Open questions
+[Safe document](https://docs.example.test/?a=1&b=2)
+`);
+  f.write('projects/unsafe/DOCS.md', '| Doc | Link | Owner | Authority |\n|---|---|---|---|\n| <svg onload=alert(3)> | [Unsafe doc](javascript:alert%283%29) | A & B | authoritative: safety |\n');
+  f.write('digests/activity/DIGEST.md', '---\ntitle: "Activity <img src=x> & review"\nprojects:\n  - name: unsafe\n---\n');
+  f.write('digests/activity/2026-05-02-daily.md', digest('2026-05-02', 'Unused', '<img src=x onerror=alert(4)> [Unsafe digest](data:text/html,evil)'));
+  success(f.render());
+  const html = f.html('projects/unsafe.html');
+  for (const page of [f.html(), html]) {
+    assert.doesNotMatch(page, /<(?:script|img|svg)\b/i);
+    assert.doesNotMatch(page, /href="(?:javascript|data|ftp):/i);
+    assert.match(page, /Example &lt;script>alert\(1\)&lt;\/script> &amp; &quot;review&quot;/);
+    assertLocalHrefsWork(page, join(f.out, page === html ? 'projects/unsafe.html' : 'index.html'));
+  }
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)>/);
+  assert.match(html, /&lt;script>alert\(2\)&lt;\/script>/);
+  assert.match(html, /&lt;svg onload=alert\(3\)>/);
+  assert.match(html, /Activity &lt;img src=x> &amp; review/);
+  assert.match(html, /&lt;img src=x onerror=alert\(4\)>/);
+  for (const label of ['Unsafe tracker', 'Unsafe script', 'Unsafe data', 'Unsafe file transfer', 'Missing local', 'Image label', 'Unsafe doc', 'Unsafe digest']) {
+    assert.ok(html.includes(label), `lost label: ${label}`);
+  }
+  assert.doesNotMatch(html, /href="[^"]*notes\/missing\.md/);
+  assert.ok(html.includes('href="https://docs.example.test/?a=1&amp;b=2"'));
+  assert.ok(f.html().includes('href="https://chat.example.test/?a=1&amp;b=2"'));
+});
+
+test('dashboard rejects invalid invocation, unmarked roots and output paths that could overwrite instance sources', (t) => {
+  const f = dashboardFixture(t);
+  f.write('projects/alpha/README.md', '# Alpha\n');
+  const before = filesUnder(f.instance);
+  const usage = f.run('render-dashboard.mjs');
+  assert.equal(usage.status, 2);
+  assert.match(usage.stderr, /usage: render-dashboard\.mjs --instance/);
+  const unmarked = f.write('unmarked/README.md', '# Not an instance\n');
+  const missingMarker = f.run('render-dashboard.mjs', '--instance', resolve(unmarked, '..'), f.out);
+  assert.equal(missingMarker.status, 1);
+  assert.match(missingMarker.stderr, /instance root must contain HOFFICE\.md/);
+  rmSync(resolve(unmarked, '..'), { recursive: true });
+  symlinkSync(f.instance, join(f.out, 'instance-alias'), 'dir');
+  for (const out of [f.instance, join(f.instance, 'generated'), join(f.out, 'instance-alias', 'generated')]) {
+    const result = f.run('render-dashboard.mjs', '--instance', f.instance, out);
+    assert.equal(result.status, 1, `unsafe output accepted: ${out}`);
+    assert.match(result.stderr, /output directory must be outside the instance/);
+  }
+  assert.deepEqual(filesUnder(f.instance), before);
+});
+
+for (const destination of ['index.html', 'projects', 'projects/alpha.html']) {
+  test(`dashboard rejects a symlink at output ${destination} before writing any pages`, (t) => {
+    const f = dashboardFixture(t);
+    f.write('projects/alpha/README.md', '# Alpha sentinel\n');
+    f.write('projects/zeta/README.md', '# Zeta sentinel\n');
+    const before = filesUnder(f.instance);
+    const sentinel = destination === 'projects' ? join(f.instance, 'projects') : join(f.instance, 'HOFFICE.md');
+    if (destination === 'projects/alpha.html') mkdirSync(join(f.out, 'projects'));
+    symlinkSync(sentinel, join(f.out, destination), destination === 'projects' ? 'dir' : 'file');
+    const result = f.render();
+    assert.equal(result.status, 1, `output symlink accepted: ${destination}`);
+    assert.match(result.stderr, /output destination must not be a symlink/);
+    assert.deepEqual(filesUnder(f.instance), before, 'all instance sentinels must remain unchanged');
+    assert.deepEqual(readdirSync(f.out).sort(), [destination === 'index.html' ? 'index.html' : 'projects']);
+    if (destination === 'projects/alpha.html') {
+      assert.deepEqual(readdirSync(join(f.out, 'projects')), ['alpha.html'], 'no other project pages written before rejection');
+    }
+  });
+}

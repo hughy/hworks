@@ -69,6 +69,30 @@ cp -R ~/dev/hworks/hoffice/templates/instance ~/dev/my-projects   # then git ini
 
 `install.sh` links each launcher into `~/.agents/skills/`, writes the engine path to `~/.config/hoffice/home`, and adds each instance path given to `~/.config/hoffice/instances`. Re-run it after pulling hoffice if a launcher was added.
 
+## Local project dashboard
+
+Render an instance's local registry as static HTML. Install the renderer dependencies once from the engine checkout:
+
+```bash
+npm ci --ignore-scripts --prefix hoffice
+node hoffice/scripts/render-dashboard.mjs --instance "/path/to/project memory" "/path/to/dashboard output"
+```
+
+Run these commands from the directory containing `hoffice/`, or use the engine's absolute script path from any working directory. `--instance` must point to the directory containing `HOFFICE.md`, whether that directory is the git root or nested inside a repository. The output directory must be outside the instance, including when reached through a symlink. The renderer rejects symlinks at `index.html`, the output's `projects/` directory, or any generated project page before writing.
+
+The command creates `index.html` and `projects/<project>.html`, overwrites those pages on subsequent runs, and prints the index's `file:` URL. Open that URL in a browser. It does not edit the instance or publish anything. Pages link to local source files through absolute `file:` URLs, so keep the sources available on the machine where you view the dashboard. Treat the output as private instance content.
+
+The index lists directories under `projects/`, with titles and registry fields from each project's `README.md`, authored review dates from `STATE.md`, and links to the latest associated digests. Project pages add:
+
+- Repository cards whose `Projects` field lists that project.
+- The `Summary`, `Open questions`, and `Next steps` sections from `STATE.md`.
+- `DOCS.md` rows whose `Authority` starts with `authoritative:`.
+- Each associated digest's latest summary and source link.
+
+Digest association comes from `projects[].name` in `digests/<digest>/DIGEST.md`, not the digest directory name. See [the digest config template](templates/digest-config.md). The dashboard selects the dated Markdown entry with the latest valid `period_end` in each digest directory, ignoring archive subdirectories. It skips invalid entries and configs with a diagnostic on stderr. Missing optional files and fields appear as unavailable; a review date is authored source data, not a refresh timestamp.
+
+This phase reads local files only. Remote health, milestones, issue counts, PR counts, factory state, weekly goals, and briefings are unavailable. Links to remote sources do not mean those sources were queried.
+
 ## Source of truth
 
 1. Code and deployed configuration in the relevant repo.
