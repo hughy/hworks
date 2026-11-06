@@ -214,7 +214,8 @@ export function renderDashboard({ instance: instanceArg, out: outArg, variant = 
     try { url = new URL(raw, pathToFileURL(source)); } catch { return ''; }
     if (!['http:', 'https:', 'file:'].includes(url.protocol)) return '';
     if (url.protocol !== 'file:') return url.href;
-    const path = fileURLToPath(url);
+    let path;
+    try { path = fileURLToPath(url); } catch { return ''; }
     return exists(path) ? fileHref(path, from, url.hash) : '';
   }
   function markdown(text, source, from, { inline = false, tasks = false } = {}) {

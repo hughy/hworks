@@ -9,13 +9,16 @@ Any task that renders several prototype pages can use this. The manifest is JSON
                    "entry": "cards/index.html", "dir": "cards",
                    "baseline": false, "letter": "optional override"}]}
 
-Paths are relative to the manifest. Prototypes get letters A, B, C... in order; a baseline entry is
-shown for comparison without a letter. Unless --no-stamp is given, every .html file under a
-prototype's dir gets a small fixed badge with its letter that links back to the gallery; restamping
-replaces the old badge.
+Paths are relative to the manifest and must stay inside its directory. Prototypes get letters A, B,
+C... in order; a baseline entry is shown for comparison without a letter. Unless --no-stamp is given,
+each prototype's pages get a small fixed badge with its letter that links back to the gallery: every
+.html file under its dir when the manifest names one, otherwise only its entry page. Dirs must not
+overlap. Restamping replaces the old badge.
 """
 import argparse
 import html
+import re
+import urllib.parse
 import json
 import os
 import shutil
@@ -43,7 +46,7 @@ def load(manifest_path):
     if not isinstance(protos, list) or not protos:
         raise ValueError("manifest needs a non-empty prototypes list")
     n = 0
-    seen = set()
+    seen, labels = set(), set()
     for p in protos:
         for key in ("id", "title", "entry"):
             if not isinstance(p.get(key), str) or not p[key]:
@@ -56,7 +59,10 @@ def load(manifest_path):
         else:
             p["label"] = p.get("letter") or letter_for(n)
             n += 1
-        p.setdefault("dir", os.path.dirname(p["entry"]) or ".")
+        if p["label"] in labels:
+            raise ValueError(f"duplicate prototype letter: {p['label']}")
+        labels.add(p["label"])
+        p["anchor"] = f"p-{len(labels)}-" + re.sub(r"[^a-z0-9]+", "-", p["label"].lower()).strip("-")
         p.setdefault("approach", "")
         p.setdefault("differences", [])
         p.setdefault("features", [])
@@ -64,7 +70,34 @@ def load(manifest_path):
 
 
 def anchor(p):
-    return "p-" + p["label"].lower().replace(" ", "-")
+    return p["anchor"]
+
+
+def url(path):
+    """A relative filesystem path as a percent-encoded URL path."""
+    return urllib.parse.quote(path.replace(os.sep, "/"), safe="/")
+
+
+def inside(root, rel, what):
+    """Resolve rel under root, rejecting absolute paths, escapes, and symlinks along the way."""
+    if os.path.isabs(rel) or ".." in Path(rel).parts:
+        raise ValueError(f"{what} must be a relative path inside the manifest directory: {rel}")
+    path = root
+    for part in Path(rel).parts:
+        path = path / part
+        if path.is_symlink():
+            raise ValueError(f"{what} must not pass through a symlink: {path}")
+    return path
+
+
+def pages_for(root, p):
+    """The pages a prototype's badge goes on."""
+    if p.get("dir") is None:
+        return [inside(root, p["entry"], "entry")]
+    base = inside(root, p["dir"], "dir")
+    if not base.is_dir():
+        raise ValueError(f"prototype dir not found: {base}")
+    return [page for page in sorted(base.rglob("*.html")) if not page.is_symlink()]
 
 
 def badge(p, href):
@@ -80,20 +113,17 @@ def badge(p, href):
 
 
 def stamp(root, p, gallery):
-    """Insert or replace the badge in every page under the prototype's dir. Returns the page count."""
-    base = (root / p["dir"]).resolve()
-    if not base.is_dir():
-        raise ValueError(f"prototype dir not found: {base}")
+    """Insert or replace the badge on the prototype's pages. Returns the page count."""
     count = 0
-    for page in sorted(base.rglob("*.html")):
-        if page.is_symlink() or page.resolve() == gallery.resolve():
+    for page in pages_for(root, p):
+        if page.resolve() == gallery.resolve():
             continue
         text = page.read_text()
         start = text.find(BADGE_START)
         if start != -1:
             end = text.find(BADGE_END, start)
             text = text[:start] + text[end + len(BADGE_END):] if end != -1 else text[:start] + text[start + len(BADGE_START):]
-        href = os.path.relpath(gallery, page.parent) + "#" + anchor(p)
+        href = url(os.path.relpath(gallery, page.parent)) + "#" + anchor(p)
         tag = badge(p, href)
         i = text.lower().rfind("</body>")
         text = text[:i] + tag + "\n" + text[i:] if i != -1 else text + tag
@@ -151,7 +181,7 @@ COMPARE_JS = """
 def gallery_html(data, out_dir, root):
     e = html.escape
     protos = data["prototypes"]
-    rel = lambda p: os.path.relpath(root / p["entry"], out_dir)
+    rel = lambda p: url(os.path.relpath(root / p["entry"], out_dir))
     items = lambda xs: "".join(f"<li>{e(x)}</li>" for x in xs)
     letter = lambda p: f'<span class="letter{" base" if p.get("baseline") else ""}">{e(p["label"])}</span>'
     rows = "".join(
@@ -172,12 +202,14 @@ def gallery_html(data, out_dir, root):
         for i, p in enumerate(protos))
     jump = "".join(f'<a href="#{anchor(p)}">{letter(p)}</a>' for p in protos)
     lettered = [p for p in protos if not p.get("baseline")]
+    default = (f"{len(lettered)} prototypes, labelled {lettered[0]['label']} to {lettered[-1]['label']}. " if lettered else "") + \
+        "Every page carries its label in the bottom-left corner; click it to come back here."
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{e(data.get("title", "Prototypes"))}</title><style>{CSS}</style></head>
 <body><main>
 <h1>{e(data.get("title", "Prototypes"))}</h1>
-<p class="lede">{e(data.get("description", f"{len(lettered)} prototypes, labelled {lettered[0]['label']} to {lettered[-1]['label']}. Every page carries its letter in the bottom-left corner; click it to come back here."))}</p>
+<p class="lede">{e(data.get("description") or default)}</p>
 <nav class="jump" aria-label="Prototypes">{jump}</nav>
 <table><thead><tr><th></th><th>Prototype</th><th>Approach</th><th>Strengths</th></tr></thead><tbody>{rows}</tbody></table>
 <div class="compare"><h2>Compare side by side</h2><div class="bar"><label>Left <select aria-label="Left prototype">{options(0)}</select></label>
@@ -216,15 +248,25 @@ def main(argv=None):
         manifest = Path(args.manifest).resolve()
         root = manifest.parent
         data = load(manifest)
-        out = Path(args.out).resolve() if args.out else root / "index.html"
+        out = Path(os.path.abspath(args.out)) if args.out else root / "index.html"
+        if out.is_symlink():
+            raise ValueError(f"gallery output must not be a symlink: {out}")
+        out = out.parent.resolve() / out.name
+        owners = {}
         for p in data["prototypes"]:
-            if (root / p["entry"]).resolve() == out:
+            entry = inside(root, p["entry"], "entry")
+            if entry.resolve() == out:
                 raise ValueError(f"gallery would overwrite prototype entry {p['entry']}")
-            if not (root / p["entry"]).is_file():
+            if not entry.is_file():
                 raise ValueError(f"prototype entry not found: {p['entry']}")
+            for page in pages_for(root, p):
+                if page in owners:
+                    raise ValueError(f"prototypes {owners[page]} and {p['id']} would both stamp {page}; give them separate dirs")
+                owners[page] = p["id"]
+        page = gallery_html(data, out.parent, root)
         out.parent.mkdir(parents=True, exist_ok=True)
         stamped = 0 if args.no_stamp else sum(stamp(root, p, out) for p in data["prototypes"])
-        out.write_text(gallery_html(data, out.parent, root))
+        out.write_text(page)
     except (OSError, ValueError) as error:
         print(f"prototype-gallery: {error}", file=sys.stderr)
         return 1

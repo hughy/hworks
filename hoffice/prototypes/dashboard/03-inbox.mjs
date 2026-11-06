@@ -1,4 +1,4 @@
-import { stats, icon, filterScript, sharedCss } from './_shared.mjs';
+import { stats, icon, filterScript, sharedCss, tok } from './_shared.mjs';
 
 export const meta = {
   id: 'inbox',
@@ -30,12 +30,12 @@ export function index(ctx) {
   const groups = ctx.projects.map(p => {
     const s = stats(p, ctx);
     open += s.open; done += s.done;
-    const items = p.stepItems.map(i => `<li class="task${i.checked ? ' done' : ''}" data-search="${ctx.esc(i.text)}" data-status="${i.checked ? 'done' : 'open'}" data-project="${p.slug}"><input type="checkbox" disabled${i.checked ? ' checked' : ''} aria-label="${i.checked ? 'Done' : 'Open'}"><div>${ctx.markdown(i.text, p.state, from, { inline: true })}</div></li>`).join('');
+    const items = p.stepItems.map(i => `<li class="task${i.checked ? ' done' : ''}" data-search="${ctx.esc(i.text)}" data-status="${i.checked ? 'done' : 'open'}" data-project="${tok(p.slug)}"><input type="checkbox" disabled${i.checked ? ' checked' : ''} aria-label="${i.checked ? 'Done' : 'Open'}"><div>${ctx.markdown(i.text, p.state, from, { inline: true })}</div></li>`).join('');
     const prose = !s.total && p.narrative['next steps']?.trim()
-      ? `<div class="prose-only" data-search="${ctx.esc(p.narrative['next steps'])}" data-status="open" data-project="${p.slug}">Written as prose, not a list: ${ctx.markdown(p.narrative['next steps'].trim().split('\n')[0], p.state, from, { inline: true })} ${ctx.optionalLink('Open STATE', p.state, from)}</div>` : '';
-    return `<section class="group" data-group><h2>${icon(p)}${ctx.link(p.title, ctx.hrefTo(from, p.page))}<span class="count">${s.open} open</span></h2>${items ? `<ul class="tasks">${items}</ul>` : prose || `<p class="muted" data-search="" data-status="none" data-project="${p.slug}">No next steps recorded.</p>`}</section>`;
+      ? `<div class="prose-only" data-search="${ctx.esc(p.narrative['next steps'])}" data-status="open" data-project="${tok(p.slug)}">Written as prose, not a list: ${ctx.markdown(p.narrative['next steps'].trim().split('\n')[0], p.state, from, { inline: true })} ${ctx.optionalLink('Open STATE', p.state, from)}</div>` : '';
+    return `<section class="group" data-group><h2>${icon(p)}${ctx.link(p.title, ctx.hrefTo(from, p.page))}<span class="count">${s.open} open</span></h2>${items ? `<ul class="tasks">${items}</ul>` : prose || `<p class="muted" data-search="" data-status="none" data-project="${tok(p.slug)}">No next steps recorded.</p>`}</section>`;
   }).join('');
-  const rail = ctx.projects.map(p => `<button data-facet="project=${p.slug}" aria-pressed="false">${icon(p)}<span>${ctx.esc(p.title)}</span><span class="n">${p.steps.total - p.steps.done}</span></button>`).join('');
+  const rail = ctx.projects.map(p => `<button data-facet="project=${tok(p.slug)}" aria-pressed="false">${icon(p)}<span>${ctx.esc(p.title)}</span><span class="n">${p.steps.total - p.steps.done}</span></button>`).join('');
   return { title: 'Next steps', crumbs: ['Next steps'], body: `<div class="head"><h1>Next steps<span class="count">${open} open</span></h1><p class="sub">${done} done across ${ctx.projects.length} projects, read from each project's STATE. Checkboxes are read-only; edit STATE to change them.</p></div>
 <div class="toolbar"><input class="filter" data-filter placeholder="Filter next steps  ( / )" aria-label="Filter next steps"><button class="chip" data-facet="status=open" aria-pressed="false">Open</button><button class="chip" data-facet="status=done" aria-pressed="false">Done</button><span class="muted"><span data-count></span> shown</span></div>
 <div class="wrap"><nav class="rail" aria-label="Projects">${rail}</nav><div>${groups}</div></div>` };

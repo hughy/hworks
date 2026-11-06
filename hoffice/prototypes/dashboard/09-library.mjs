@@ -1,4 +1,4 @@
-import { hue, icon, filterScript, sharedCss } from './_shared.mjs';
+import { hue, icon, filterScript, sharedCss, tok } from './_shared.mjs';
 
 export const meta = {
   id: 'library',
@@ -30,12 +30,12 @@ export function index(ctx) {
   const kinds = [...new Set(docs.map(d => d.kind))].sort();
   const items = docs.map(d => {
     const p = ctx.projects.find(x => x.slug === d.owner);
-    return `<li data-search="${ctx.esc(`${d.title} ${d.rel}`)}" data-kind="${d.kind}" data-project="${d.owner ?? 'none'}"><time>${d.date || '—'}</time><div>${ctx.link(d.title, ctx.hrefTo('index.html', d.page), 't')}<span class="path">${ctx.esc(d.rel)}</span></div><div class="proj">${p ? `${icon(p)}${ctx.esc(p.title)}` : '<span>Instance</span>'}</div></li>`;
+    return `<li data-search="${ctx.esc(`${d.title} ${d.rel}`)}" data-kind="${tok(d.kind)}" data-project="${tok(d.owner ?? 'none')}"><time>${d.date || '—'}</time><div>${ctx.link(d.title, ctx.hrefTo('index.html', d.page), 't')}<span class="path">${ctx.esc(d.rel)}</span></div><div class="proj">${p ? `${icon(p)}${ctx.esc(p.title)}` : '<span>Instance</span>'}</div></li>`;
   }).join('');
   return { title: 'Library', crumbs: ['Library'], body: `<div class="head"><h1>Library<span class="count"><span data-count></span> of ${docs.length}</span></h1><p class="sub">Every Markdown document in the instance, rendered. READMEs omitted.</p></div>
 <div class="toolbar"><input class="filter" data-filter placeholder="Search titles and paths  ( / )" aria-label="Search documents"></div>
-<div class="facets"><span>Kind</span><div>${kinds.map(k => `<button class="chip" data-facet="kind=${k}" aria-pressed="false">${k} (${docs.filter(d => d.kind === k).length})</button>`).join('')}</div>
-<span>Project</span><div>${ctx.projects.map(p => `<button class="chip" data-facet="project=${p.slug}" aria-pressed="false" style="--h:${hue(p.slug)}">${ctx.esc(p.title)} (${p.files.filter(f => !f.readme).length})</button>`).join('')}</div></div>
+<div class="facets"><span>Kind</span><div>${kinds.map(k => `<button class="chip" data-facet="kind=${tok(k)}" aria-pressed="false">${ctx.esc(k)} (${docs.filter(d => d.kind === k).length})</button>`).join('')}</div>
+<span>Project</span><div>${ctx.projects.map(p => `<button class="chip" data-facet="project=${tok(p.slug)}" aria-pressed="false" style="--h:${hue(p.slug)}">${ctx.esc(p.title)} (${p.files.filter(f => !f.readme).length})</button>`).join('')}</div></div>
 <ol class="lib">${items}</ol>` };
 }
 
@@ -45,7 +45,7 @@ export function project(p, ctx) {
   for (const f of p.files.filter(f => !f.readme)) (groups[f.kind] ??= []).push(f);
   const order = ['root', 'decisions', 'sessions', 'notes', 'published'];
   const kinds = Object.keys(groups).sort((a, b) => (order.indexOf(a) + 99) % 99 - (order.indexOf(b) + 99) % 99 || a.localeCompare(b));
-  const index = `<section class="kinds"><h2>Documents<span class="count">${p.files.filter(f => !f.readme).length}</span></h2>${kinds.map(k => `<h3>${k === 'root' ? 'Core' : k} · ${groups[k].length}</h3><ul>${groups[k].sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.title.localeCompare(b.title)).map(f => `<li>${ctx.link(f.title, ctx.hrefTo(from, f.page))}${f.date ? ` <small class="muted">${f.date}</small>` : ''}</li>`).join('')}</ul>`).join('')}</section>`;
+  const index = `<section class="kinds"><h2>Documents<span class="count">${p.files.filter(f => !f.readme).length}</span></h2>${kinds.map(k => `<h3>${k === 'root' ? 'Core' : ctx.esc(k)} · ${groups[k].length}</h3><ul>${groups[k].sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.title.localeCompare(b.title)).map(f => `<li>${ctx.link(f.title, ctx.hrefTo(from, f.page))}${f.date ? ` <small class="muted">${f.date}</small>` : ''}</li>`).join('')}</ul>`).join('')}</section>`;
   const body = `${ctx.parts.head(p, from)}
 <div class="layout"><div>${ctx.parts.nextSteps(p, from)}${ctx.parts.section(p, 'summary', 'Summary', from)}${ctx.parts.section(p, 'open questions', 'Open questions', from)}</div>
 <aside>${index}${ctx.parts.properties(p, from)}${ctx.parts.repositories(p, from)}</aside></div>`;

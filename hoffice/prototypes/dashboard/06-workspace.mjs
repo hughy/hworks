@@ -1,4 +1,4 @@
-import { stats, icon, sharedCss } from './_shared.mjs';
+import { stats, icon, sharedCss, tok } from './_shared.mjs';
 
 export const meta = {
   id: 'workspace',
@@ -66,19 +66,19 @@ function sidebar(ctx, from, current) {
   return ctx.projects.map(p => {
     const groups = {};
     for (const f of p.files.filter(f => !f.readme)) (groups[f.kind] ??= []).push(f);
-    const target = from === 'index.html' ? `#${p.slug}` : `${ctx.hrefTo(from, 'index.html')}#${p.slug}`;
+    const target = from === 'index.html' ? `#${tok(p.slug)}` : `${ctx.hrefTo(from, 'index.html')}#${tok(p.slug)}`;
     return `<a class="proj" href="${ctx.esc(target)}" aria-current="${p.slug === current}">${icon(p)}<span>${ctx.esc(p.title)}</span><span class="n">${stats(p, ctx).open || ''}</span></a>
-<div class="tree${p.slug === current ? ' on' : ''}" data-for="${p.slug}">${Object.entries(groups).map(([kind, files]) => `<details${kind === 'root' ? ' open' : ''}><summary>${kind === 'root' ? 'Core' : kind} (${files.length})</summary>${files.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.title.localeCompare(b.title)).map(f => `<a href="${ctx.esc(ctx.hrefTo(from, f.page))}" title="${ctx.esc(f.title)}">${ctx.esc(f.title)}</a>`).join('')}</details>`).join('')}</div>`;
+<div class="tree${p.slug === current ? ' on' : ''}" data-for="${tok(p.slug)}">${Object.entries(groups).map(([kind, files]) => `<details${kind === 'root' ? ' open' : ''}><summary>${kind === 'root' ? 'Core' : ctx.esc(kind)} (${files.length})</summary>${files.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.title.localeCompare(b.title)).map(f => `<a href="${ctx.esc(ctx.hrefTo(from, f.page))}" title="${ctx.esc(f.title)}">${ctx.esc(f.title)}</a>`).join('')}</details>`).join('')}</div>`;
   }).join('');
 }
 
 export function index(ctx) {
-  const views = ctx.projects.map(p => `<div class="view" id="${p.slug}">${ctx.parts.projectBody(p, 'index.html').replace(ctx.remoteNote, '')}</div>`).join('');
+  const views = ctx.projects.map(p => `<div class="view" id="${tok(p.slug)}">${ctx.parts.projectBody(p, 'index.html').replace(ctx.remoteNote, '')}</div>`).join('');
   return { title: 'Projects', body: frame(ctx, 'index.html', sidebar(ctx, 'index.html'), views || '<p class="muted">No projects registered.</p>') };
 }
 
 export function project(p, ctx) {
-  return { title: p.title, body: frame(ctx, p.page, sidebar(ctx, p.page, p.slug), `<p class="note">This workspace shows projects in ${ctx.link('one page', `${ctx.hrefTo(p.page, 'index.html')}#${p.slug}`)}.</p>${ctx.parts.projectBody(p, p.page)}`) };
+  return { title: p.title, body: frame(ctx, p.page, sidebar(ctx, p.page, p.slug), `<p class="note">This workspace shows projects in ${ctx.link('one page', `${ctx.hrefTo(p.page, 'index.html')}#${tok(p.slug)}`)}.</p>${ctx.parts.projectBody(p, p.page)}`) };
 }
 
 export function doc(d, ctx) {

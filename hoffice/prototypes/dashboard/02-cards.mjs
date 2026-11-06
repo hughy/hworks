@@ -1,4 +1,4 @@
-import { stats, icon, tasks, ageLabel, ageClass, firstParagraph, sharedCss } from './_shared.mjs';
+import { stats, icon, tasks, ageLabel, ageClass, firstParagraph, sharedCss, tok } from './_shared.mjs';
 
 export const meta = {
   id: 'cards',
@@ -62,7 +62,7 @@ export function project(p, ctx) {
     ['summary', 'Summary', ctx.parts.section(p, 'summary', 'Summary', from)],
     ['questions', `Questions (${s.questions})`, ctx.parts.section(p, 'open questions', 'Open questions', from)],
     ['digests', 'Digests', ctx.parts.digests(p, from)],
-    ['documents', `Documents (${s.documents})`, `<section><h2>Documents</h2><ul>${p.files.filter(f => !f.readme).sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(f => `<li>${ctx.link(f.title, ctx.hrefTo(from, f.page))} <small class="muted">${f.kind}${f.date ? ` · ${f.date}` : ''}</small></li>`).join('')}</ul></section>`],
+    ['documents', `Documents (${s.documents})`, `<section><h2>Documents</h2><ul>${p.files.filter(f => !f.readme).sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(f => `<li>${ctx.link(f.title, ctx.hrefTo(from, f.page))} <small class="muted">${ctx.esc(f.kind)}${f.date ? ` · ${f.date}` : ''}</small></li>`).join('')}</ul></section>`],
   ];
   const body = `${ctx.parts.head(p, from)}
 <nav class="tabs" role="tablist">${panels.map(([id, label]) => `<a href="#${id}" role="tab">${label}</a>`).join('')}</nav>

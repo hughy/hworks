@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Renders the dashboard once per variant module into <out>/<id>/ and writes <out>/prototypes.json,
 // the manifest scripts/prototype-gallery.py turns into a lettered gallery.
-import { readdirSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readdirSync, statSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join, basename, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { renderDashboard } from './lib/dashboard.mjs';
@@ -25,6 +25,10 @@ const modules = inputs.flatMap(input => statSync(input).isDirectory()
   : [input]);
 try {
   const out = resolve(options.out);
+  const manifest = join(out, 'prototypes.json');
+  // The manifest is written last, so check it before any variant renders.
+  try { if (lstatSync(manifest).isSymbolicLink()) throw new Error(`output destination must not be a symlink: ${manifest}`); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
   mkdirSync(out, { recursive: true });
   const entries = [];
   const render = (id, variant, meta) => {
@@ -43,7 +47,6 @@ try {
       title: meta.title ?? basename(path, '.mjs'), approach: meta.approach ?? '',
       differences: meta.differences ?? [], features: meta.features ?? [] });
   }
-  const manifest = join(out, 'prototypes.json');
   writeFileSync(manifest, JSON.stringify({ title: options.title, prototypes: entries }, null, 2) + '\n');
   console.log(`${pathToFileURL(manifest).href}: ${entries.length} prototypes`);
 } catch (error) { console.error(`render-prototypes: ${error.message}`); process.exitCode = 1; }

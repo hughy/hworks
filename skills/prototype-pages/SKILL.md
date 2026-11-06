@@ -16,7 +16,7 @@ The contract between a page generator and the gallery is a manifest, `prototypes
                  "entry": "cards/index.html", "dir": "cards", "baseline": false}]}
 ```
 
-`../../scripts/prototype-gallery.py <manifest> --open` letters the prototypes in manifest order (a `baseline` entry is shown unlettered), stamps every page under each `dir` with a badge carrying its letter that links back to the gallery, writes the gallery (`index.html` beside the manifest: summary table, side-by-side compare, one section per prototype with a live preview), and opens the gallery plus every entry as tabs of one new browser window. `--print-open` prints that command instead; `--no-stamp` leaves pages untouched. Restamping replaces old badges, so rerun it after every render.
+`../../scripts/prototype-gallery.py <manifest> --open` letters the prototypes in manifest order (a `baseline` entry is shown unlettered), stamps each prototype's pages with a badge carrying its letter that links back to the gallery (every page under `dir`, or only the entry when `dir` is omitted; dirs must not overlap, and paths must stay inside the manifest directory without symlinks), writes the gallery (`index.html` beside the manifest: summary table, side-by-side compare, one section per prototype with a live preview), and opens the gallery plus every entry as tabs of one new browser window. `--print-open` prints that command instead; `--no-stamp` leaves pages untouched. Restamping replaces old badges, so rerun it after every render.
 
 ## Steps
 

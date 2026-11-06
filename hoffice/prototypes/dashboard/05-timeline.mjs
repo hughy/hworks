@@ -1,4 +1,4 @@
-import { hue, icon, filterScript, sharedCss } from './_shared.mjs';
+import { hue, icon, filterScript, sharedCss, tok } from './_shared.mjs';
 
 export const meta = {
   id: 'timeline',
@@ -25,7 +25,7 @@ export const css = sharedCss + `
 `;
 export const script = filterScript;
 
-const kinds = { sessions: 'Session', decisions: 'Decision', digests: 'Digest', published: 'Published', notes: 'Note' };
+const kinds = Object.assign(Object.create(null), { sessions: 'Session', decisions: 'Decision', digests: 'Digest', published: 'Published', notes: 'Note' });
 
 function weekOf(day) {
   const d = new Date(day + 'T00:00:00Z');
@@ -42,7 +42,7 @@ function feed(ctx, from, events) {
   }
   return [...weeks].map(([w, list]) => `<section class="week" data-group><h2>Week of ${w} · ${list.length}</h2><ol class="events">${list.map(e => {
     const p = ctx.projects.find(x => x.slug === e.owner);
-    return `<li style="--h:${hue(e.owner ?? e.kind)}" data-search="${ctx.esc(`${e.title} ${p?.title ?? ''}`)}" data-kind="${e.kind}" data-project="${e.owner ?? 'none'}"><time>${e.date}</time><div><span class="kind ${e.kind}">${kinds[e.kind] ?? e.kind}</span>${ctx.link(e.title, ctx.hrefTo(from, e.page))}<small>${p ? ctx.esc(p.title) : ctx.esc(e.rel.split('/').slice(0, 2).join('/'))}</small></div></li>`;
+    return `<li style="--h:${hue(e.owner ?? e.kind)}" data-search="${ctx.esc(`${e.title} ${p?.title ?? ''}`)}" data-kind="${tok(e.kind)}" data-project="${tok(e.owner ?? 'none')}"><time>${e.date}</time><div><span class="kind ${tok(e.kind)}">${kinds[e.kind] ?? ctx.esc(e.kind)}</span>${ctx.link(e.title, ctx.hrefTo(from, e.page))}<small>${p ? ctx.esc(p.title) : ctx.esc(e.rel.split('/').slice(0, 2).join('/'))}</small></div></li>`;
   }).join('')}</ol></section>`).join('');
 }
 
@@ -52,8 +52,8 @@ export function index(ctx) {
   const list = events(ctx.docs);
   const present = [...new Set(list.map(e => e.kind))];
   const toolbar = `<div class="toolbar"><input class="filter" data-filter placeholder="Filter events  ( / )" aria-label="Filter events">
-${present.map(k => `<button class="chip" data-facet="kind=${k}" aria-pressed="false">${kinds[k] ?? k}</button>`).join('')}
-<span class="muted">·</span>${ctx.projects.map(p => `<button class="chip" data-facet="project=${p.slug}" aria-pressed="false" style="--h:${hue(p.slug)}">${ctx.esc(p.title)}</button>`).join('')}
+${present.map(k => `<button class="chip" data-facet="kind=${tok(k)}" aria-pressed="false">${kinds[k] ?? ctx.esc(k)}</button>`).join('')}
+<span class="muted">·</span>${ctx.projects.map(p => `<button class="chip" data-facet="project=${tok(p.slug)}" aria-pressed="false" style="--h:${hue(p.slug)}">${ctx.esc(p.title)}</button>`).join('')}
 <span class="muted"><span data-count></span> shown</span></div>`;
   return { title: 'Activity', crumbs: ['Activity'], body: `<div class="head"><h1>Activity<span class="count">${list.length}</span></h1><p class="sub">Dated instance documents, newest first. Dates come from file names.</p></div>${toolbar}${feed(ctx, 'index.html', list)}` };
 }
