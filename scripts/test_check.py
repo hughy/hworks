@@ -69,6 +69,25 @@ class CheckTest(unittest.TestCase):
         p = self.run_check(1)
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
+    def test_skill_tests_run_and_symlinked_skills_are_skipped(self):
+        self.module("test_a", "pass\n")
+        own = os.path.join(self.root, "skills", "own", "tests")
+        os.makedirs(own)
+        with open(os.path.join(own, "test_own.py"), "w") as f:
+            f.write("import unittest\n\n\nclass T(unittest.TestCase):\n    def test_it(self):\n        self.fail('own-marker')\n")
+        linked = tempfile.mkdtemp(prefix="check-linked-")
+        self.addCleanup(shutil.rmtree, linked)
+        os.makedirs(os.path.join(linked, "tests"))
+        with open(os.path.join(linked, "tests", "test_linked.py"), "w") as f:
+            f.write("raise SystemExit('linked skill ran')\n")
+        os.symlink(linked, os.path.join(self.root, "skills", "linked"))
+        p = self.run_check(2)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertRegex(p.stdout, r"FAIL +py:own/test_own")
+        self.assertIn("own-marker", p.stdout)
+        self.assertNotIn("linked", p.stdout)
+        self.assertIn("1 of 2 parts failed", p.stdout)
+
     def test_empty_root_fails(self):
         p = self.run_check(1)
         self.assertEqual(p.returncode, 2)

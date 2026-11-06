@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the full hworks check with each part as its own process, up to CHECK_JOBS at once.
-# CHECK_ROOT overrides the repo root (its scripts/, workflows/, and extensions/ are checked).
+# CHECK_ROOT overrides the repo root (its scripts/, skills/*/tests/, workflows/, and extensions/ are checked).
 set -u
 
 root=${CHECK_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
@@ -26,6 +26,14 @@ for f in "$root"/scripts/test_*.py; do
   [ -e "$f" ] || continue
   m=$(basename "$f" .py)
   add "py:$m" "$root/scripts" "python3 -m unittest $m"
+done
+# A skill's own tests, so a skill directory stays self-contained. Symlinked skills (pstack) are not hworks code.
+for f in "$root"/skills/*/tests/test_*.py; do
+  [ -e "$f" ] || continue
+  s=$(basename "$(dirname "$(dirname "$f")")")
+  [ -L "$root/skills/$s" ] && continue
+  m=$(basename "$f" .py)
+  add "py:$s/$m" "$root/skills/$s/tests" "python3 -m unittest $m"
 done
 set -- "$root"/workflows/*.test.js
 if [ -e "$1" ]; then
