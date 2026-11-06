@@ -560,6 +560,7 @@ export function pages(ctx) { return [{ path: 'extra/all.html', title: 'All', cru
     [`export function pages() { return [{ path: './/index.html', title: 'x', body: '' }]; }`, /two pages render to index\.html/],
     [`export function pages() { return [{ path: 'INDEX.html', title: 'x', body: '' }]; }`, /two pages render to INDEX\.html/],
     [`export function pages() { return [{ path: 'stra\u00dfe.html', title: 'x', body: '' }]; }`, /only ASCII/],
+    [`export function pages() { return [{ path: 'Source/strasse.md.html', title: 'x', body: '' }]; }`, /not be under source\/ or projects\//],
   ]) {
     const out = join(f.out, 'bad');
     const bad = f.write('bad.mjs', body);

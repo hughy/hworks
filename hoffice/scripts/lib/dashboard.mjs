@@ -203,7 +203,7 @@ export function checkOutput(instanceArg, outArg) {
 // Renders the dashboard for one instance into `out`.
 // `variant` may supply: css (appended to baseCss, or the whole sheet with replaceCss), head, script,
 // bodyClass, shell(page, ctx), index(ctx), project(project, ctx), doc(doc, ctx), and pages(ctx)
-// returning extra { path, title, crumbs, body } pages (ASCII paths). Each renderer returns { title, crumbs, body }.
+// returning extra { path, title, crumbs, body } pages (ASCII paths outside source/ and projects/). Each renderer returns { title, crumbs, body }.
 export function renderDashboard({ instance: instanceArg, out: outArg, variant = {}, now = new Date() }) {
   const { instance, out } = checkOutput(instanceArg, outArg);
 
@@ -430,8 +430,8 @@ ${remoteNote}
   const css = variant.replaceCss ? (variant.css ?? '') : baseCss + (variant.css ?? '');
   const shell = variant.shell ? page => variant.shell(page, ctx) : undefined;
   const pages = new Map();
-  // Compare case-folded, so INDEX.html cannot overwrite index.html on a case-insensitive filesystem. Instance-derived
-  // names are real files on the same filesystem; variant paths are ASCII (below), where lowercasing is exact folding.
+  // Compare case-folded, so INDEX.html cannot overwrite index.html on a case-insensitive filesystem. Variant paths are
+  // ASCII, where lowercasing is exact folding, and stay out of the instance-named source/ and projects/ (below).
   const taken = new Set();
   const add = (destination, page) => {
     const key = destination.normalize('NFC').toLowerCase();
@@ -447,6 +447,8 @@ ${remoteNote}
     const path = posix.normalize(page.path);
     if (isAbsolute(path) || path.split('/').includes('..') || path === '.' || path.endsWith('/')) throw new Error(`variant page path must stay inside the output: ${page.path}`);
     if (!/^[A-Za-z0-9._/-]+$/.test(path)) throw new Error(`variant page path must use only ASCII letters, digits, and ._/-: ${page.path}`);
+    // source/ and projects/ hold pages named after instance files, which may alias an ASCII name on this filesystem.
+    if (/^(source|projects)\//i.test(path)) throw new Error(`variant page path must not be under source/ or projects/: ${page.path}`);
     add(path, page);
   }
 
