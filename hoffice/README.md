@@ -78,14 +78,15 @@ npm ci --ignore-scripts --prefix hoffice
 node hoffice/scripts/render-dashboard.mjs --instance "/path/to/project memory" "/path/to/dashboard output"
 ```
 
-Run these commands from the directory containing `hoffice/`, or use the engine's absolute script path from any working directory. `--instance` must point to the directory containing `HOFFICE.md`, whether that directory is the git root or nested inside a repository. The output directory must neither contain the instance nor be inside it, including when reached through a symlink. The renderer rejects symlinks at `index.html`, the output's `projects/` directory, or any generated project page before writing.
+Run these commands from the directory containing `hoffice/`, or use the engine's absolute script path from any working directory. `--instance` must point to the directory containing `HOFFICE.md`, whether that directory is the git root or nested inside a repository. The output directory must neither contain the instance nor be inside it, including when reached through a symlink. The renderer rejects symlinks at any generated page or at the output's `projects/` or `source/` directories, or their subdirectories, before writing.
 
-The command creates `index.html` and `projects/<project>.html`, overwrites those pages on subsequent runs, and prints the index's `file:` URL. Open that URL in a browser. It does not edit the instance or publish anything. Pages link to local source files through absolute `file:` URLs, so keep the sources available on the machine where you view the dashboard. Treat the output as private instance content.
+The command creates `index.html`, `projects/<project>.html`, and `source/<instance path>.html` for every Markdown file in the instance, skipping dot directories and symlinks. It overwrites those pages on later runs, leaves pages for deleted sources in place, and prints the index's `file:` URL. Open that URL in a browser. It does not edit the instance or publish anything. Links to instance Markdown open the rendered `source/` page, and each rendered page links to its raw file through an absolute `file:` URL. Other local links use `file:` URLs directly, so keep the sources available on the machine where you view the dashboard. Treat the output as private instance content.
 
-The index lists directories under `projects/`, with titles and registry fields from each project's `README.md`, authored review dates from `STATE.md`, and links to the latest associated digests. Project pages add:
+The index lists directories under `projects/`, with titles and registry fields from each project's `README.md`, open and done next-step counts and authored review dates from `STATE.md`, and links to the latest associated digests. Project pages add:
 
 - Repository cards whose `Projects` field lists that project.
-- The `Summary`, `Open questions`, and `Next steps` sections from `STATE.md`.
+- The `Next steps` section from `STATE.md` first, with list items shown as checkboxes. GFM task items (`- [x]`) show as done; the checkboxes are read-only and change only when `STATE.md` does.
+- The `Summary` and `Open questions` sections from `STATE.md`.
 - `DOCS.md` rows whose `Authority` starts with `authoritative:`.
 - Each associated digest's latest summary and source link.
 
