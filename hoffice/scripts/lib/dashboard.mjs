@@ -184,10 +184,6 @@ const withinPath = (parent, child) => {
   return !path || (path !== '..' && !path.startsWith('../') && !isAbsolute(path));
 };
 
-// Renders the dashboard for one instance into `out`.
-// `variant` may supply: css (appended to baseCss, or the whole sheet with replaceCss), head, script,
-// bodyClass, shell(page, ctx), index(ctx), project(project, ctx), doc(doc, ctx), and pages(ctx)
-// returning extra { path, title, crumbs, body } pages. Each renderer returns { title, crumbs, body }.
 // Resolves the instance root and an output directory, refusing an output that overlaps the instance.
 export function checkOutput(instanceArg, outArg) {
   const instance = realpathSync(resolve(instanceArg));
@@ -204,6 +200,10 @@ export function checkOutput(instanceArg, outArg) {
   return { instance, out };
 }
 
+// Renders the dashboard for one instance into `out`.
+// `variant` may supply: css (appended to baseCss, or the whole sheet with replaceCss), head, script,
+// bodyClass, shell(page, ctx), index(ctx), project(project, ctx), doc(doc, ctx), and pages(ctx)
+// returning extra { path, title, crumbs, body } pages (ASCII paths). Each renderer returns { title, crumbs, body }.
 export function renderDashboard({ instance: instanceArg, out: outArg, variant = {}, now = new Date() }) {
   const { instance, out } = checkOutput(instanceArg, outArg);
 
@@ -430,7 +430,8 @@ ${remoteNote}
   const css = variant.replaceCss ? (variant.css ?? '') : baseCss + (variant.css ?? '');
   const shell = variant.shell ? page => variant.shell(page, ctx) : undefined;
   const pages = new Map();
-  // Compare case-folded, so INDEX.html cannot overwrite index.html on a case-insensitive filesystem.
+  // Compare case-folded, so INDEX.html cannot overwrite index.html on a case-insensitive filesystem. Instance-derived
+  // names are real files on the same filesystem; variant paths are ASCII (below), where lowercasing is exact folding.
   const taken = new Set();
   const add = (destination, page) => {
     const key = destination.normalize('NFC').toLowerCase();
@@ -445,6 +446,7 @@ ${remoteNote}
     // Normalized, so ./index.html cannot slip past the duplicate check and replace index.html.
     const path = posix.normalize(page.path);
     if (isAbsolute(path) || path.split('/').includes('..') || path === '.' || path.endsWith('/')) throw new Error(`variant page path must stay inside the output: ${page.path}`);
+    if (!/^[A-Za-z0-9._/-]+$/.test(path)) throw new Error(`variant page path must use only ASCII letters, digits, and ._/-: ${page.path}`);
     add(path, page);
   }
 
