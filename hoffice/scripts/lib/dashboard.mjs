@@ -218,8 +218,18 @@ export function renderDashboard({ instance: instanceArg, out: outArg, variant = 
     try { path = fileURLToPath(url); } catch { return ''; }
     return exists(path) ? fileHref(path, from, url.hash) : '';
   }
-  function markdown(text, source, from, { inline = false, tasks = false } = {}) {
+  function markdown(text, source, from, { inline = false, tasks = false, anchors = false } = {}) {
     const renderer = new marked.Renderer();
+    if (anchors) {
+      // GitHub-style heading ids, so links like notes/design.md#choice land on the heading.
+      const used = new Map();
+      renderer.heading = function ({ tokens, depth, text }) {
+        const base = text.toLowerCase().replace(/<[^>]*>/g, '').replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s/g, '-');
+        const n = used.get(base) ?? 0;
+        used.set(base, n + 1);
+        return `<h${depth} id="${esc(n ? `${base}-${n}` : base)}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
+      };
+    }
     renderer.html = ({ text }) => esc(text);
     renderer.image = ({ text }) => esc(text);
     renderer.link = function ({ href: raw, tokens }) {
@@ -369,7 +379,7 @@ ${parts.sources(project, from)}
           text = body;
         } catch { props = `<pre><code>${esc(front[0])}</code></pre>`; text = text.slice(front[0].length); }
       }
-      return { props, html: markdown(text, doc.source, from), title: text.match(/^# (.+)$/m)?.[1] ?? basename(doc.source) };
+      return { props, html: markdown(text, doc.source, from, { anchors: true }), title: text.match(/^# (.+)$/m)?.[1] ?? basename(doc.source) };
     },
   };
 

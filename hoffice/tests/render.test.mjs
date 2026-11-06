@@ -520,8 +520,8 @@ for (const destination of ['index.html', 'projects', 'projects/alpha.html', 'sou
 function variantFixture(t) {
   const f = dashboardFixture(t);
   f.write('projects/alpha/README.md', '# Alpha <one>\n\nAlpha lead.\n\n| Field | Value |\n|---|---|\n| Tracker | [Board](https://tracker.example.test/alpha) |\n');
-  f.write('projects/alpha/STATE.md', '# Alpha state\n\nLast reviewed: 2026-05-01 by test.\n\n## Summary\n\nAlpha summary.\n\n## Open questions\n\n- Which <way>?\n\n## Next steps\n\n- [x] Ship the first part\n- Write the [design](notes/design.md)\n');
-  f.write('projects/alpha/notes/design.md', '# Design note\n');
+  f.write('projects/alpha/STATE.md', '# Alpha state\n\nLast reviewed: 2026-05-01 by test.\n\n## Summary\n\nAlpha summary.\n\n## Open questions\n\n- Which <way>?\n\n## Next steps\n\n- [x] Ship the first part\n- Write the [design](notes/design.md#the-choice)\n');
+  f.write('projects/alpha/notes/design.md', '# Design note\n\n## The choice\n\n## The choice\n');
   f.write('projects/alpha/sessions/2026-05-02-kickoff.md', '# Kickoff\n');
   f.write('projects/beta/README.md', '# Beta\n');
   f.write('projects/beta/STATE.md', '# Beta state\n\n## Next steps\n\nNone agreed. [bad](file:///tmp/%2Fbad)\n');
@@ -529,6 +529,9 @@ function variantFixture(t) {
   f.write('projects/q"<s>/README.md', '# Hostile\n');
   f.write('projects/q"<s>/STATE.md', '# State\n\n## Next steps\n\n- Step\n\n## Open questions\n\n- Q\n');
   f.write('projects/q"<s>/n"<k>/2026-05-03-x.md', '# X\n');
+  // Kinds that collide with Object.prototype names, and slugs a lossy token encoding would merge.
+  for (const kind of ['constructor', '__proto__', 'toString']) f.write(`projects/alpha/${kind}/note.md`, '# Note\n');
+  for (const slug of ['x.y', 'x_2e_y']) f.write(`projects/${slug}/README.md`, `# ${slug}\n`);
   return f;
 }
 
@@ -548,6 +551,8 @@ export function pages(ctx) { return [{ path: 'extra/all.html', title: 'All', cru
   assert.match(f.html('projects/alpha.html'), /<p id="custom"><\/p><div class="head"><h1>Alpha &lt;one><\/h1>/);
   assert.match(f.html('extra/all.html'), /<a href="\.\.\/index\.html">Projects<\/a>/);
   for (const page of ['index.html', 'projects/alpha.html', 'extra/all.html']) assertLocalHrefsWork(f.html(page), join(f.out, page));
+  assert.match(f.html('projects/alpha.html'), /href="\.\.\/source\/projects\/alpha\/notes\/design\.md\.html#the-choice"/);
+  assert.match(f.html('source/projects/alpha/notes/design.md.html'), /<h2 id="the-choice">The choice<\/h2>\n<h2 id="the-choice-1">/);
 
   for (const [body, error] of [
     [`export function pages() { return [{ path: '../escape.html', title: 'x', body: '' }]; }`, /must stay inside the output/],
@@ -571,6 +576,9 @@ test('render-prototypes renders every bundled variant with a manifest and workin
   const modules = readdirSync(variants).filter(n => n.endsWith('.mjs') && !n.startsWith('_'));
   assert.equal(manifest.prototypes.length, modules.length + 1);
   assert.equal(manifest.prototypes[0].baseline, true);
+  const ids = [...readFileSync(join(f.out, 'workspace', 'index.html'), 'utf8').matchAll(/<div class="view" id="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(new Set(ids).size, ids.length, `workspace view ids collide: ${ids}`);
+  assert.equal(ids.length, 5);
   for (const p of manifest.prototypes) {
     assert.ok(p.title && p.entry === `${p.id}/index.html`, JSON.stringify(p));
     if (!p.baseline) assert.ok(p.approach && p.differences.length && p.features.length, `${p.id} needs approach, differences and features`);

@@ -64,7 +64,7 @@ function frame(ctx, from, side, main) {
 
 function sidebar(ctx, from, current) {
   return ctx.projects.map(p => {
-    const groups = {};
+    const groups = Object.create(null);
     for (const f of p.files.filter(f => !f.readme)) (groups[f.kind] ??= []).push(f);
     const target = from === 'index.html' ? `#${tok(p.slug)}` : `${ctx.hrefTo(from, 'index.html')}#${tok(p.slug)}`;
     return `<a class="proj" href="${ctx.esc(target)}" aria-current="${p.slug === current}">${icon(p)}<span>${ctx.esc(p.title)}</span><span class="n">${stats(p, ctx).open || ''}</span></a>

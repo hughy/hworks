@@ -41,7 +41,7 @@ export function index(ctx) {
 
 export function project(p, ctx) {
   const from = p.page;
-  const groups = {};
+  const groups = Object.create(null);
   for (const f of p.files.filter(f => !f.readme)) (groups[f.kind] ??= []).push(f);
   const order = ['root', 'decisions', 'sessions', 'notes', 'published'];
   const kinds = Object.keys(groups).sort((a, b) => (order.indexOf(a) + 99) % 99 - (order.indexOf(b) + 99) % 99 || a.localeCompare(b));

@@ -45,7 +45,7 @@ export function hue(slug) {
   return h;
 }
 // A token safe in ids, classes, URL fragments, and space-separated data attributes.
-export const tok = value => String(value).replace(/[^A-Za-z0-9_-]/g, ch => `_${ch.codePointAt(0).toString(16)}_`);
+export const tok = value => String(value).replace(/[^A-Za-z0-9-]/g, ch => `_${ch.codePointAt(0).toString(16)}_`);
 
 export const icon = project => `<span class="icon" style="--h:${hue(project.slug)}" aria-hidden="true">${[...project.title][0]?.toUpperCase() ?? '?'}</span>`;
 
