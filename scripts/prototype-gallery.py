@@ -14,6 +14,10 @@ C... in order; a baseline entry is shown for comparison without a letter. Unless
 each prototype's pages get a small fixed badge with its letter that links back to the gallery: every
 .html file under its dir when the manifest names one, otherwise only its entry page. Dirs must not
 overlap. Restamping replaces the old badge.
+
+--shots <dir> then screenshots each prototype with headless Chrome: its entry page plus the first
+--inner-pages pages under its dir that the entry links to, at every --viewports size. --print-shots
+lists those screenshots without running Chrome.
 """
 import argparse
 import html
@@ -24,10 +28,16 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
 from pathlib import Path
 
 BADGE_START, BADGE_END = "<!--prototype-badge-->", "<!--/prototype-badge-->"
 CHROMIUM = ["Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge", "Arc"]
+HEADLESS = ["Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge"]
+HEADLESS_EXES = ["google-chrome", "chromium", "chromium-browser", "brave-browser", "microsoft-edge"]
+SHOT_TIMEOUT = 60
 
 
 def letter_for(n):
@@ -235,6 +245,106 @@ def open_command(urls, browser=None, platform=sys.platform):
     return ["xdg-open", urls[0]]
 
 
+def chrome_path(chrome=None, platform=sys.platform):
+    """The headless Chrome executable: --chrome when given, else the first installed Chromium browser."""
+    if chrome:
+        found = shutil.which(chrome)
+        if not found:
+            raise ValueError(f"browser executable not found: {chrome}")
+        return found
+    if platform == "darwin":
+        for app in HEADLESS:
+            exe = Path(f"/Applications/{app}.app/Contents/MacOS/{app}")
+            if exe.is_file():
+                return str(exe)
+    for exe in HEADLESS_EXES:
+        if shutil.which(exe):
+            return shutil.which(exe)
+    raise ValueError("no headless Chrome found; pass --chrome <executable>")
+
+
+def parse_viewports(raw):
+    sizes = []
+    for v in raw.split(","):
+        m = re.fullmatch(r"(\d+)x(\d+)", v.strip())
+        if not m or not int(m[1]) or not int(m[2]):
+            raise ValueError(f"bad viewport {v!r}; use WxH such as 1280x900")
+        sizes.append((int(m[1]), int(m[2])))
+    return sizes
+
+
+class LinkParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.paths = []
+
+    def handle_starttag(self, tag, attrs):
+        for key, value in attrs:
+            parts = urllib.parse.urlsplit(value or "") if tag == "a" and key == "href" else None
+            if parts and parts.path and not parts.scheme and not parts.netloc:
+                self.paths.append(urllib.parse.unquote(parts.path))
+
+
+def linked_paths(text):
+    """Relative link paths of the <a> tags in an HTML page, in document order."""
+    parser = LinkParser()
+    parser.feed(text)
+    parser.close()
+    return parser.paths
+
+
+def shot_pages(root, p, inner):
+    """The entry page, then up to inner pages it owns: those the entry links to first, then the rest in path order."""
+    entry = inside(root, p["entry"], "entry")
+    if p.get("dir") is None or inner <= 0:
+        return [entry]
+    owned = {page.resolve(): page for page in pages_for(root, p)}
+    owned.pop(entry.resolve(), None)
+    picked = []
+    for rel in linked_paths(entry.read_text()):
+        page = owned.get((entry.parent / rel).resolve())
+        if page and page not in picked:
+            picked.append(page)
+    picked += [page for page in owned.values() if page not in picked]
+    return [entry] + picked[:inner]
+
+
+def shot_jobs(root, data, out_dir, sizes, inner):
+    return [{"label": p["label"], "page": page, "rel": os.path.relpath(page, root), "size": f"{w}x{h}",
+             "png": out_dir / f"{p['anchor']}-{n}-{w}x{h}.png"}
+            for p in data["prototypes"] for n, page in enumerate(shot_pages(root, p, inner)) for w, h in sizes]
+
+
+def frame_html(job):
+    """A page that holds the prototype page in an iframe of exactly the viewport size. Headless Chrome's
+    --window-size sets the outer window and keeps the layout at least 500px wide; an iframe's viewport is exact."""
+    w, h = job["size"].split("x")
+    return (f'<!DOCTYPE html><html><body style="margin:0;overflow:hidden"><iframe src="{html.escape(job["page"].as_uri())}"'
+            f' style="display:block;border:0;width:{w}px;height:{h}px"></iframe></body></html>')
+
+
+def shot_command(chrome, job, work):
+    """The Chrome command that screenshots work/frame.html, written by take() from frame_html(job)."""
+    w, h = job["size"].split("x")
+    return [chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
+            f"--user-data-dir={work}/profile", f"--window-size={w},{h}", "--virtual-time-budget=3000",
+            f"--screenshot={job['png']}", f"file://{urllib.parse.quote(str(work))}/frame.html"]
+
+
+def take(chrome, job):
+    """Screenshot one page with a fresh profile. Returns an error message, or None when the PNG was written."""
+    job["png"].unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(prefix="prototype-shot-") as work:
+        (Path(work) / "frame.html").write_text(frame_html(job))
+        try:
+            proc = subprocess.run(shot_command(chrome, job, work), capture_output=True, text=True, timeout=SHOT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return f"timed out after {SHOT_TIMEOUT}s"
+    if job["png"].is_file() and job["png"].stat().st_size:
+        return None
+    return (proc.stderr.strip().splitlines() or [f"no screenshot written, exit {proc.returncode}"])[-1]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("manifest")
@@ -243,11 +353,21 @@ def main(argv=None):
     ap.add_argument("--open", action="store_true", help="open the gallery and every prototype in a new browser window")
     ap.add_argument("--print-open", action="store_true", help="print the open command instead of running it")
     ap.add_argument("--browser", help="browser application or executable name")
+    ap.add_argument("--shots", metavar="DIR", help="screenshot every prototype into DIR with headless Chrome")
+    ap.add_argument("--viewports", default="1280x900", help="comma-separated WxH sizes for --shots (default: 1280x900)")
+    ap.add_argument("--inner-pages", type=int, default=1, help="pages besides the entry to shoot per prototype (default: 1)")
+    ap.add_argument("--chrome", help="headless Chrome executable for --shots (default: first one found)")
+    ap.add_argument("--print-shots", action="store_true", help="list the --shots screenshots without running Chrome")
     args = ap.parse_args(argv)
     try:
         manifest = Path(args.manifest).resolve()
         root = manifest.parent
         data = load(manifest)
+        if args.print_shots and not args.shots:
+            raise ValueError("--print-shots needs --shots <dir>")
+        if args.shots:
+            sizes = parse_viewports(args.viewports)
+            chrome = chrome_path(args.chrome)
         out = Path(os.path.abspath(args.out)) if args.out else root / "index.html"
         if out.is_symlink():
             raise ValueError(f"gallery output must not be a symlink: {out}")
@@ -273,6 +393,24 @@ def main(argv=None):
     print(f"{out.as_uri()}: {len(data['prototypes'])} prototypes, {stamped} pages stamped")
     for p in data["prototypes"]:
         print(f"  {p['label']:>8}  {p['title']}  {(root / p['entry']).as_uri()}")
+    if args.shots:
+        shots = Path(os.path.abspath(args.shots))
+        jobs = shot_jobs(root, data, shots, sizes, args.inner_pages)
+        if args.print_shots:
+            for job in jobs:
+                print(f"  shot {job['label']:>8}  {job['rel']}  {job['size']}  {job['png']}")
+        else:
+            shots.mkdir(parents=True, exist_ok=True)
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                errors = list(pool.map(lambda job: take(chrome, job), jobs))
+            for job, error in zip(jobs, errors):
+                print(f"  shot {job['label']:>8}  {job['rel']}  {job['size']}  {error or job['png']}")
+            failed = [f"{job['rel']} at {job['size']}: {error}" for job, error in zip(jobs, errors) if error]
+            print(f"{len(jobs) - len(failed)} of {len(jobs)} screenshots in {shots}")
+            if failed:
+                for line in failed:
+                    print(f"prototype-gallery: screenshot failed: {line}", file=sys.stderr)
+                return 1
     if args.open or args.print_open:
         cmd = open_command([out.as_uri()] + [(root / p["entry"]).as_uri() for p in data["prototypes"]], args.browser)
         if args.print_open:

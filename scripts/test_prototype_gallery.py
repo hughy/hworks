@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import shutil
+import zlib
 import os
 import subprocess
 import sys
@@ -12,6 +14,13 @@ SCRIPT = os.path.join(HERE, "prototype-gallery.py")
 spec = importlib.util.spec_from_file_location("prototype_gallery", SCRIPT)
 gallery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gallery)
+
+def _has_chrome():
+    try:
+        return bool(gallery.chrome_path())
+    except ValueError:
+        return False
+
 
 BAD = '<b>&"x\'</b>'
 
@@ -173,6 +182,95 @@ class PrototypeGalleryTest(unittest.TestCase):
         result = self.run_cli("--out", str(self.root / "one" / "index.html"))
         self.assertEqual(result.returncode, 1)
         self.assertIn("would overwrite", result.stderr)
+
+
+class PrototypeShotsTest(unittest.TestCase):
+    """--shots, run against a stand-in Chrome that writes the --screenshot file, or fails for pages under two/."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        for pid in ("one", "two"):
+            (self.root / pid / "a").mkdir(parents=True)
+            (self.root / pid / "a" / "first.html").write_text("<html><body>first</body></html>")
+            (self.root / pid / "z.html").write_text("<html><body>linked</body></html>")
+            (self.root / pid / "index.html").write_text('<html><body><a href="https://x/y.html">x</a><a href = \'z.html#top\'>z</a></body></html>')
+        self.manifest = self.root / "prototypes.json"
+        self.manifest.write_text(json.dumps({"prototypes": [
+            {"id": "one", "title": "one", "entry": "one/index.html", "dir": "one"},
+            {"id": "two", "title": "two", "entry": "two/index.html"}]}))
+        self.chrome = self.root / "fake-chrome"
+        self.chrome.write_text(f"#!{sys.executable}\n" + (
+            "import sys\n"
+            "from urllib.parse import unquote\n"
+            "frame = open(unquote(sys.argv[-1][len('file://'):])).read()\n"
+            "if '/two/' in frame: sys.exit('cannot render two')\n"
+            "out = next(a for a in sys.argv if a.startswith('--screenshot='))[len('--screenshot='):]\n"
+            "open(out, 'wb').write(b'png')\n"))
+        self.chrome.chmod(0o755)
+        self.shots = self.root / "shots"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, SCRIPT, str(self.manifest), "--shots", str(self.shots), "--chrome", str(self.chrome), *args],
+                              capture_output=True, text=True)
+
+    def test_print_shots_takes_the_entry_then_the_pages_it_links_to_at_each_viewport(self):
+        result = self.run_cli("--print-shots", "--viewports", "1280x900, 390x844", "--inner-pages", "2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        shots = [line.split() for line in result.stdout.splitlines() if line.startswith("  shot ")]
+        self.assertEqual([s[2:4] for s in shots], [["one/index.html", "1280x900"], ["one/index.html", "390x844"],
+                                                   ["one/z.html", "1280x900"], ["one/z.html", "390x844"],
+                                                   ["one/a/first.html", "1280x900"], ["one/a/first.html", "390x844"],
+                                                   ["two/index.html", "1280x900"], ["two/index.html", "390x844"]])
+        pngs = [s[4] for s in shots]
+        self.assertEqual(len(set(pngs)), len(pngs))
+        self.assertFalse(self.shots.exists())
+        one = self.run_cli("--print-shots").stdout
+        self.assertIn("one/z.html", one)
+        self.assertNotIn("first.html", one)
+        self.assertNotIn("one/z.html", self.run_cli("--print-shots", "--inner-pages", "0").stdout)
+
+    def test_shots_report_each_png_and_fail_when_chrome_writes_none(self):
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("2 of 3 screenshots", result.stdout)
+        self.assertIn("screenshot failed: two/index.html at 1280x900: cannot render", result.stderr)
+        self.assertEqual(sorted(p.name for p in self.shots.iterdir()), ["p-1-a-0-1280x900.png", "p-1-a-1-1280x900.png"])
+
+    def test_bad_shot_options_fail_before_writing(self):
+        for args, message in [(("--viewports", "1280"), "bad viewport"), (("--chrome", "no-such-chrome-xyz"), "not found")]:
+            result = subprocess.run([sys.executable, SCRIPT, str(self.manifest), "--shots", str(self.shots), *args], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, args)
+            self.assertIn(message, result.stderr)
+        result = subprocess.run([sys.executable, SCRIPT, str(self.manifest), "--print-shots"], capture_output=True, text=True)
+        self.assertIn("needs --shots", result.stderr)
+        self.assertFalse((self.root / "index.html").exists())
+
+    @unittest.skipUnless(_has_chrome(), "no headless Chrome")
+    def test_real_chrome_lays_out_at_the_requested_viewport(self):
+        # Red at the 390px viewport, blue otherwise; bare --window-size keeps the layout 500px wide and shows blue.
+        (self.root / "one" / "index.html").write_text(
+            "<html><head><style>html{background:#00f}@media (max-width:450px){html{background:#f00}}</style></head><body></body></html>")
+        self.manifest.write_text(json.dumps({"prototypes": [{"id": "one", "title": "one", "entry": "one/index.html"}]}))
+        result = subprocess.run([sys.executable, SCRIPT, str(self.manifest), "--no-stamp", "--shots", str(self.shots),
+                                 "--viewports", "390x844,1280x900"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(first_pixel(self.shots / "p-1-a-0-390x844.png"), (255, 0, 0))
+        self.assertEqual(first_pixel(self.shots / "p-1-a-0-1280x900.png"), (0, 0, 255))
+
+
+def first_pixel(png):
+    """RGB of the top-left pixel. Every PNG filter leaves the first pixel of the first row unchanged."""
+    data, pos, idat = png.read_bytes(), 8, b""
+    while pos < len(data):
+        size, kind = int.from_bytes(data[pos:pos + 4], "big"), data[pos + 4:pos + 8]
+        if kind == b"IDAT":
+            idat += data[pos + 8:pos + 8 + size]
+        pos += 12 + size
+    return tuple(zlib.decompress(idat)[1:4])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,23 @@
+/* Styles for prototype-kit.js plus age badges and chips. Inline in a <style> after the page's base sheet.
+   Colours come from custom properties; the defaults below lose to any :root rule that sets them.
+   Age badges: <span class="age fresh|aging|stale|unknown">. Chips: <span class="chip"> or <button class="chip" data-facet>.
+   Filter box: <input class="filter" data-filter> in a .toolbar. Key hints: <span class="kbd">/</span>. */
+:where(:root) { --fg: #1b1c1f; --muted: #6b6f76; --line: #e8e8ec; --soft: #f6f6f8; --bg: #fff; --accent: #5e6ad2; --accent-soft: #f1f2fc; }
+.age { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 12px; line-height: 19px; white-space: nowrap; }
+.age.fresh { background: #e7f6ec; color: #1f7a3d; }
+.age.aging { background: #fdf3dc; color: #8a5a00; }
+.age.stale { background: #fde8e8; color: #b42318; }
+.age.unknown { background: var(--soft); color: var(--muted); }
+.chip { display: inline-block; padding: 0 8px; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; line-height: 20px; color: var(--muted); background: var(--bg); white-space: nowrap; }
+button.chip { cursor: pointer; font: inherit; font-size: 12px; }
+button.chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+input.filter { width: 100%; max-width: 360px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: var(--bg); color: var(--fg); }
+input.filter:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
+.kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; font: 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+[hidden] { display: none !important; }
+.cursor { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tabs { display: flex; gap: 2px; margin: 0 0 20px; border-bottom: 1px solid var(--line); }
+.tabs a { padding: 8px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: 13px; }
+.tabs a[aria-selected="true"] { border-color: var(--accent); color: var(--fg); font-weight: 500; }
+.panel:not(.on) { display: none; }
