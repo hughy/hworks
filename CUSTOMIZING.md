@@ -109,10 +109,30 @@ my-overlay/
   models.d/<name>.conf      profiles for your model provider
   adapters/<harness>.md     tool mappings for your harness
   skills/<skill>/SKILL.md   skills that do not belong in hworks
+  global/AGENTS.md          guidance that names private systems
+  hooks/                    git hooks for your hworks clone, with a private deny list
+  hoffice/                  a hoffice instance for project memory (optional)
   scripts/install.sh        links the files above into place
+  scripts/check.sh          the overlay's gate
 ```
 
 `install.sh` links `models.d/<name>.conf` into `<hworks>/models.d/` and `adapters/<harness>.md` into `<hworks>/adapters/local/`. It also links each skill into a skills directory that your harness loads, or you add `my-overlay/skills` to `skills` in pi settings. Read the hworks path from an environment variable with a default, and refuse to overwrite a destination that is not a symlink. The overlay depends on hworks. hworks never depends on the overlay.
+
+The other parts are for content that must stay out of public hworks:
+
+- `global/AGENTS.md`: `install.sh` links it to `~/AGENTS.md`. pi loads that file after `~/.pi/agent/AGENTS.md` in any directory under `~`; Claude Code and Codex do not load it. Keep rules that name private systems here, not in hworks' `global/AGENTS.md`.
+- `hooks/`: a deny list of private terms cannot live in hworks, because the list would leak them itself. `install.sh` links each hook into `<hworks>/.git/hooks/`, where it scans commits and pushes to hworks. Git ignores `.git/hooks/` while `core.hooksPath` is set, so leave it unset for that clone or point it at the overlay's `hooks/`.
+- `hoffice/`: a directory instance whose projects, repo cards, and extension files may name private systems. Create it as `hoffice/README.md` describes under "New instance". `install.sh` registers it by running `<hworks>/hoffice/scripts/install.sh <overlay>/hoffice` when that script exists, and `scripts/check.sh` runs `<hworks>/hoffice/scripts/check-instance.sh hoffice`.
+
+Set up a machine in this order, then start a new session:
+
+```bash
+~/dev/hworks/scripts/install.sh
+~/dev/my-overlay/scripts/install.sh
+~/dev/hworks/scripts/models.sh <profile>
+```
+
+`models.sh` can apply a profile from the overlay's `models.d/` only after `install.sh` has linked it. `~/dev/hworks/scripts/install.sh --check` reports drift later.
 
 ### What an adapter maps
 

@@ -59,15 +59,29 @@ Launchers work in a worktree of the instance's containing repository at `<instan
 
 ## Install
 
-For an existing project-memory repository, follow [the migration guide](docs/migrating.md).
+Clone the engine, create an instance (below) or [migrate an existing project-memory repository](docs/migrating.md), then register the instance:
 
 ```bash
 git clone https://github.com/hughy/hworks ~/dev/hworks
-cp -R ~/dev/hworks/hoffice/templates/instance ~/dev/my-projects   # then git init it and fill in HOFFICE.md
-~/dev/hworks/hoffice/scripts/install.sh ~/dev/my-projects
+~/dev/hworks/hoffice/scripts/install.sh /absolute/path/to/instance
 ```
 
-`install.sh` links each launcher into `~/.agents/skills/`, writes the engine path to `~/.config/hoffice/home`, and adds each instance path given to `~/.config/hoffice/instances`. Re-run it after pulling hoffice if a launcher was added.
+`install.sh` links each launcher into `~/.agents/skills/`, writes the engine path to `~/.config/hoffice/home`, and adds each instance path given to `~/.config/hoffice/instances`. Re-run it after pulling hoffice if a launcher was added, and on each machine that uses the instance.
+
+## New instance
+
+Choose the form first. A repository root suits an instance of its own. A directory suits an instance that belongs with other private content, such as an hworks overlay repo (see `CUSTOMIZING.md` at the hworks root). Below, `engine` is the engine checkout, `~/dev/hworks/hoffice` by default.
+
+1. Copy the skeleton to a path that does not exist yet, so `cp -R` copies the directory itself, dotfiles included:
+   - Repository root: `cp -R "$engine/templates/instance" ~/dev/my-projects`, then `git init` it and add its remote.
+   - Directory: `cp -R "$engine/templates/instance" <repo>/hoffice`. Content and extension paths are relative to that directory's `HOFFICE.md`. Launchers branch the containing repository and put worktrees at `<instance>/.worktrees/`, which the skeleton's `.gitignore` keeps untracked.
+2. Set `name` and the description in `HOFFICE.md`. In `AGENTS.md`, fill `## This instance` with the repositories and hosts in scope.
+3. Register it with `install.sh` as above.
+4. On each machine, copy `AGENTS.local.md.example` to `AGENTS.local.md` (gitignored) and fill in checkout and local-document paths.
+5. Add projects and repo cards following the instance's `projects/README.md` and `repos/README.md`, and list each project in its `README.md` table.
+6. Add an extension file for each external system a procedure needs (`docs/extensions.md`). Without one, the procedure stops short: `publish` renders and stops before publishing, and `digest` lists the source as a coverage gap.
+7. Run `"$engine/scripts/check-instance.sh" <instance>` and fix every finding. When the containing repository has its own check, call `check-instance.sh` from it so the instance stays valid.
+8. Commit in the instance's repository.
 
 ## Local project dashboard
 
