@@ -280,6 +280,7 @@ Authored summary with [design](notes/design%20notes.md#choice).
 Who reviews the draft?
 ## Next steps
 - Review the draft.
+- [x] Circulate the outline.
 ## Architecture
 Architecture stays in the source.
 `);
@@ -302,20 +303,35 @@ Architecture stays in the source.
     assert.match(alpha, /Authored summary/);
     assert.match(alpha, /Who reviews the draft\?/);
     assert.match(alpha, /Review the draft/);
+    assert.ok(alpha.indexOf('Next steps') < alpha.indexOf('Authored summary'), 'next steps lead the project page');
+    assert.match(alpha, /<li class="task"><input type="checkbox" disabled aria-label="Open"><div>Review the draft\.<\/div><\/li>/);
+    assert.match(alpha, /<li class="task done"><input type="checkbox" disabled checked aria-label="Done"><div>Circulate the outline\.<\/div><\/li>/);
+    assert.match(index, /1 open · 1 done/);
     assert.doesNotMatch(alpha, /Architecture stays in the source|Unrelated repository|Second owner/);
     assert.match(alpha, /Alpha repository/);
     assert.match(alpha, /Shared repository/);
     assert.match(zeta, /Shared repository/);
     assert.doesNotMatch(zeta, /Alpha repository|Unrelated repository|First owner/);
-    assert.ok(alpha.includes(`href="${pathToFileURL(join(f.instance, 'projects/alpha/notes/design notes.md')).href}#choice"`));
-    assert.ok(alpha.includes(`href="${pathToFileURL(join(f.instance, 'repos/shared.md')).href}"`));
+    // Instance Markdown links open rendered pages; those pages link back to the raw source.
+    assert.ok(alpha.includes('href="../source/projects/alpha/notes/design%20notes.md.html#choice"'));
+    assert.ok(alpha.includes('href="../source/repos/shared.md.html"'));
+    const state = f.html('source/projects/alpha/STATE.md.html');
+    assert.match(state, /<h2[^>]*>Architecture<\/h2>/);
+    assert.match(state, /Architecture stays in the source/);
+    assert.ok(state.includes('href="notes/design%20notes.md.html#choice"'));
+    assert.ok(state.includes(`href="${pathToFileURL(join(f.instance, 'projects/alpha/STATE.md')).href}"`));
+    assert.ok(state.includes('href="../../../projects/alpha.html"'), 'source page links back to its project');
+    assertLocalHrefsWork(state, join(f.out, 'source/projects/alpha/STATE.md.html'));
     for (const [path, html] of [['index.html', index], ['projects/alpha.html', alpha], ['projects/zeta.html', zeta]]) {
       assert.match(html, /Registry only/);
       assert.match(html, /No remote sources were queried/);
       assertLocalHrefsWork(html, join(f.out, path));
     }
     const firstOutput = filesUnder(f.out);
-    assert.deepEqual(Object.keys(firstOutput), ['index.html', 'projects/alpha.html', 'projects/zeta.html']);
+    assert.deepEqual(Object.keys(firstOutput), ['index.html', 'projects/alpha.html', 'projects/zeta.html',
+      'source/HOFFICE.md.html', 'source/projects/alpha/DOCS.md.html', 'source/projects/alpha/README.md.html', 'source/projects/alpha/STATE.md.html',
+      'source/projects/alpha/notes/design notes.md.html', 'source/projects/zeta/README.md.html',
+      'source/repos/alpha.md.html', 'source/repos/shared.md.html', 'source/repos/unrelated.md.html']);
     success(f.render());
     assert.deepEqual(filesUnder(f.out), firstOutput, 'unchanged inputs produce byte-identical pages');
     assert.deepEqual(filesUnder(f.instance), before, 'rendering does not change instance sources');
@@ -336,7 +352,7 @@ test('dashboard tolerates absent optional project files and empty registries wit
     assert.match(html, /No repository cards registered/);
     assert.match(html, /Authoritative documents unavailable/);
     assert.match(html, /Last reviewed: <span class="muted">Unavailable<\/span>/);
-    assert.match(html, /<h3>summary<\/h3><p>Unavailable\.<\/p>/);
+    assert.match(html, /<h2>Summary<\/h2><div class="prose"><p class="muted">Unavailable\.<\/p>/);
     assert.match(html, /<h2>Latest digests<\/h2><p><span class="muted">Unavailable<\/span>/);
     assert.doesNotMatch(html, /2026-02-30|href="[^"]*(?:DOCS|DIGEST)\.md/);
     assertLocalHrefsWork(html, join(f.out, `projects/${slug}.html`));
@@ -366,7 +382,8 @@ test('dashboard associates digests through config and selects the latest valid p
     const html = f.html(`projects/${slug}.html`);
     assert.match(html, /Shared activity \(2026-05-03\)/);
     assert.match(html, /Newest valid summary/);
-    assert.ok(html.includes(`href="${pathToFileURL(latest).href}"`));
+    assert.ok(html.includes('href="../source/digests/daily/2026-01-01-daily.md.html"'));
+    assert.ok(f.html('source/digests/daily/2026-01-01-daily.md.html').includes(`href="${pathToFileURL(latest).href}"`));
     assert.doesNotMatch(html, /Older same-day summary|Invalid date summary|Malformed date summary|Missing metadata summary|Archived summary|Undated file summary|Unconfigured summary|Status not summary/);
     assertLocalHrefsWork(html, join(f.out, `projects/${slug}.html`));
   }
@@ -436,6 +453,14 @@ test('dashboard escapes source content and drops unsafe or missing link targets 
     assert.ok(html.includes(label), `lost label: ${label}`);
   }
   assert.doesNotMatch(html, /href="[^"]*notes\/missing\.md/);
+  // Rendered source pages, including frontmatter properties, get the same escaping and link filtering.
+  for (const path of Object.keys(filesUnder(join(f.out, 'source')))) {
+    const page = f.html(`source/${path}`);
+    assert.doesNotMatch(page, /<(?:script|img|svg)\b/i, path);
+    assert.doesNotMatch(page, /href="(?:javascript|data|ftp):/i, path);
+    assertLocalHrefsWork(page, join(f.out, 'source', path));
+  }
+  assert.match(f.html('source/digests/activity/DIGEST.md.html'), /Activity &lt;img src=x> &amp; review/);
   assert.ok(html.includes('href="https://docs.example.test/?a=1&amp;b=2"'));
   assert.ok(f.html().includes('href="https://chat.example.test/?a=1&amp;b=2"'));
 });
@@ -472,7 +497,7 @@ test('dashboard rejects ancestor output without overwriting instance files', (t)
   assert.deepEqual(filesUnder(f.instance), before);
 });
 
-for (const destination of ['index.html', 'projects', 'projects/alpha.html']) {
+for (const destination of ['index.html', 'projects', 'projects/alpha.html', 'source']) {
   test(`dashboard rejects a symlink at output ${destination} before writing any pages`, (t) => {
     const f = dashboardFixture(t);
     f.write('projects/alpha/README.md', '# Alpha sentinel\n');
@@ -485,7 +510,7 @@ for (const destination of ['index.html', 'projects', 'projects/alpha.html']) {
     assert.equal(result.status, 1, `output symlink accepted: ${destination}`);
     assert.match(result.stderr, /output destination must not be a symlink/);
     assert.deepEqual(filesUnder(f.instance), before, 'all instance sentinels must remain unchanged');
-    assert.deepEqual(readdirSync(f.out).sort(), [destination === 'index.html' ? 'index.html' : 'projects']);
+    assert.deepEqual(readdirSync(f.out).sort(), [destination === 'index.html' || destination === 'source' ? destination : 'projects']);
     if (destination === 'projects/alpha.html') {
       assert.deepEqual(readdirSync(join(f.out, 'projects')), ['alpha.html'], 'no other project pages written before rejection');
     }
