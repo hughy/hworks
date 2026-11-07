@@ -46,7 +46,7 @@ class RendererTest(unittest.TestCase):
         self.assertLess(text.index('<th>prior 7d'), text.index('<th>last 7d'))
         self.assertEqual(sum('key' in c.split() for c in parser.tile_classes), 6)
         self.assertEqual(text.count('<tr class="krow">'), 6)
-        self.assertIn('<b>$11.80</b>', text)
+        self.assertIn('<b>$11.80, $826 of 70</b>', text)
         self.assertIn('<span class="tag t-companion">companion</span>', text)
         self.assertIn('Generic test &lt;definition&gt;', text)
         quality = text[text.index('<h2>Review and quality'):text.index('<h2>Churn')]
@@ -104,7 +104,7 @@ class RendererTest(unittest.TestCase):
         fragment = text[text.index('Merged with no rework, by week'):text.index('Review dispatcher verdicts against outcome')]
         self.assertIn('week of Dec 29 (5)', fragment)
         self.assertIn('week of Jan 19 (5)', fragment)
-        self.assertEqual(fragment.count('>100%</text>'), 2)
+        self.assertEqual(fragment.count('>100%, 5 of 5</text>'), 2)
         for week in ('2024-12-30', '2026-12-28', '2026-01-05'):
             self.assertNotIn(week, fragment)
 
@@ -119,7 +119,7 @@ class RendererTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
             text = self.run_dashboard(path)
-        self.assertIn('PRs per task: mean 3.00, max 4, over 2 tasks', text)
+        self.assertIn('PRs per task: -<br>2 of 5 needed', text)
         self.assertIn('Direct cost of these PRs: $123 over the period', text)
         self.assertIn('median open-PR age 988 days', text)
         fragment = text[text.index('Operator touches per day, by type'):text.index('Friction per merged PR', text.index('<h2>Human touches'))]
@@ -156,6 +156,161 @@ class RendererTest(unittest.TestCase):
         first = text[text.index('First review clean, by coder model'):text.index('Merged with no rework, by week')]
         self.assertIn('model (10)', first)
         self.assertIn('50%', first)
+
+    def test_rate_sample_floor_counts_and_delta(self):
+        for previous, current in ((5, 4), (4, 5), (5, 5)):
+            with self.subTest(previous=previous, current=current):
+                data = json.loads((FIX / 'metrics.json').read_text())
+                for d in data['days']:
+                    d.update(fr_rows=0, fr_inschema=0)
+                data['days'][-8].update(fr_rows=previous, fr_inschema=previous)
+                data['days'][-1].update(fr_rows=current, fr_inschema=1)
+                with tempfile.TemporaryDirectory() as temp:
+                    path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+                    text = self.run_dashboard(path)
+                tile = text[text.index('Friction rows in schema'):text.index('</section>', text.index('Friction rows in schema'))]
+                if current == 4:
+                    self.assertIn('<span class="lv">-<br>4 of 5 needed</span>', tile)
+                    self.assertNotIn('25%', tile)
+                else:
+                    self.assertIn('<span class="lv">20%, 1 of 5</span>', tile)
+                    self.assertIn('Jan 21: 20%, 1 of 5</title>', tile)
+                if previous == 4:
+                    self.assertIn('prior 7d -<br>4 of 5 needed', tile)
+                if min(previous, current) < 5:
+                    self.assertNotIn('class="chg', tile)
+                else:
+                    self.assertIn('>-80%</span>', tile)
+
+    def test_duration_median_and_p90_not_mean(self):
+        data = json.loads((FIX / 'metrics.json').read_text())
+        data['days'][-1]['htm'] = [1, 1, 1, 1, 96]
+        ext = {'series': {'latency': {f'2026-01-{day}': value for day, value in zip(range(17, 22), [1, 1, 1, 1, 96])}},
+               'tiles': [dict(key='latency', band='Output', title='Latency', home='test', about='Duration samples', kind='bars', series=['latency'],
+                              kpi=dict(series='latency', how='mean', format='h'),
+                              score_row=dict(series='latency', how='mean', format='h'))]}
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+            extension = Path(temp) / 'tiles.json'; extension.write_text(json.dumps(ext))
+            text = self.run_dashboard(path, '--tiles', str(extension))
+        score = text[text.index('<h2>Scorecard'):text.index('<h2>Output')]
+        for title, value in (('Hours to merge (median)', '1.0 h'), ('Hours to merge (p90)', '96 h')):
+            row = score[score.index('<td>' + title + '</td>'):]
+            row = row[:row.index('</tr>')]
+            self.assertIn('<b>' + value + '</b>', row)
+        latency = text[text.index('Latency</span>'):text.index('<h2>Cost')]
+        self.assertIn('median, prior 7d', latency)
+        self.assertIn('p90, prior 7d', latency)
+        self.assertIn('<span class="lv">1.0 h</span>', latency)
+        self.assertIn('<span class="lv">96 h</span>', latency)
+        self.assertNotIn('20 h', latency)
+        self.assertNotIn('mean', latency)
+
+    def test_rate_counts_in_tables_bars_score_and_unknown_extensions(self):
+        data = json.loads((FIX / 'metrics.json').read_text())
+        for d in data['days']:
+            d.update(cw=2, spend=4, ops=1)
+        data['tables']['churn'] = {'test/repo': dict(totals=dict(added=5, churn21=1, moved=2, revisit_changes=1, changes=4))}
+        data['tables']['prs'] = [dict(mergedAt='2026-01-20T12:00:00Z', no_rework=True) for _ in range(4)]
+        ext = {'series': {'unknown': {'2026-01-21': .9}},
+               'tiles': [dict(key='unknown', band='Output', title='Unknown rate', home='test', about='No counts supplied', kind='lines', series=['unknown'], format='%',
+                              kpi=dict(series='unknown', how='last', format='%'))]}
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+            extension = Path(temp) / 'tiles.json'; extension.write_text(json.dumps(ext))
+            text = self.run_dashboard(path, '--tiles', str(extension))
+        self.assertIn('50%, $14.00 of $28.00, 7 days', text)
+        self.assertIn('0.1, 7 of 70', text)
+        self.assertIn('<td>20%, 1 of 5</td><td>40%, 2 of 5</td><td>-\n4 of 5 needed</td>', text)
+        weekly = text[text.index('Merged with no rework, by week'):text.index('Review dispatcher verdicts against outcome')]
+        self.assertIn('4 of 5 needed', weekly)
+        self.assertNotIn('100%', weekly)
+        unknown = text[text.index('Unknown rate</span>'):text.index('<h2>Cost')]
+        self.assertIn('-<br>count unavailable', unknown)
+        self.assertNotIn('90%', unknown)
+
+    def test_spend_shares_count_observed_days_not_rolling_outputs(self):
+        for previous, current in ((1, 1), (4, 5), (5, 4), (5, 5), (7, 7)):
+            with self.subTest(previous=previous, current=current):
+                data = json.loads((FIX / 'metrics.json').read_text())
+                for d in data['days']:
+                    d.update(cw=None, longc=None, linked=None, spend_factory=None, spend=None)
+                for end, amount, count in ((-7, 1, previous), (0, 2, current)):
+                    start = len(data['days']) + end - 7
+                    for i in range(start, start + count):
+                        data['days'][i].update(cw=amount, longc=amount, linked=amount, spend_factory=amount, spend=4)
+                with tempfile.TemporaryDirectory() as temp:
+                    path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+                    text = self.run_dashboard(path)
+                score = text[text.index('<td>Cache-write share of spend</td>'):]
+                fragments = [score[:score.index('</tr>')]]
+                for title in ('Cache-write share of spend', 'Long-context share of spend', 'Spend linked to a PR', 'Factory share of spend'):
+                    start = text.index(title + '</span>')
+                    fragments.append(text[start:text.index('</details>', start)])
+                for fragment in fragments:
+                    if current < 5:
+                        self.assertIn(f'-<br>{current} of 5 needed', fragment)
+                        self.assertNotIn('50%', fragment)
+                    else:
+                        self.assertIn(f'50%, ${2*current:.2f} of ${4*current:.2f}, {current} days', fragment)
+                    if previous < 5:
+                        self.assertIn(f'-<br>{previous} of 5 needed', fragment)
+                        self.assertNotIn('25%', fragment)
+                    else:
+                        self.assertIn(f'25%, ${previous:.2f} of ${4*previous:.2f}, {previous} days', fragment)
+                    if min(previous, current) < 5:
+                        self.assertNotIn('class="chg', fragment)
+                    else:
+                        self.assertIn('>+100%</span>', fragment)
+
+    def test_extension_names_do_not_collide_with_internal_metadata(self):
+        data = json.loads((FIX / 'metrics.json').read_text())
+        for d in data['days']:
+            d.update(fr_rows=1, fr_inschema=1, htm=[1])
+        ext = {'series': {name: {'2026-01-21': value} for name, value in
+                          [('schema_rate', 123), ('htm7_n', 456)]},
+               'tiles': [dict(key='metadata_names', band='Output', title='Extension values', home='test',
+                              about='Numeric extension series', kind='table', series=['schema_rate', 'htm7_n'])]}
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+            extension = Path(temp) / 'tiles.json'; extension.write_text(json.dumps(ext))
+            text = self.run_dashboard(path, '--tiles', str(extension))
+            ext['series']['schema'] = {'2026-01-21': .9}
+            extension.write_text(json.dumps(ext))
+            overridden = self.run_dashboard(path, '--tiles', str(extension))
+            for name, title, index, value, expected, score_title in (
+                ('htm7', 'Hours to merge', 0, 123, '123 h', 'Hours to merge (median)'),
+                ('htm90', 'Hours to merge', 1, 123, '123 h', 'Hours to merge (p90)'),
+                ('oq_judged', 'Agent decisions: reversed and judged', 1, .9, '-<br>count unavailable', None),
+                ('attr7', 'Cost per merged PR', 1, 123, '$123', 'Cost per merged PR, direct (median)'),
+                ('cpp_all', 'Cost per merged PR', 0, 2, '-<br>count unavailable', 'Cost per merged PR, all spend'),
+                ('ops_pr', 'Operator messages per merged PR', 0, 2, '-<br>count unavailable', 'Operator messages per merged PR'),
+            ):
+                with self.subTest(override=name):
+                    values = {d['date']: 1 if i < len(data['days']) - 7 else value for i, d in enumerate(data['days'])}
+                    extension.write_text(json.dumps({'series': {name: values}, 'tiles': []}))
+                    result = self.run_dashboard(path, '--tiles', str(extension))
+                    tile = result[result.index(title + '</span>'):]
+                    tile = tile[:tile.index('</details>')]
+                    kpi = tile.split('<div class="kpi">')[index + 1].split('</div>')[0]
+                    self.assertIn('<span class="lv">' + expected + '</span>', kpi)
+                    self.assertNotIn('class="chg', kpi)
+                    if name == 'oq_judged':
+                        self.assertNotIn('90%', tile)
+                    if score_title:
+                        score = result[:result.index('<h2>Output')]
+                        row = score[score.index('<td>' + score_title + '</td>'):]
+                        row = row[:row.index('</tr>')]
+                        self.assertIn('<b>' + expected + '</b>', row)
+                        self.assertNotIn('class="chg', row)
+        self.assertIn('<td>2026-01-21</td><td>123</td><td>456</td>', text)
+        schema = text[text.index('Friction rows in schema'):]
+        self.assertIn('<span class="lv">100%, 7 of 7</span>', schema)
+        duration = text[text.index('Hours to merge</span>'):text.index('Main-session time by who held the turn')]
+        self.assertIn('<span class="lv">1.0 h</span><span class="chg', duration)
+        schema = overridden[overridden.index('Friction rows in schema'):]
+        self.assertIn('<span class="lv">-<br>count unavailable</span>', schema)
+        self.assertNotIn('90%', schema)
 
     def test_rejects_invalid_extension_at_boundary(self):
         with tempfile.TemporaryDirectory() as temp:

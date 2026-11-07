@@ -31,6 +31,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 ACC, INK, GREY, LIGHT, PAPER = "#b3261e", "#222", "#8a8a8a", "#cfcfcf", "#fffff8"
+MIN_SAMPLES = 5
 esc = lambda s: html.escape(str(s))
 
 
@@ -43,10 +44,6 @@ def roll(vals, k=7, fn=lambda xs: sum(xs) / len(xs)):
 
 
 rsum = lambda v: roll(v, 7, sum)
-
-
-def ratio(a, b, minb=1e-9):
-    return [x / y if (x is not None and y and y >= minb) else None for x, y in zip(a, b)]
 
 
 def fmt(v, kind=""):
@@ -63,13 +60,38 @@ def fmt(v, kind=""):
     return f"{v:,}"
 
 
+def rate_value(part):
+    numerator, denominator, unit, minimum, count = part
+    return numerator / denominator if numerator is not None and denominator and count is not None and count >= minimum else None
+
+
+def rate_text(value, kind, part=None):
+    if part is None:
+        return '-\ncount unavailable' if kind == '%' else fmt(value, kind)
+    numerator, denominator, unit, minimum, count = part
+    if count is None:
+        return '-\ncount unavailable'
+    if count < minimum:
+        return f'-\n{fmt(count)} of {MIN_SAMPLES if count < MIN_SAMPLES else minimum} needed'
+    if numerator is None or denominator is None:
+        return '-\ncount unavailable'
+    observations = f', {fmt(count)} days' if unit == '$' else ''
+    return f'{fmt(value, kind)}, {fmt(numerator, "$" if kind == "$" else unit)} of {fmt(denominator, unit)}{observations}'
+
+
+def display(value, kind, part=None):
+    return esc(rate_text(value, kind, part)).replace('\n', '<br>')
+
+
 def daylabel(d):
     return date.fromisoformat(d).strftime("%b %-d")
 
 
 # ---------- sparkline ----------
-def spark(vals, w=120, h=20, kind="", bars=False, sample_dates=None):
+def spark(vals, w=120, h=20, kind="", bars=False, sample_dates=None, rates=None):
     sample_dates = sample_dates or dates
+    if kind == "%" and rates is None:
+        return ""
     pts = [(i, v) for i, v in enumerate(vals) if v is not None]
     if not pts:
         return ""
@@ -81,14 +103,14 @@ def spark(vals, w=120, h=20, kind="", bars=False, sample_dates=None):
     if bars:
         bw = max(1.2, (w - 6) / len(vals) * 0.6)
         for i, v in pts:
-            s.append(f'<rect x="{x(i)-bw/2:.1f}" y="{y(v):.1f}" width="{bw:.1f}" height="{h-2-y(v):.1f}" fill="{GREY}"><title>{daylabel(sample_dates[i])}: {fmt(v, kind)}</title></rect>')
+            s.append(f'<rect x="{x(i)-bw/2:.1f}" y="{y(v):.1f}" width="{bw:.1f}" height="{h-2-y(v):.1f}" fill="{GREY}"><title>{daylabel(sample_dates[i])}: {esc(rate_text(v, kind, rates[i] if rates else None))}</title></rect>')
     else:
         d = " ".join(f"{'M' if j == 0 else 'L'}{x(i):.1f},{y(v):.1f}" for j, (i, v) in enumerate(pts))
         s.append(f'<path d="{d}" fill="none" stroke="{GREY}" stroke-width="1"/>')
     imax = max(pts, key=lambda p: p[1])
-    s.append(f'<circle cx="{x(imax[0]):.1f}" cy="{y(imax[1]):.1f}" r="1.6" fill="{INK}"><title>max {daylabel(sample_dates[imax[0]])}: {fmt(imax[1], kind)}</title></circle>')
+    s.append(f'<circle cx="{x(imax[0]):.1f}" cy="{y(imax[1]):.1f}" r="1.6" fill="{INK}"><title>max {daylabel(sample_dates[imax[0]])}: {esc(rate_text(imax[1], kind, rates[imax[0]] if rates else None))}</title></circle>')
     li, lv = pts[-1]
-    s.append(f'<circle cx="{x(li):.1f}" cy="{y(lv):.1f}" r="2" fill="{ACC}"><title>{daylabel(sample_dates[li])}: {fmt(lv, kind)}</title></circle>')
+    s.append(f'<circle cx="{x(li):.1f}" cy="{y(lv):.1f}" r="2" fill="{ACC}"><title>{daylabel(sample_dates[li])}: {esc(rate_text(lv, kind, rates[li] if rates else None))}</title></circle>')
     s.append("</svg>")
     return "".join(s)
 
@@ -100,6 +122,8 @@ def chart(series, w=360, h=120, ymax=None, kind="", notes=(), R=58, yfmt=None, x
     iw, ih = w - L - R, h - T - B
     allv = []
     for s in series:
+        if kind == "%" and not s.get("rates"):
+            s = dict(s, vals=[None] * N)
         for v in s["vals"]:
             if v is None:
                 continue
@@ -133,12 +157,17 @@ def chart(series, w=360, h=120, ymax=None, kind="", notes=(), R=58, yfmt=None, x
     bw = max(1.5, iw / N * 0.6)
     for s in series:
         col, vals, sty = s.get("color", GREY), s["vals"], s.get("style", "line")
+        rates = s.get("rates")
+        if kind == "%" and rates is None:
+            vals = [None] * N
         if sty == "bar":
             for i, v in enumerate(vals):
                 if v:
-                    out.append(f'<rect x="{x(i)-bw/2:.1f}" y="{y(v):.1f}" width="{bw:.1f}" height="{T+ih-y(v):.1f}" fill="{col}"><title>{daylabel(dates[i])}: {fmt(v, kind)}</title></rect>')
+                    out.append(f'<rect x="{x(i)-bw/2:.1f}" y="{y(v):.1f}" width="{bw:.1f}" height="{T+ih-y(v):.1f}" fill="{col}"><title>{daylabel(dates[i])}: {esc(rate_text(v, kind, rates[i] if rates else None))}</title></rect>')
         elif sty == "stack":
             for i, v in enumerate(vals):
+                if v is None:
+                    continue
                 base = 0
                 tip = ", ".join(f"{n} {fmt(p, kind)}" for n, p in zip(s["names"], v) if p)
                 for p, c in zip(v, s["colors"]):
@@ -156,7 +185,7 @@ def chart(series, w=360, h=120, ymax=None, kind="", notes=(), R=58, yfmt=None, x
                 dash = ' stroke-dasharray="3,2"' if sty == "dash" else ""
                 out.append(f'<path d="{d}" fill="none" stroke="{col}" stroke-width="{s.get("width", 1.3)}"{dash}/>')
                 for i, v in pts:
-                    out.append(f'<circle cx="{x(i):.1f}" cy="{y(v):.1f}" r="3" fill="transparent"><title>{daylabel(dates[i])}: {fmt(v, kind)}</title></circle>')
+                    out.append(f'<circle cx="{x(i):.1f}" cy="{y(v):.1f}" r="3" fill="transparent"><title>{daylabel(dates[i])}: {esc(rate_text(v, kind, rates[i] if rates else None))}</title></circle>')
         if s.get("label"):
             pts = [(i, v) for i, v in enumerate(vals) if v is not None and not isinstance(v, list)]
             if pts:
@@ -172,7 +201,7 @@ def chart(series, w=360, h=120, ymax=None, kind="", notes=(), R=58, yfmt=None, x
 
 
 # ---------- horizontal bars (window totals) ----------
-def hbars(items, kind="", w=360, lw=130, unit=""):
+def hbars(items, kind="", w=360, lw=130, unit="", rates=None):
     """items: (label, [(value, color, name)...])"""
     rows = [(lab, parts if isinstance(parts, list) else [(parts, GREY, "")]) for lab, parts in items]
     mx = max((sum(p[0] for p in parts) for _, parts in rows), default=1) or 1
@@ -187,9 +216,9 @@ def hbars(items, kind="", w=360, lw=130, unit=""):
         for v, c, nm in parts:
             ww = v * iw / mx
             if ww > 0:
-                out.append(f'<rect x="{x0:.1f}" y="{yy}" width="{ww:.1f}" height="{bh}" fill="{c}"><title>{esc(lab)}{": " + esc(nm) if nm else ""} {fmt(v, kind)}{unit}</title></rect>')
+                out.append(f'<rect x="{x0:.1f}" y="{yy}" width="{ww:.1f}" height="{bh}" fill="{c}"><title>{esc(lab)}{": " + esc(nm) if nm else ""} {esc(rate_text(v, kind, rates[k] if rates else None))}{unit}</title></rect>')
             x0 += ww
-        out.append(f'<text x="{x0+4:.1f}" y="{yy+bh-2}" class="tick">{fmt(sum(p[0] for p in parts), kind)}{unit}</text>')
+        out.append(f'<text x="{x0+4:.1f}" y="{yy+bh-2}" class="tick">{esc(rate_text(sum(p[0] for p in parts), kind, rates[k] if rates else None)).replace(chr(10), " ")}{unit}</text>')
     out.append("</svg>")
     return "".join(out)
 
@@ -238,6 +267,11 @@ def summ(v, how):
         return (sum(ps) if ps else None), (sum(xs) if xs else None)
     if how == "last":
         return (ps[-1] if ps else None), (xs[-1] if xs else None)
+    if how in ('median', 'p90'):
+        xs = [x for v in xs for x in (v if isinstance(v, list) else [v])]
+        ps = [x for v in ps for x in (v if isinstance(v, list) else [v])]
+        fn = st.median if how == 'median' else lambda v: sorted(v)[math.ceil(.9 * len(v)) - 1]
+        return (fn(ps) if ps else None), (fn(xs) if xs else None)
     return (sum(ps) / len(ps) if ps else None), (sum(xs) / len(xs) if xs else None)
 
 
@@ -249,10 +283,27 @@ def change(b, a, better):
     return f'<span class="chg {cls}">{r:+.0%}</span>'
 
 
-def kpi(v, how, kind="", better="none"):
+def period_summary(v, how, kind, rates=None, samples=None):
     b, a = summ(v, how)
-    return (f'<div class="kpi"><span class="pv">prior 7d {fmt(b, kind)}</span>'
-            f'<span class="lv">{fmt(a, kind)}</span>{change(b, a, better)}</div>')
+    bp, ap = (prior7(rates), last7(rates)) if rates is not None else ([], [])
+    bp, ap = (bp[-1] if bp else None), (ap[-1] if ap else None)
+    if rates is not None:
+        b, a = rate_value(bp) if bp else None, rate_value(ap) if ap else None
+        bn, an = (p[4] if p else 0 for p in (bp, ap))
+    elif samples is not None:
+        bn, an = (prior7(samples) or [0])[-1], (last7(samples) or [0])[-1]
+    else:
+        bn, an = len(prior7(v)), len(last7(v))
+    enough = min(bn or 0, an or 0) >= MIN_SAMPLES and (kind != '%' or rates is not None)
+    return b, a, bp, ap, enough
+
+
+def kpi(v, how, kind="", better="none", rates=None, samples=None):
+    if kind == 'h' and how == 'mean':
+        return ''.join(kpi(v, stat, kind, better, rates, samples).replace('prior 7d', stat + ', prior 7d') for stat in ('median', 'p90'))
+    b, a, bp, ap, enough = period_summary(v, how, kind, rates, samples)
+    return (f'<div class="kpi"><span class="pv">prior 7d {display(b, kind, bp)}</span>'
+            f'<span class="lv">{display(a, kind, ap)}</span>{change(b, a, better) if enough else ""}</div>')
 
 
 KEY = {}
@@ -286,7 +337,7 @@ section h2{{font-weight:400;font-style:italic;font-size:15px;margin:18px 0 8px;c
 .tile.w2{{grid-column:span 2}} .tile.full{{grid-column:1/-1}} .tile.key{{border-top:2px solid {ACC}}}
 .keyb{{font:10.5px -apple-system,system-ui,sans-serif;color:{ACC};letter-spacing:.02em}}
 details.about{{margin-top:4px}} details.about summary{{font-size:12px;color:#aaa;cursor:pointer;width:14px}} details.about summary:hover{{color:#555}} details.about p{{margin:4px 0 0;font-size:12px;color:#444;max-width:620px}}
-.tbl td{{white-space:nowrap}} .sc tr.grp td{{font-style:italic;color:#888;padding-top:8px;border-bottom:none}} .sc tr.krow td{{font-weight:600}} .sc tr.krow td:first-child{{border-left:2px solid {ACC};padding-left:6px}} .sc .tg{{color:{ACC};font:10.5px -apple-system,system-ui,sans-serif}}
+.tbl td{{white-space:pre-line}} .sc tr.grp td{{font-style:italic;color:#888;padding-top:8px;border-bottom:none}} .sc tr.krow td{{font-weight:600}} .sc tr.krow td:first-child{{border-left:2px solid {ACC};padding-left:6px}} .sc .tg{{color:{ACC};font:10.5px -apple-system,system-ui,sans-serif}}
 .tile.dim{{background:transparent;border-style:dashed}}
 .th{{display:flex;align-items:center;gap:6px}}
 .tt{{flex:1;font-size:13.5px}}
@@ -327,50 +378,60 @@ details table td{{padding:4px 8px;border-bottom:1px solid #eee;vertical-align:to
 BANDS = ['Output', 'Cost', 'Human touches and friction', 'Review and quality', 'Churn', 'Factory health and improvement']
 
 
-def rolling_ratio(a, b, minimum=1):
-    return ratio(rsum(a), rsum(b), minimum)
-
-
 def nullable_sum(xs):
     return sum(xs) if xs and all(x is not None for x in xs) else None
 
 
 def derive(metrics):
     series = {k: [d.get(k) for d in D] for k in {k for d in D for k in d} - {'date'}}
+    rate_parts, sample_counts = {}, {}
     col = lambda k: series.get(k, [None] * N)
-    series['cpp_all'] = rolling_ratio(col('spend'), col('merged'), 10)
-    series['cpp_prod'] = rolling_ratio(col('spend_product'), col('merged'), 10)
-    series['ops_pr'] = rolling_ratio(col('ops'), col('merged'), 10)
+    def rate(key, numerators, denominators, minimum=MIN_SAMPLES, unit='', counts=None):
+        parts = [(a, b, unit, minimum, n) for a, b, n in zip(numerators, denominators, denominators if counts is None else counts)]
+        rate_parts[key] = parts
+        series[key] = [rate_value(p) for p in parts]
+    rate('cpp_all', rsum(col('spend')), rsum(col('merged')), 10)
+    rate('cpp_prod', rsum(col('spend_product')), rsum(col('merged')), 10)
+    rate('ops_pr', rsum(col('ops')), rsum(col('merged')), 10)
     for key, num, den in [('cw_share', 'cw', 'spend'), ('long_share', 'longc', 'spend'), ('coverage', 'linked', 'spend'), ('factory_share', 'spend_factory', 'spend'), ('schema', 'fr_inschema', 'fr_rows'), ('cr', 'churn21', 'added')]:
-        series[key] = rolling_ratio(col(num), col(den))
+        counts = rsum([int(v is not None) for v in col(den)]) if den == 'spend' else None
+        rate(key, rsum(col(num)), rsum(col(den)), unit='$' if den == 'spend' else '', counts=counts)
     series['escaped'] = [None if d.get('friction') is None else d['friction'].get('operator', 0) + d['friction'].get('ci', 0) for d in D]
     series['fr_all'] = [None if d.get('friction') is None else sum(d['friction'].values()) for d in D]
     for key, src in [('escaped_pr', 'escaped'), ('fr_pr', 'fr_all')]:
-        series[key] = rolling_ratio(series[src], col('merged'), 10)
+        rate(key, rsum(series[src]), rsum(col('merged')), 10)
     series['subfail'] = [nullable_sum([d.get('subagent_fail'), d.get('babysitter_fail')]) for d in D]
-    series['corr_pr'] = rolling_ratio([nullable_sum([d.get('sig_correction'), d.get('sig_abort')]) for d in D], col('merged'), 10)
+    rate('corr_pr', rsum([nullable_sum([d.get('sig_correction'), d.get('sig_abort')]) for d in D]), rsum(col('merged')), 10)
     for key, fields in [('landed_stack', ['pr_landed', 'pr_fixed', 'pr_holding']), ('tasks_stack', ['tasks_landed', 'tasks_fixed', 'tasks_nopr', 'tasks_holding']), ('sub_stack', ['subagent_fail', 'babysitter_fail'])]:
         series[key] = [[d[k] for k in fields] if all(d.get(k) is not None for k in fields) else None for d in D]
     series['touch_stack'] = []
     for d in D:
         fields = ['sig_correction', 'sig_abort', 'sig_approval', 'sig_status-check', 'ops']
         series['touch_stack'].append([d['sig_correction'], d['sig_abort'], d['sig_approval'] + d['sig_status-check'], max(0, d['ops'] - sum(d[k] for k in fields[:4]))] if all(d.get(k) is not None for k in fields) else None)
-    for key, src, minimum in [('attr7', 'pr_cost', 5), ('htm7', 'htm', 5)]:
-        series[key] = []
+    for key, src in [('attr7', 'pr_cost'), ('htm7', 'htm')]:
+        series[key], sample_counts[key] = [], []
+        if key == 'htm7':
+            series['htm90'], sample_counts['htm90'] = [], sample_counts[key]
         for i in range(N):
             xs = [x for d in D[max(0, i-6):i+1] for x in (d.get(src) or []) if x is not None]
-            series[key].append(st.median(xs) if len(xs) >= minimum else None)
-    series['oq_rev'], series['oq_judged'] = [], []
+            sample_counts[key].append(len(xs))
+            series[key].append(st.median(xs) if len(xs) >= MIN_SAMPLES else None)
+            if key == 'htm7':
+                series['htm90'].append(sorted(xs)[math.ceil(.9 * len(xs)) - 1] if len(xs) >= MIN_SAMPLES else None)
+    rate_parts['oq_rev'], rate_parts['oq_judged'] = [], []
     for i in range(N):
         window = D[max(0, i-13):i+1]
         r = nullable_sum([d.get('oq_reversed') for d in window])
         k = nullable_sum([d.get('oq_kept') for d in window])
         t = nullable_sum([d.get('oq') for d in window])
-        series['oq_rev'].append(r / (r+k) if r is not None and k is not None and r+k >= 3 else None)
-        series['oq_judged'].append((r+k) / t if r is not None and k is not None and t and t >= 10 else None)
+        judged = r + k if r is not None and k is not None else None
+        rate_parts['oq_rev'].append((r, judged, '', MIN_SAMPLES, judged))
+        rate_parts['oq_judged'].append((judged, t, '', 10, t))
+    for key in ('oq_rev', 'oq_judged'):
+        series[key] = [rate_value(p) for p in rate_parts[key]]
     for catcher in ('self', 'test', 'reviewer', 'operator', 'ci'):
         series['fr_' + catcher] = [d['friction'].get(catcher, 0) if d.get('friction') is not None else None for d in D]
-    return series
+    return series, rate_parts, sample_counts
 
 
 def generic_tiles(metrics):
@@ -384,7 +445,7 @@ def generic_tiles(metrics):
     specs[-1]['kpi']['series'] = 'tasks_done'
     ppt = metrics['tables'].get('prs_per_task', [])
     if ppt:
-        specs[-1]['foot'] = f'PRs per task: mean {st.mean(ppt):.2f}, max {max(ppt)}, over {len(ppt)} tasks'
+        specs[-1]['foot'] = 'PRs per task: ' + rate_text(rate_value((sum(ppt), len(ppt), '', MIN_SAMPLES, len(ppt))), '', (sum(ppt), len(ppt), '', MIN_SAMPLES, len(ppt)))
     add('merged', 'PRs merged per day', 'Output', ['merged'], 'bars', 'sum', better='up', target='higher is better' if not has_tasks else '')
     add('opened', 'PRs opened per day', 'Output', ['opened'], 'bars', 'sum', better='up')
     add('landed', 'Landed PRs, by merge day', 'Output', ['landed_stack'], 'stacked bars', names=['landed', 'fixed within 7d', 'in 7d window'])
@@ -417,7 +478,7 @@ def generic_tiles(metrics):
     add('catcher', 'Friction by who caught it', 'Human touches and friction', ['fr_self', 'fr_test', 'fr_reviewer', 'fr_operator', 'fr_ci'], 'small bars', wide=True)
     specs[-1]['kpi'] = {}
     add('decisions', 'Agent decisions: reversed and judged', 'Human touches and friction', ['oq_rev', 'oq_judged'], form='%', better='down')
-    add('htm', 'Hours to merge', 'Human touches and friction', ['htm7'], kind='merge lines', form='h', better='down')
+    add('htm', 'Hours to merge', 'Human touches and friction', ['htm7', 'htm90'], kind='merge lines', form='h', better='down')
     add('timesplit', 'Main-session time by who held the turn', 'Human touches and friction', kind='hbars', rows=[({'tool': 'tools', 'human': 'operator'}.get(k, k), v/3600) for k, v in metrics['tables'].get('time', {}).items()], form='h')
     add('escaped', 'Escaped defects per merged PR', 'Review and quality', ['escaped_pr'], better='down', target='guardrail, keep low')
     add('funnel', 'Review-loop rounds', 'Review and quality', kind='hbars', rows=[('round ' + str(r['round']), [(r['rounds_with_blocker'], INK, 'blocked'), (r['runs'] - r['rounds_with_blocker'], LIGHT, 'clean')]) for r in report.get('loop rounds', [])])
@@ -425,7 +486,8 @@ def generic_tiles(metrics):
     for r in report.get('roles', []):
         models[r['model']][0] += r.get('first_round_clean', 0)
         models[r['model']][1] += r.get('first_rounds', 0)
-    add('firstclean', 'First review clean, by coder model', 'Review and quality', kind='hbars', rows=[(f'{m.rsplit("/", 1)[-1]} ({b})', [(a/b, INK, 'clean')]) for m, (a, b) in models.items() if b >= 10], form='%')
+    add('firstclean', 'First review clean, by coder model', 'Review and quality', kind='hbars', rows=[(f'{m.rsplit("/", 1)[-1]} ({b})', rate_value((a, b, '', 10, b)) or 0) for m, (a, b) in models.items()], form='%')
+    specs[-1]['rates'] = [(a, b, '', 10, b) for a, b in models.values()]
     weeks = defaultdict(lambda: [0, 0])
     tz = ZoneInfo(metrics['tz'])
     for p in metrics['tables'].get('prs', []):
@@ -437,12 +499,15 @@ def generic_tiles(metrics):
             weeks[week][0] += 1
             # Outcome definitions remain owned by kaizen-prs via collector table.
             weeks[week][1] += bool(p.get('no_rework'))
-    add('rework', 'Merged with no rework, by week', 'Review and quality', kind='hbars', rows=[(f'week of {daylabel(w)} ({a})', [(b/a, INK, 'no rework')]) for w, (a, b) in sorted(weeks.items()) if a >= 5], form='%')
+    add('rework', 'Merged with no rework, by week', 'Review and quality', kind='hbars', rows=[(f'week of {daylabel(w)} ({a})', rate_value((b, a, '', MIN_SAMPLES, a)) or 0) for w, (a, b) in sorted(weeks.items())], form='%')
+    specs[-1]['rates'] = [(b, a, '', MIN_SAMPLES, a) for w, (a, b) in sorted(weeks.items())]
     add('hdispatch', 'Review dispatcher verdicts against outcome', 'Review and quality', kind='empty')
     add('churn_chart', 'Lines rewritten within 21 days, share of added', 'Churn', ['cr'], form='%', better='down', target='guardrail, keep low')
     rows = [['repo', 'lines added', 'churn21', 'moved', 'revisit', 'weekly']]
     for name, r in metrics['tables'].get('churn', {}).items():
-        t = r['totals']; rows.append([Path(name).name, fmt(t['added']), f"{t['churn21_ratio']:.1%}" if t['churn21_ratio'] is not None else '-', f"{t['moved_ratio']:.1%}" if t['moved_ratio'] is not None else '-', fmt(t['revisit_share'], '%'), name])
+        t = r['totals']
+        parts = [(t.get(num), t.get(den), '', MIN_SAMPLES, t.get(den)) for num, den in [('churn21', 'added'), ('moved', 'added'), ('revisit_changes', 'changes')]]
+        rows.append([Path(name).name, fmt(t['added']), *[rate_text(rate_value(p), '%', p) for p in parts], name])
     add('churn_tbl', 'Churn by repo', 'Churn', kind='table', rows=rows if len(rows) > 1 else [], wide=True)
     specs[-1]['weekly'] = []
     for name, result in metrics['tables'].get('churn', {}).items():
@@ -452,8 +517,8 @@ def generic_tiles(metrics):
             week = (dd - timedelta(days=dd.weekday())).isoformat()
             weekly[week][0] += row['added']
             weekly[week][1] += row['churn21']
-        weeks = [(w, b/a) for w, (a, b) in sorted(weekly.items()) if a >= 200]
-        specs[-1]['weekly'].append((name, [v for _, v in weeks], [w for w, _ in weeks]))
+        weeks = [(w, (b, a, '', 200, a)) for w, (a, b) in sorted(weekly.items()) if a >= 200]
+        specs[-1]['weekly'].append((name, [rate_value(p) for _, p in weeks], [w for w, _ in weeks], [p for _, p in weeks]))
     add('failures', 'Subagent failures per day', 'Factory health and improvement', ['sub_stack'], 'stacked bars', 'sum', better='down', target='guardrail, keep low', names=['other roles', 'pr-babysitter'])
     specs[-1]['kpi']['series'] = 'subfail'
     specs[-1]['notes'] = [(d['date'], nullable_sum([d.get('subagent_fail'), d.get('babysitter_fail')]) or 0, f"{daylabel(d['date'])}: {d['runs_never_started']:,} runs never started") for d in D if d.get('runs_never_started')]
@@ -484,37 +549,44 @@ def generic_tiles(metrics):
     return specs
 
 
-def score_row(title, values, how='last', form='', better='none', target=''):
-    b, a = summ(values, how)
-    return (f'<tr class="{"krow" if target else ""}"><td>{esc(title)}</td><td>{spark(values, kind=form, bars=how == "sum")}</td>'
-            f'<td class="num">{fmt(b, form)}</td><td class="num"><b>{fmt(a, form)}</b></td>'
-            f'<td class="num">{change(b, a, better)}</td><td class="tg">{esc(target)}</td></tr>')
+def score_row(title, values, how='last', form='', better='none', target='', rates=None, samples=None):
+    if form == 'h' and how == 'mean':
+        return ''.join(score_row(title + ' (' + stat + ')', values, stat, form, better, target, rates, samples) for stat in ('median', 'p90'))
+    b, a, bp, ap, enough = period_summary(values, how, form, rates, samples)
+    return (f'<tr class="{"krow" if target else ""}"><td>{esc(title)}</td><td>{spark(values, kind=form, bars=how == "sum", rates=rates)}</td>'
+            f'<td class="num">{display(b, form, bp)}</td><td class="num"><b>{display(a, form, ap)}</b></td>'
+            f'<td class="num">{change(b, a, better) if enough else ""}</td><td class="tg">{esc(target)}</td></tr>')
 
 
-def render_tile(spec, series):
+def render_tile(spec, series, rate_parts, sample_counts):
     key, title, kind = spec['key'], spec['title'], spec['kind']
     P[key] = spec.get('about', '')
     if spec.get('key_metric'):
         KEY[title] = spec['key_metric']
     fields = spec.get('series', [])
     vals = [series.get(k, [None] * N) for k in fields]
-    if kind == 'empty' or (vals and all(v is None for field in vals for v in field)) or (not vals and not spec.get('rows')):
+    if kind == 'empty' or (vals and all(v is None for field in vals for v in field) and not any(k in rate_parts for k in fields)) or (not vals and not spec.get('rows')):
         return empty(title, key, spec['home'])
     conf = spec.get('kpi', {})
     form = spec.get('format', conf.get('format', ''))
-    kval = kpi(series.get(conf.get('series'), [None] * N), conf.get('how', 'last'), form, conf.get('better', 'none')) if conf else ''
+    kval = kpi(series.get(conf.get('series'), [None] * N), conf.get('how', 'last'), form, conf.get('better', 'none'), rate_parts.get(conf.get('series', '')), sample_counts.get(conf.get('series', ''))) if conf else ''
     prefixes = {'cpp': 'all spend, ', 'landed': 'fixed within 7 days, ', 'queue': 'open PRs, ', 'touches': 'corrections and aborts per merged PR, ', 'decisions': 'reversed, '}
     kval = kval.replace('prior 7d', prefixes.get(key, '') + 'prior 7d')
+    if key == 'htm':
+        kval += kpi(series['htm90'], 'last', 'h', 'down', samples=sample_counts.get('htm90')).replace('prior 7d', 'p90, prior 7d')
+        kval = kval.replace('prior 7d', 'median, prior 7d', 1)
+    if key == 'decisions':
+        kval += kpi(series['oq_judged'], 'last', '%', 'none', rate_parts.get('oq_judged')).replace('prior 7d', 'judged, prior 7d')
     if key == 'cpp':
-        kval += kpi(series['attr7'], 'last', '$', 'down').replace('prior 7d', 'direct, median, prior 7d')
+        kval += kpi(series['attr7'], 'last', '$', 'down', samples=sample_counts.get('attr7')).replace('prior 7d', 'direct, median, prior 7d')
     colors = spec.get('colors', [INK, ACC, GREY, LIGHT, '#e08a7f'])
     if kind == 'table':
-        rows = spec.get('rows') or [['date', *fields], *[[dd, *[fmt(v[i]) for v in vals]] for i, dd in enumerate(dates)]]
+        rows = spec.get('rows') or [['date', *fields], *[[dd, *[rate_text(v[i], form, rate_parts.get(field, [None] * N)[i]) for field, v in zip(fields, vals)]] for i, dd in enumerate(dates)]]
         body = '<table class="tbl">' + ''.join('<tr>' + ''.join(f'<{"th" if i == 0 else "td"}>{esc(c)}</{"th" if i == 0 else "td"}>' for c in row) + '</tr>' for i, row in enumerate(rows)) + '</table>'
     elif kind == 'range':
         body = hrange(sorted(spec['rows'], key=lambda row: -row[1]), w=380, lw=165)
     elif kind == 'hbars':
-        body = hbars(spec['rows'], form, lw=spec.get('lw', 130))
+        body = hbars(spec['rows'], form, lw=spec.get('lw', 130), rates=spec.get('rates'))
     elif kind == 'small bars':
         maximum = 300 if key == 'spend' else max((x for field in vals for x in field if x is not None), default=1)
         panels = []
@@ -537,12 +609,12 @@ def render_tile(spec, series):
             body += f'<span><i style="background:{INK}"></i>reviews by others, 7d mean</span>'
         body += '</div>'
     else:
-        styles = [dict(vals=v, style='bar' if kind == 'bars' else 'line', color=colors[i % len(colors)], label=(spec.get('labels') or fields)[i] if kind == 'lines' and len(vals) > 1 and key != 'queue' else '') for i, v in enumerate(vals)]
+        styles = [dict(vals=v, rates=rate_parts.get(fields[i]), style='bar' if kind == 'bars' else 'line', color=colors[i % len(colors)], label=(spec.get('labels') or fields)[i] if kind == 'lines' and len(vals) > 1 and key != 'queue' else '') for i, v in enumerate(vals)]
         if kind in ('cost lines', 'merge lines'):
             samples = series.get('pr_cost' if kind == 'cost lines' else 'htm', [None] * N)
             styles.insert(0, dict(vals=samples, style='dots', color=GREY))
         if kind == 'merge lines':
-            styles[-1]['label'] = '7d median'
+            styles[-2]['label'], styles[-1]['label'] = '7d median', '7d p90'
         if key in ('ops_pr', 'fr_pr', 'escaped'):
             styles[0]['label'] = '7d'
         if kind == 'cost lines':
@@ -553,10 +625,17 @@ def render_tile(spec, series):
         if key == 'abandoned':
             body = chart([dict(vals=vals[0], style='bar', color=GREY)], h=80)
         elif kind == 'bars':
-            body = chart([dict(vals=vals[0], style='bar', color=colors[0] if key in ('guards', 'commits') else LIGHT), dict(vals=roll(vals[0]), color=INK, label='7d mean')], kind=form)
+            styles = [dict(vals=vals[0], rates=rate_parts.get(fields[0]), style='bar', color=colors[0] if key in ('guards', 'commits') else LIGHT)]
+            if form != '%' and fields[0] not in rate_parts:
+                styles.append(dict(vals=roll(vals[0], fn=st.median) if form == 'h' else roll(vals[0]), color=INK, label='7d median' if form == 'h' else '7d mean'))
+                if form == 'h':
+                    styles.append(dict(vals=roll(vals[0], fn=lambda xs: sorted(xs)[math.ceil(.9 * len(xs)) - 1]), color=ACC, label='7d p90'))
+            body = chart(styles, kind=form)
     if key == 'churn_tbl' and spec.get('weekly'):
-        for name, values, week_dates in spec['weekly']:
-            body = body.replace('<td>' + esc(name) + '</td>', '<td>' + (spark(values, w=70, h=16, sample_dates=week_dates) if len(values) > 1 else '') + '</td>')
+        for name, values, week_dates, rates in spec['weekly']:
+            body = body.replace('<td>' + esc(name) + '</td>', '<td>' + (spark(values, w=70, h=16, sample_dates=week_dates, kind='%', rates=rates) if len(values) > 1 else '') + '</td>')
+    if form == '%' and any(field not in rate_parts for field in fields):
+        body += '<div class="foot">-<br>count unavailable</div>'
     if spec.get('legend'):
         body += '<div class="lg">' + ''.join(f'<span><i style="background:{c}"></i>{esc(n)}</span>' for n, c in spec['legend']) + '</div>'
     if key == 'queue' and spec.get('labels'):
@@ -564,11 +643,11 @@ def render_tile(spec, series):
     if key == 'ops_pr':
         body += '<div class="foot">Includes the first prompt.</div>'
     if spec.get('foot'):
-        body += f'<div class="foot">{esc(spec["foot"])}</div>'
+        body += f'<div class="foot">{esc(spec["foot"]).replace(chr(10), "<br>")}</div>'
     return tile(title, body, key, spec['home'], kval, 'w2' if spec.get('wide') else '')
 
 
-def extension(path, series):
+def extension(path, series, rate_parts, sample_counts):
     data = json.loads(Path(path).read_text())
     if not isinstance(data, dict) or not isinstance(data.get('series'), dict) or not isinstance(data.get('tiles'), list):
         raise ValueError('extension needs series object and tiles list')
@@ -581,6 +660,11 @@ def extension(path, series):
             if any(x is not None and (not isinstance(x, (int, float)) or not math.isfinite(x) or x < 0) for x in xs):
                 raise ValueError('series values must be finite nonnegative numbers or null')
         series[name] = [values.get(d) for d in dates]
+        if name in rate_parts:
+            rate_parts[name] = [(None, None, '', MIN_SAMPLES, None)] * N
+            series[name] = [None] * N
+        if name in sample_counts:
+            sample_counts[name] = [None] * N
     for tile_spec in data['tiles']:
         if any(not isinstance(tile_spec.get(k), str) for k in ('key', 'band', 'title', 'home', 'about', 'kind')):
             raise ValueError('tile needs string key, band, title, home, about and kind')
@@ -601,10 +685,10 @@ def render(metrics, prose, paths=()):
     for d in dates:
         date.fromisoformat(d)
     KEY.clear()
-    series = derive(metrics)
+    series, rate_parts, sample_counts = derive(metrics)
     specs = generic_tiles(metrics)
     for path in paths:
-        for spec in extension(path, series):
+        for spec in extension(path, series, rate_parts, sample_counts):
             specs = [s for s in specs if s['key'] != spec['key']]
             specs.append(spec)
     groups = defaultdict(list)
@@ -619,7 +703,8 @@ def render(metrics, prose, paths=()):
         ('Cost', 'Cache-write share of spend', 'cw_share', 'last', '%', 'down', ''),
         ('Human touches', 'Operator messages per merged PR', 'ops_pr', 'last', '', 'down', 'optimize: lower'),
         ('Human touches', 'Corrections and aborts per merged PR', 'corr_pr', 'last', '', 'down', ''),
-        ('Human touches', 'Hours to merge', 'htm7', 'last', 'h', 'down', ''),
+        ('Human touches', 'Hours to merge (median)', 'htm7', 'last', 'h', 'down', ''),
+        ('Human touches', 'Hours to merge (p90)', 'htm90', 'last', 'h', 'down', ''),
         ('Quality', 'Escaped defects per merged PR', 'escaped_pr', 'last', '', 'down', 'guardrail'),
         ('Quality', 'PRs fixed within 7 days', 'pr_fixed', 'sum', '', 'down', ''),
         ('Churn', 'Lines rewritten within 21 days', 'cr', 'last', '%', 'down', 'guardrail'),
@@ -631,8 +716,8 @@ def render(metrics, prose, paths=()):
         curated.pop(1)
     for category, title, field, how, form, better, target in curated:
         values = series.get(field, [None] * N)
-        if any(v is not None for v in values):
-            groups[category].append(score_row(title, values, how, form, better, target))
+        if any(v is not None for v in values) or field in rate_parts:
+            groups[category].append(score_row(title, values, how, form, better, target, rate_parts.get(field), sample_counts.get(field)))
     for spec in specs:
         conf = spec.get('score_row')
         if not conf:
@@ -641,13 +726,13 @@ def render(metrics, prose, paths=()):
         if any(isinstance(v, list) for v in values if v is not None):
             continue
         if any(v is not None for v in values):
-            groups[conf.get('category', spec['band'])].append(score_row(conf.get('title', spec['title']), values, conf.get('how', 'last'), conf.get('format', ''), conf.get('better', 'none')))
+            groups[conf.get('category', spec['band'])].append(score_row(conf.get('title', spec['title']), values, conf.get('how', 'last'), conf.get('format', ''), conf.get('better', 'none'), rates=rate_parts.get(conf.get('series', '')), samples=sample_counts.get(conf.get('series', ''))))
     score = ''.join(f'<tr class="grp"><td colspan="6">{esc(category)}</td></tr>' + ''.join(rows) for category, rows in groups.items())
     P['score'] = prose.get('score', '')
     score = tile('Last 7 days against the 7 days before', f'<table class="tbl sc"><tr><th></th><th>{daylabel(dates[0])} to {daylabel(dates[-1])}</th><th>prior 7d</th><th>last 7d</th><th>change</th><th></th></tr>{score}</table>', 'score', 'hworks', cls='full')
     bands = [band('Scorecard', [score])]
     for bandname in BANDS:
-        bands.append(band(bandname, [render_tile(s, series) for s in specs if s['band'] == bandname]))
+        bands.append(band(bandname, [render_tile(s, series, rate_parts, sample_counts) for s in specs if s['band'] == bandname]))
     notes = ''.join(f'<li>{esc(n)}</li>' for n in prose.get('notes', []))
     coverage = metrics.get('coverage', {})
     missing = coverage.get('missing_prs', [])
