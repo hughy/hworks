@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { parseFrontmatter, rewriteRelativeLinks } from '../scripts/lib/render-common.mjs';
+import { renderDashboard } from '../scripts/lib/dashboard.mjs';
 
 const engine = fileURLToPath(new URL('../', import.meta.url));
 const web = 'https://code.example.test/org/context';
@@ -280,6 +281,7 @@ Authored summary with [design](notes/design%20notes.md#choice).
 Who reviews the draft?
 ## Next steps
 - Review the draft.
+- [x] Circulate the outline.
 ## Architecture
 Architecture stays in the source.
 `);
@@ -291,31 +293,46 @@ Architecture stays in the source.
     const before = filesUnder(f.instance);
     success(f.render());
     const index = f.html(), alpha = f.html('projects/alpha.html'), zeta = f.html('projects/zeta.html');
-    assert.ok(index.indexOf('Alpha example') < index.indexOf('Zeta example'));
+    assert.ok(index.indexOf('Zeta example') < index.indexOf('Alpha example'), 'more reasons rank first');
     assert.ok(index.includes('href="projects/alpha.html"'));
     assert.ok(index.includes('href="projects/zeta.html"'));
-    assert.match(index, /2026-05-02/);
-    assert.match(index, /Dates below are authored STATE review dates, not refresh times/);
+    assert.match(alpha, /STATE reviewed/);
+    assert.match(index, /Projects ranked by what needs a look/);
     assert.ok(index.includes('href="https://tracker.example.test/alpha"'));
     assert.ok(index.includes('href="https://chat.example.test/alpha"'));
     assert.match(alpha, /First owner/);
     assert.match(alpha, /Authored summary/);
     assert.match(alpha, /Who reviews the draft\?/);
     assert.match(alpha, /Review the draft/);
-    assert.doesNotMatch(alpha, /Architecture stays in the source|Unrelated repository|Second owner/);
+    assert.ok(alpha.indexOf('Next steps') < alpha.indexOf('Authored summary'), 'next steps lead the project page');
+    assert.match(alpha, /<li class="task"><input type="checkbox" disabled aria-label="Open"><div>Review the draft\.<\/div><\/li>/);
+    assert.match(alpha, /<li class="task done"><input type="checkbox" disabled checked aria-label="Done"><div>Circulate the outline\.<\/div><\/li>/);
+    assert.match(index, /1 open/);
+    assert.match(alpha, /<summary>1 done<\/summary>/);
+    assert.doesNotMatch(alpha, /Unrelated repository|Second owner/);
     assert.match(alpha, /Alpha repository/);
     assert.match(alpha, /Shared repository/);
     assert.match(zeta, /Shared repository/);
     assert.doesNotMatch(zeta, /Alpha repository|Unrelated repository|First owner/);
-    assert.ok(alpha.includes(`href="${pathToFileURL(join(f.instance, 'projects/alpha/notes/design notes.md')).href}#choice"`));
-    assert.ok(alpha.includes(`href="${pathToFileURL(join(f.instance, 'repos/shared.md')).href}"`));
+    // Instance Markdown links open rendered pages; those pages link back to the raw source.
+    assert.ok(alpha.includes('href="../source/projects/alpha/notes/design%20notes.md.html#choice"'));
+    assert.ok(alpha.includes('href="../source/repos/shared.md.html"'));
+    const state = f.html('source/projects/alpha/STATE.md.html');
+    assert.match(state, /<h2[^>]*>Architecture<\/h2>/);
+    assert.match(state, /Architecture stays in the source/);
+    assert.ok(state.includes('href="notes/design%20notes.md.html#choice"'));
+    assert.ok(state.includes(`href="${pathToFileURL(join(f.instance, 'projects/alpha/STATE.md')).href}"`));
+    assert.ok(state.includes('href="../../../projects/alpha.html"'), 'source page links back to its project');
+    assertLocalHrefsWork(state, join(f.out, 'source/projects/alpha/STATE.md.html'));
     for (const [path, html] of [['index.html', index], ['projects/alpha.html', alpha], ['projects/zeta.html', zeta]]) {
-      assert.match(html, /Registry only/);
-      assert.match(html, /No remote sources were queried/);
+      assert.match(html, /class="ws"/);
       assertLocalHrefsWork(html, join(f.out, path));
     }
     const firstOutput = filesUnder(f.out);
-    assert.deepEqual(Object.keys(firstOutput), ['index.html', 'projects/alpha.html', 'projects/zeta.html']);
+    assert.deepEqual(Object.keys(firstOutput), ['index.html', 'projects/alpha.html', 'projects/zeta.html',
+      'source/HOFFICE.md.html', 'source/projects/alpha/DOCS.md.html', 'source/projects/alpha/README.md.html', 'source/projects/alpha/STATE.md.html',
+      'source/projects/alpha/notes/design notes.md.html', 'source/projects/zeta/README.md.html',
+      'source/repos/alpha.md.html', 'source/repos/shared.md.html', 'source/repos/unrelated.md.html']);
     success(f.render());
     assert.deepEqual(filesUnder(f.out), firstOutput, 'unchanged inputs produce byte-identical pages');
     assert.deepEqual(filesUnder(f.instance), before, 'rendering does not change instance sources');
@@ -335,9 +352,9 @@ test('dashboard tolerates absent optional project files and empty registries wit
     assert.match(html, /Registry fields unavailable/);
     assert.match(html, /No repository cards registered/);
     assert.match(html, /Authoritative documents unavailable/);
-    assert.match(html, /Last reviewed: <span class="muted">Unavailable<\/span>/);
-    assert.match(html, /<h3>summary<\/h3><p>Unavailable\.<\/p>/);
-    assert.match(html, /<h2>Latest digests<\/h2><p><span class="muted">Unavailable<\/span>/);
+    assert.match(html, /STATE has no review date/);
+    assert.match(html, /No next steps recorded/);
+    assert.match(html, /No dated notes/);
     assert.doesNotMatch(html, /2026-02-30|href="[^"]*(?:DOCS|DIGEST)\.md/);
     assertLocalHrefsWork(html, join(f.out, `projects/${slug}.html`));
   }
@@ -362,12 +379,15 @@ test('dashboard associates digests through config and selects the latest valid p
   assert.match(result.stderr, /skipped digest: invalid period_end/);
   assert.match(result.stderr, /skipped digest: missing frontmatter/);
   assert.match(result.stderr, /skipped digest configuration/);
+  renderDashboard({ instance: f.instance, out: f.out, now: new Date('2026-05-04T00:00:00Z') });
   for (const slug of ['alpha', 'beta']) {
     const html = f.html(`projects/${slug}.html`);
-    assert.match(html, /Shared activity \(2026-05-03\)/);
-    assert.match(html, /Newest valid summary/);
-    assert.ok(html.includes(`href="${pathToFileURL(latest).href}"`));
-    assert.doesNotMatch(html, /Older same-day summary|Invalid date summary|Malformed date summary|Missing metadata summary|Archived summary|Undated file summary|Unconfigured summary|Status not summary/);
+    assert.match(html, /daily digests/);
+    assert.match(html, /<b>1 day ago<\/b><small>latest digest<\/small>/);
+    assert.match(f.html('source/digests/daily/2026-01-01-daily.md.html'), /Newest valid summary/);
+    assert.ok(html.includes('href="../source/digests/daily/2026-01-01-daily.md.html"'));
+    assert.ok(f.html('source/digests/daily/2026-01-01-daily.md.html').includes(`href="${pathToFileURL(latest).href}"`));
+    assert.doesNotMatch(html, /Unconfigured summary|Status not summary/);
     assertLocalHrefsWork(html, join(f.out, `projects/${slug}.html`));
   }
   assert.doesNotMatch(f.html('projects/daily.html'), /Shared activity|Newest valid summary/);
@@ -422,7 +442,7 @@ test('dashboard escapes source content and drops unsafe or missing link targets 
   success(f.render());
   const html = f.html('projects/unsafe.html');
   for (const page of [f.html(), html]) {
-    assert.doesNotMatch(page, /<(?:script|img|svg)\b/i);
+    assert.doesNotMatch(page.replace(/<script>[\s\S]*?<\/script>/g, ''), /<(?:script|img|svg)\b/i);
     assert.doesNotMatch(page, /href="(?:javascript|data|ftp):/i);
     assert.match(page, /Example &lt;script>alert\(1\)&lt;\/script> &amp; &quot;review&quot;/);
     assertLocalHrefsWork(page, join(f.out, page === html ? 'projects/unsafe.html' : 'index.html'));
@@ -430,12 +450,20 @@ test('dashboard escapes source content and drops unsafe or missing link targets 
   assert.match(html, /&lt;img src=x onerror=alert\(1\)>/);
   assert.match(html, /&lt;script>alert\(2\)&lt;\/script>/);
   assert.match(html, /&lt;svg onload=alert\(3\)>/);
-  assert.match(html, /Activity &lt;img src=x> &amp; review/);
+  assert.match(f.html('source/digests/activity/DIGEST.md.html'), /Activity &lt;img src=x> &amp; review/);
   assert.match(html, /&lt;img src=x onerror=alert\(4\)>/);
   for (const label of ['Unsafe tracker', 'Unsafe script', 'Unsafe data', 'Unsafe file transfer', 'Missing local', 'Image label', 'Unsafe doc', 'Unsafe digest']) {
     assert.ok(html.includes(label), `lost label: ${label}`);
   }
   assert.doesNotMatch(html, /href="[^"]*notes\/missing\.md/);
+  // Rendered source pages, including frontmatter properties, get the same escaping and link filtering.
+  for (const path of Object.keys(filesUnder(join(f.out, 'source')))) {
+    const page = f.html(`source/${path}`);
+    assert.doesNotMatch(page, /<(?:script|img|svg)\b/i, path);
+    assert.doesNotMatch(page, /href="(?:javascript|data|ftp):/i, path);
+    assertLocalHrefsWork(page, join(f.out, 'source', path));
+  }
+  assert.match(f.html('source/digests/activity/DIGEST.md.html'), /Activity &lt;img src=x> &amp; review/);
   assert.ok(html.includes('href="https://docs.example.test/?a=1&amp;b=2"'));
   assert.ok(f.html().includes('href="https://chat.example.test/?a=1&amp;b=2"'));
 });
@@ -472,7 +500,7 @@ test('dashboard rejects ancestor output without overwriting instance files', (t)
   assert.deepEqual(filesUnder(f.instance), before);
 });
 
-for (const destination of ['index.html', 'projects', 'projects/alpha.html']) {
+for (const destination of ['index.html', 'projects', 'projects/alpha.html', 'source']) {
   test(`dashboard rejects a symlink at output ${destination} before writing any pages`, (t) => {
     const f = dashboardFixture(t);
     f.write('projects/alpha/README.md', '# Alpha sentinel\n');
@@ -485,9 +513,94 @@ for (const destination of ['index.html', 'projects', 'projects/alpha.html']) {
     assert.equal(result.status, 1, `output symlink accepted: ${destination}`);
     assert.match(result.stderr, /output destination must not be a symlink/);
     assert.deepEqual(filesUnder(f.instance), before, 'all instance sentinels must remain unchanged');
-    assert.deepEqual(readdirSync(f.out).sort(), [destination === 'index.html' ? 'index.html' : 'projects']);
+    assert.deepEqual(readdirSync(f.out).sort(), [destination === 'index.html' || destination === 'source' ? destination : 'projects']);
     if (destination === 'projects/alpha.html') {
       assert.deepEqual(readdirSync(join(f.out, 'projects')), ['alpha.html'], 'no other project pages written before rejection');
     }
   });
 }
+
+function workspaceFixture(t) {
+  const f = dashboardFixture(t);
+  f.write('projects/alpha/README.md', '# Alpha <one>\n\nAlpha lead.\n\n| Field | Value |\n|---|---|\n| Tracker | [Board](https://tracker.example.test/alpha) |\n');
+  f.write('projects/alpha/STATE.md', '# Alpha state\n\nLast reviewed: 2026-05-01 by test.\n\n## Summary\n\nAlpha summary.\n\n## Open questions\n\n- Which <way>?\n\n## Next steps\n\n- [x] Ship the first part\n- Write the [design](notes/design.md#the-choice)\n');
+  f.write('projects/alpha/notes/design.md', '# Design note\n\n## The choice\n\n## The choice\n\n## The choice-1\n\n## See [the plan](https://plan.example.test/x)\n');
+  f.write('projects/alpha/sessions/2026-05-02-kickoff.md', '# Kickoff\n');
+  // Hostile front matter must stay safe when rendered as event detail.
+  f.write('projects/alpha/decisions/2026-05-04-pick.md', '---\nstatus: pro<s>posed\ntags: [a<k>, "c,d"]\nprs:\n  - javascript:alert(1)\n  - "https://git.example.test/o/r/pull/7"\n---\n\n# Pick <one>\n\n## Decision\n\nUse <way> here.\n\n## Consequences\n\n- First <s>\n- Second\n- Third\n- Fourth\n');
+  f.write('projects/beta/README.md', '# Beta\n');
+  f.write('projects/beta/STATE.md', '# Beta state\n\n## Next steps\n\nNone agreed. [bad](file:///tmp/%2Fbad)\n');
+  // Hostile directory names: project slugs and document kinds come straight from the filesystem.
+  f.write('projects/q"<s>/README.md', '# Hostile\n');
+  f.write('projects/q"<s>/STATE.md', '# State\n\n## Next steps\n\n- Step\n\n## Open questions\n\n- Q\n');
+  f.write('projects/q"<s>/n"<k>/2026-05-03-x.md', '# X\n');
+  // Kinds that collide with Object.prototype names, and slugs a lossy token encoding would merge.
+  for (const kind of ['constructor', '__proto__', 'toString']) f.write(`projects/alpha/${kind}/note.md`, '# Note\n');
+  for (const slug of ['x.y', 'x_2e_y', 'home']) f.write(`projects/${slug}/README.md`, `# ${slug}\n`);
+  // The project named home must not collide with the Overview view.
+  f.write('projects/home/sessions/2026-05-04-note.md', '# Note in home\n');
+  f.write('projects/home/STATE.md', '# State\n## Next steps\n- [x] Finished already\n');
+  return f;
+}
+
+test('workspace renders unique views, folded events and safe source headings for hostile paths', (t) => {
+  const f = workspaceFixture(t);
+  f.write('projects/alpha/notes/entities.md', '# Entities\n## Caf&#233; &#x41;\n## Café A\n## See [the plan](https://plan.example.test/x)\n');
+  f.write('projects/alpha/sessions/2026-05-05-crlf.md', '---\r\ntags: [crlf]\r\n---\r\n# CRLF\r\n## Goal\r\nNormalized session.\r\n');
+  f.write('projects/alpha/sessions/2026-05-06-fallback.md', '---\nprs: [\n---\n# Fallback\n## Goal\nFallback session.\n');
+  success(f.render());
+  const index = f.html();
+  const overview = index.match(/id="v-_home">([\s\S]*?)<\/section>/)[1];
+  assert.match(overview, /Write the/);
+  assert.match(overview, /None agreed\./);
+  assert.doesNotMatch(overview, /Finished already/);
+  assert.match(index, /Normalized session\./);
+  assert.match(index, /Fallback session\./);
+  assert.match(index, /<section class="view" id="v-_home">/);
+  assert.match(index, /<section class="view" id="v-home" hidden>/);
+  // Prose next steps have no open count, and a single note reads as singular.
+  assert.doesNotMatch(index.match(/href="#v-beta"[\s\S]*?<\/a>/)[0], /open/);
+  assert.match(index.match(/href="#v-alpha"[\s\S]*?<\/a>/)[0], /1 open/);
+  assert.match(index.match(/id="v-home"[\s\S]*?<\/section>/)[0], />1 note</);
+  assert.match(index, /<noscript>[\s\S]*href="projects\/home\.html"/);
+  assert.match(index, /<b>Decision\.<\/b> Use &lt;way> here\./);
+  assert.match(index, /\+1 more in the full note/);
+  assert.match(index, /<a href="https:\/\/git\.example\.test\/o\/r\/pull\/7">o\/r#7<\/a>/);
+  assert.match(index, /<p class="d-tags"><span>a&lt;k><\/span><span>c,d<\/span><\/p>/);
+  assert.match(f.html('projects/alpha.html'), /href="\.\.\/index\.html#v-beta"/);
+  assert.match(f.html('source/projects/alpha/notes/design.md.html'), /<h2 id="the-choice">The choice<\/h2>\n<h2 id="the-choice-1">The choice<\/h2>\n<h2 id="the-choice-1-1">The choice-1<\/h2>\n<h2 id="see-the-plan">/);
+  assert.match(f.html('source/projects/alpha/notes/entities.md.html'), /id="café-a"/);
+  assert.match(f.html('source/projects/alpha/notes/entities.md.html'), /id="café-a-1"/);
+  for (const [path, html] of Object.entries(filesUnder(f.out))) {
+    const ids = [...html.matchAll(/ id="([^"]+)"/g)].map(m => m[1]);
+    assert.equal(new Set(ids).size, ids.length, `duplicate ids in ${path}`);
+    assert.doesNotMatch(html, /<way>|<one>|q"<|n"<|<s>|<k>/, path);
+    assertLocalHrefsWork(html, join(f.out, path));
+  }
+});
+
+test('dashboard preflights nested source symlinks before any writes', (t) => {
+  const f = dashboardFixture(t);
+  f.write('projects/alpha/README.md', '# Alpha\n');
+  mkdirSync(join(f.out, 'source/projects/alpha'), { recursive: true });
+  symlinkSync(join(f.instance, 'HOFFICE.md'), join(f.out, 'source/projects/alpha/README.md.html'));
+  const result = f.render();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /output destination must not be a symlink/);
+  assert.deepEqual(readdirSync(f.out), ['source']);
+  assert.equal(readFileSync(join(f.instance, 'HOFFICE.md'), 'utf8'), '---\nname: Example registry\n---\n');
+});
+
+test('dashboard refuses case-folded page collisions before writing', (t) => {
+  const f = dashboardFixture(t);
+  f.write('projects/alpha/README.md', '# Alpha\n');
+  f.write('projects/ALPHA/README.md', '# Upper alpha\n');
+  if (readdirSync(join(f.instance, 'projects')).length !== 2) {
+    t.skip('case-insensitive filesystem cannot hold colliding input names');
+    return;
+  }
+  const result = f.render();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /two pages render to/);
+  assert.deepEqual(readdirSync(f.out), []);
+});
