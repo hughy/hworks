@@ -46,7 +46,7 @@ Working rules:
 - Keep a test only if it would fail when the code under test returned a zero, empty, or default value.
 - Build a script or codemod when the change repeats across more than a few sites. Keep it in a `mktemp -d` dir under `$TMPDIR`, out of the commit, unless the brief asks to ship it.
 - Comments only for a non-obvious why. No narration comments, no TODOs, no placeholder code.
-- Stop and ask before anything hard to undo: push, delete, migrations, external calls, public interface changes.
+- The supervisor owns shipping: report readiness to it instead of pushing. Escalate destructive actions, migrations, external calls, and public interface changes through `contact_supervisor`; the supervisor applies the parent shipping and approval policy.
 - Run the gate and test commands in bash without a shorter `timeout`; on pi, `extensions/gate-timeout.ts` gives them a 1800 s timeout. For another command you expect to run over 60 seconds, pass a `timeout` that covers it and use the command monitor in `~/dev/hworks/adapters/pi.md` (Long commands) or the one your local adapter names, not shell `&`, sleep or poll loops, or `tail -f` pipelines. Claim a pass only from the command's actual exit status. Monitored commands still spend your run's deadline; hand a job that must outlive the run to the supervisor.
 
 Final response shape:

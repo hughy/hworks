@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Set up hworks on this machine. Safe to rerun.
-# usage: install.sh [--profile <name>] [--check]
+# usage: install.sh [--profile <name>] [--amp] [--check]
+#   --amp             also link Amp guidance and machine-local skills
 #   --profile <name>  apply a model profile with models.sh after linking
 #   --check           report what is installed and what differs; change nothing
 #
@@ -15,15 +16,25 @@ pi=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}
 settings=${PI_SETTINGS:-$pi/settings.json}
 tasks=${HWORKS_TASKS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-tasks}
 
-check=0; profile=
+check=0; profile=; amp=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) check=1; shift ;;
+    --amp) amp=1; shift ;;
     --profile) profile=${2:?--profile needs a name}; shift 2 ;;
     -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# A linked worktree is disposable; permanent user links must come from a standalone clone.
+git_dir=$(unset $(git rev-parse --local-env-vars); git -C "$root" rev-parse --absolute-git-dir 2>/dev/null || true)
+common=$(unset $(git rev-parse --local-env-vars); git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+if [ "$check" = 0 ] && [ -n "$git_dir" ] && [ "$git_dir" != "$common" ]; then
+  echo "refusing installation from a linked worktree: $root" >&2
+  echo "Run install.sh from a durable standalone clone instead (git common dir: $common)." >&2
+  exit 1
+fi
 
 status=0
 say() { printf '%-8s %s\n' "$1" "$2"; }
@@ -61,6 +72,15 @@ elif [ -e "$HOME/AGENTS.md" ]; then
 fi
 link "$root/global/AGENTS.md" "$HOME/.claude/CLAUDE.md"
 link "$root/global/AGENTS.md" "$HOME/.codex/AGENTS.md"
+if [ "$amp" = 1 ]; then
+  link "$root/global/AGENTS.md" "$HOME/.config/amp/AGENTS.md"
+  for skill in "$root"/skills/*; do
+    [ -f "$skill/SKILL.md" ] || continue
+    name=$(basename "$skill")
+    # Amp loads only the first skill by name. Keep a fallback even if shared roots are disabled.
+    link "$skill" "$HOME/.config/amp/skills/$name"
+  done
+fi
 link "$root/agents" "$pi/agents/hworks"
 for ext in "$root"/extensions/*.ts; do
   [ -e "$ext" ] || continue

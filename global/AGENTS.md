@@ -48,7 +48,7 @@
 ## Tool hygiene
 
 - Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands as background processes that wake you on exit or on a log match, and use a PR tracker, not polling, for CI and reviews. Do not pass a short `timeout` to a gate or test run in foreground bash; on pi, hworks `extensions/gate-timeout.ts` raises it to 1800 s.
-- Read files with `hashread` and an `offset`/`limit` range. Pipe any command that may print more than 200 lines through `head`, `tail`, or a filter (`rg -m`, `git diff --stat`, `jq`). Exception: never filter a test, lint, or check run. The failing line can fall outside the filter and force a rerun; run it unfiltered and, when the harness truncates and saves the full output to a file, search that file.
+- Read files with the harness's ranged-read tool, selecting the lines needed. Pipe any command that may print more than 200 lines through `head`, `tail`, or a filter (`rg -m`, `git diff --stat`, `jq`). Exception: never filter a test, lint, or check run. The failing line can fall outside the filter and force a rerun; run it unfiltered and, when the harness truncates and saves the full output to a file, search that file.
 
 ## Comments
 
