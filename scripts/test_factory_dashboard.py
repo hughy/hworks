@@ -182,6 +182,40 @@ class RendererTest(unittest.TestCase):
                 else:
                     self.assertIn('>-80%</span>', tile)
 
+    def test_hands_off_tile_counts_sample_floor_and_delta(self):
+        for previous, current in ((5, 4), (4, 5), (5, 5), (None, None)):
+            with self.subTest(previous=previous, current=current):
+                data = json.loads((FIX / 'metrics.json').read_text())
+                for d in data['days']:
+                    d.update(workers=0, worker_touches=0, workers_merged=0, workers_merged_hands_off=0)
+                data['days'][-8].update(workers=previous, workers_merged=previous, workers_merged_hands_off=previous)
+                data['days'][-1].update(workers=current, worker_touches=2, workers_merged=current, workers_merged_hands_off=1 if current else None)
+                if current is None:
+                    for d in data['days']:
+                        d.update(workers=None, worker_touches=None, workers_merged=None, workers_merged_hands_off=None)
+                with tempfile.TemporaryDirectory() as temp:
+                    path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+                    text = self.run_dashboard(path)
+                tile = text[text.index('Worker sessions hands-off</span>'):text.index('</details>', text.index('Worker sessions hands-off</span>'))]
+                if current is None:
+                    self.assertIn('-<br>count unavailable', tile)
+                    self.assertIn('- workers; - touches', tile)
+                elif current == 4:
+                    self.assertIn('<span class="lv">-<br>4 of 5 needed</span>', tile)
+                    self.assertNotIn('25%', tile)
+                else:
+                    self.assertIn('<span class="lv">20%, 1 of 5</span>', tile)
+                    self.assertIn('Jan 21: 20%, 1 of 5</title>', tile)
+                if current is not None:
+                    self.assertIn(f'{previous + current} workers; 2 touches', tile)
+                    self.assertIn('Window: ' + ('67%, 6 of 9' if previous == 5 and current == 4 else '56%, 5 of 9' if previous == 4 else '60%, 6 of 10'), tile)
+                if previous == 4:
+                    self.assertIn('prior 7d -<br>4 of 5 needed', tile)
+                if current is None or min(previous, current) < 5:
+                    self.assertNotIn('class="chg', tile)
+                else:
+                    self.assertIn('>-80%</span>', tile)
+
     def test_duration_median_and_p90_not_mean(self):
         data = json.loads((FIX / 'metrics.json').read_text())
         data['days'][-1]['htm'] = [1, 1, 1, 1, 96]

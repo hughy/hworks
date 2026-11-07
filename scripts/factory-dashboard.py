@@ -396,6 +396,7 @@ def derive(metrics):
     for key, num, den in [('cw_share', 'cw', 'spend'), ('long_share', 'longc', 'spend'), ('coverage', 'linked', 'spend'), ('factory_share', 'spend_factory', 'spend'), ('schema', 'fr_inschema', 'fr_rows'), ('cr', 'churn21', 'added')]:
         counts = rsum([int(v is not None) for v in col(den)]) if den == 'spend' else None
         rate(key, rsum(col(num)), rsum(col(den)), unit='$' if den == 'spend' else '', counts=counts)
+    rate('hands_off', rsum(col('workers_merged_hands_off')), rsum(col('workers_merged')))
     series['escaped'] = [None if d.get('friction') is None else d['friction'].get('operator', 0) + d['friction'].get('ci', 0) for d in D]
     series['fr_all'] = [None if d.get('friction') is None else sum(d['friction'].values()) for d in D]
     for key, src in [('escaped_pr', 'escaped'), ('fr_pr', 'fr_all')]:
@@ -470,6 +471,17 @@ def generic_tiles(metrics):
         add(key, title, 'Cost', kind='hbars', rows=[(('round ' if label == 'round' else '') + str(r[label]), r['cost']) for r in report.get(section, [])], form='$')
     add('cloud', 'Cloud agent spend', 'Cost', ['cloud'], 'empty')
     add('revcost', 'Cost per dispatched review', 'Cost', ['revcost'], 'empty')
+    add('hands_off', 'Worker sessions hands-off', 'Human touches and friction', ['hands_off'], form='%', better='up')
+    specs[-1]['about'] = ('Zero-touch share of worker sessions linked to a merged PR, by first-message local date. '
+                         'The chart and comparison use 7-day windows; the footer covers the full reporting window. '
+                         'Touches exclude the first prompt and messages matching HWORKS_OPERATOR_SKIP. '
+                         'HWORKS_FM_WORKER_PROMPT must be configured; counts are triage leads, not an SLA.')
+    hands_off = nullable_sum([d.get('workers_merged_hands_off') for d in D])
+    merged_workers = nullable_sum([d.get('workers_merged') for d in D])
+    part = (hands_off, merged_workers, '', MIN_SAMPLES, merged_workers)
+    specs[-1]['foot'] = (f'Window: {rate_text(rate_value(part), "%", part)}; '
+                         f'{fmt(nullable_sum([d.get("workers") for d in D]))} workers; '
+                         f'{fmt(nullable_sum([d.get("worker_touches") for d in D]))} touches')
     add('ops_pr', 'Operator messages per merged PR', 'Human touches and friction', ['ops_pr'], better='down', target='lower is better')
     add('touches', 'Operator touches per day, by type', 'Human touches and friction', ['touch_stack'], 'stacked bars', names=['corrections', 'aborts', 'approvals and status checks', 'other'], wide=True)
     specs[-1]['kpi'] = dict(series='corr_pr', how='last', better='down')
@@ -532,7 +544,7 @@ def generic_tiles(metrics):
         spec['labels'] = labels.get(spec['key'], [])
         if spec['key'] in palettes:
             spec['colors'] = palettes[spec['key']]
-        if spec['key'] in ('cw', 'longc', 'coverage', 'factory', 'decisions', 'schema'):
+        if spec['key'] in ('cw', 'longc', 'coverage', 'factory', 'decisions', 'schema', 'hands_off'):
             spec['ymax'] = 1
         if spec['key'] in ('funnel', 'loops', 'timesplit'):
             spec['lw'] = 70

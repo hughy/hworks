@@ -16,6 +16,9 @@ are also loaded by the existing reporter loader.
     Empty accepts every transcript-linked PR, including authors unavailable in gh.
   HWORKS_FM_SESSION_RULES: JSON ordered [{pattern: regex, class: product|factory|
     home|automation}]; matches cwd; first wins. Default class product, absent cwd home.
+  HWORKS_FM_WORKER_PROMPT: regex matched with re.match against the first user
+    message after operator-signals' leading injection stripping. Unset/empty makes
+    worker fields null; configure overlay-specific prompt text in the environment.
   HWORKS_PI_SESSIONS, HWORKS_PR_TOOLS, HWORKS_GH, HWORKS_OPERATOR_SKIP,
   HWORKS_INJECTED_PREFIX, HWORKS_REDACT, HWORKS_TASKS_DIR, HWORKS_BLOCKERS_LOG,
   HWORKS_SUBAGENT_RUNS, HWORKS_RUN_HISTORY, HWORKS_HARNESS_AUDIT_LOG:
@@ -41,6 +44,11 @@ Output fields:
  ops/sig_correction/sig_abort/sig_approval/sig_status-check: operator-signals
    messages and signals; main pi sessions only, INCLUDING first prompts (reporter
    definition, unlike prototype). No prompt text is emitted.
+ workers/worker_touches: top-level worker sessions started and subsequent operator
+   messages in them (HWORKS_OPERATOR_SKIP applies), by first-message local date.
+   Touches include follow-ups before the reporting window ends, not the first prompt.
+ workers_merged/workers_merged_hands_off: workers linked through their root tree to
+   any known merged PR / those with zero touches; denominator/numerator for the share.
  pr_cost: direct costs of merged PRs, root-tree window spend split equally over
    linked PRs; abandoned_spend: same for closed-unmerged PRs by close day.
  open_prs/open_age: end-of-day open PR count and median age in days.
@@ -213,6 +221,7 @@ def landed(prs, end):
 
 
 SESSION = 'spend spend_product spend_factory spend_home spend_auto cw longc linked ops sig_correction sig_abort sig_approval sig_status-check'.split()
+WORKER = 'workers worker_touches workers_merged workers_merged_hands_off'.split()
 PR = 'opened merged abandoned pr_landed pr_fixed pr_holding pr_cost abandoned_spend open_prs open_age human_reviews htm'.split()
 TASK = 'tasks_done tasks_landed tasks_fixed tasks_nopr tasks_holding tasks_canceled queue wip'.split()
 BLOCK = 'friction fr_rows fr_inschema guard oq oq_kept oq_reversed subagent_fail babysitter_fail runs_never_started'.split()
@@ -244,12 +253,18 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
     days = {}
     for i in range((end - start).days + 1):
         key = (start + timedelta(days=i)).isoformat()
-        days[key] = dict.fromkeys(SESSION + PR + TASK + BLOCK + GIT + ['cloud', 'revcost', 'effective', 'automations', 'kaizen'])
+        days[key] = dict.fromkeys(SESSION + WORKER + PR + TASK + BLOCK + GIT + ['cloud', 'revcost', 'effective', 'automations', 'kaizen'])
         days[key]['date'] = key
     cov = dict(sources=[], counts=Counter(), failures=[], missing_sources=[], dropped_pr_links=[], missing_prs=[], unavailable_pr_hosts=[])
     tables = dict(prs=[], repo_cost={}, prs_per_task=[], token_report={}, time={}, churn={})
     notes, sessions, links = [], {}, defaultdict(set)
     root = ks.sources()['sessions']
+    worker_prompt = os.environ.get('HWORKS_FM_WORKER_PROMPT')
+    worker_prompt = re.compile(worker_prompt) if worker_prompt else None
+    if worker_prompt is None:
+        cov['missing_sources'].append('workers: HWORKS_FM_WORKER_PROMPT unset or empty')
+    operator_src = ops.sources()
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     rules = json.loads(os.environ.get('HWORKS_FM_SESSION_RULES', '[]'))
     if not isinstance(rules, list) or any(not isinstance(r, dict) or not isinstance(r.get('pattern'), str) for r in rules):
         raise ValueError('session rules must be a list of pattern/class objects')
@@ -260,6 +275,8 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
     if os.path.isdir(root):
         cov['sources'].append('pi')
         initialize(days, SESSION)
+        if worker_prompt is not None:
+            initialize(days, WORKER)
         for path in sorted(glob.glob(os.path.join(root, '**', '*.jsonl'), recursive=True)):
             if '/subagent-artifacts/' in path:
                 continue
@@ -290,14 +307,22 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
                 d['cw'] += t['cost'].get('cacheWrite') or 0
                 d['longc'] += cost if t['input'] + t['cr'] + t['cw'] > 150000 else 0
             if s['kind'] == 'main':
-                _, _, messages = ops.read_session(path, since, ops.sources(), notes)
+                first = next((m for m in s['pr']['messages'] if m['role'] == 'user'), None)
+                first_text, first_skills = ops.strip_injections(first['text'], operator_src['prefix']) if first else ('', [])
+                worker = worker_prompt is not None and first is not None and worker_prompt.match(first_text)
+                _, _, messages = ops.read_session(path, epoch if worker else since, operator_src, notes)
+                if worker and day(first['ts'].isoformat(), tz) in days:
+                    touches = sum(ks.to_dt(op['ts']) < until for op in messages)
+                    if (first_text or first_skills) and (not operator_src['skip'] or not operator_src['skip'].search(first['text'])):
+                        touches -= 1
+                    s['worker'] = (day(first['ts'].isoformat(), tz), touches)
                 for op in messages:
                     key = day(op['ts'], tz)
                     if key in days:
                         days[key]['ops'] += 1
                         for name, fn in ops.SIGNALS.items():
                             days[key]['sig_' + name] += bool(fn(op))
-                kp.add_split(total_time, kp.time_split([m for m in s['pr']['messages'] if since <= m['ts'] < until], ops.sources()['skip']))
+                kp.add_split(total_time, kp.time_split([m for m in s['pr']['messages'] if since <= m['ts'] < until], operator_src['skip']))
         tables['time'] = {k: total_time.get(k, 0) for k in ('model', 'tool', 'human', 'harness')}
         # Existing reporter owns cache rewrite and review loop definitions.
         report, more = kt.analyze(ks.sources(), since, min_sessions=1, top=10000, until=until)
@@ -344,6 +369,17 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
                 for t in s['turns']:
                     if t['dt'] and since <= t['dt'] < until:
                         days[day(t['dt'].isoformat(), tz)]['linked'] += t['cost'].get('total') or 0
+    if not pr_available:
+        for d in days.values():
+            d['workers_merged'] = d['workers_merged_hands_off'] = None
+    for s in sessions.values():
+        if 'worker' in s:
+            dd, touches = s['worker']
+            days[dd]['workers'] += 1
+            days[dd]['worker_touches'] += touches
+            if pr_available and any(prs.get(u, {}).get('mergedAt') for u in links[s['root']]):
+                days[dd]['workers_merged'] += 1
+                days[dd]['workers_merged_hands_off'] += touches == 0
     states = landed(prs, until)
     costs = Counter()
     for path, s in sessions.items():
