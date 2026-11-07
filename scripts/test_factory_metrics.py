@@ -72,6 +72,58 @@ class CollectorTest(unittest.TestCase):
         outcomes = {p['number']: p['landed'] for p in updated['tables']['prs']}
         self.assertEqual([outcomes[n] for n in (1, 2, 3)], ['pr_landed', 'pr_fixed', 'pr_fixed'])
 
+    def test_worker_sessions_touches_and_merged_hands_off(self):
+        self.env.update(HWORKS_FM_WORKER_PROMPT=r'Worker job\b',
+                        HWORKS_OPERATOR_SKIP=r'dispatcher:|^ping',
+                        HWORKS_INJECTED_PREFIX=r'(?:Host notice:|dispatcher:)\s*',
+                        HWORKS_FM_TZ='America/Los_Angeles')
+        def transcript(name, prompt, followups=(), linked=True):
+            rows = [dict(type='session', cwd='/work/product'),
+                    dict(type='message', timestamp='2026-01-02T00:30:00Z',
+                         message=dict(role='user', content=prompt))]
+            for text in followups:
+                rows.append(dict(type='message', timestamp='2026-01-03T12:00:00Z',
+                                 message=dict(role='user', content=text)))
+            if linked:
+                rows.append(dict(type='message', timestamp='2026-01-03T12:01:00Z', message=dict(
+                    role='assistant', content=[dict(type='toolCall', name='bash', arguments=dict(
+                    command='gh pr view https://github.com/example/widget/pull/1 https://github.com/example/widget/pull/2'))])))
+            path = self.sessions / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        prompt = '<host mode="worker">Context</host>\nHost notice: Worker job: build a widget'
+        transcript('hands-off.jsonl', prompt, ['dispatcher: next step', '<host>notice only</host>'], linked=False)
+        transcript('hands-off/run-2/session.jsonl', 'Worker job: child', ['Actually, fix it'])
+        transcript('touched.jsonl', prompt, ['ping wake', '<host>Context</host>Actually, use blue'])
+        transcript('skipped-first.jsonl', 'dispatcher: Worker job: build another widget')
+        transcript('unlinked.jsonl', prompt, linked=False)
+        transcript('ordinary.jsonl', '<skill name="guide">Template: Worker job: build</skill>Explain the Worker job template')
+        transcript('helper_transcript.jsonl', prompt, ['Actually, fix it'])
+        transcript('subagent-artifacts/copy.jsonl', prompt)
+        result = self.run_metrics()
+        fields = ('workers', 'worker_touches', 'workers_merged', 'workers_merged_hands_off')
+        self.assertEqual([result['days'][0][k] for k in fields], [4, 1, 3, 2])
+        self.assertEqual([sum(d[k] for d in result['days']) for k in fields], [4, 1, 3, 2])
+        # A first prompt outside the window must not turn its follow-up into a worker start.
+        result = self.run_metrics('--since', '2026-01-02')
+        self.assertEqual([sum(d[k] for d in result['days']) for k in fields], [0, 0, 0, 0])
+        self.env['FM_GH_FAIL'] = '1'
+        result = self.run_metrics('--cache', str(self.root / 'unavailable-cache'))
+        self.assertEqual([result['days'][0][k] for k in fields], [4, 1, None, None])
+
+    def test_worker_prompt_unavailable_is_null(self):
+        for value in (None, ''):
+            with self.subTest(value=value):
+                if value is None:
+                    self.env.pop('HWORKS_FM_WORKER_PROMPT', None)
+                else:
+                    self.env['HWORKS_FM_WORKER_PROMPT'] = value
+                result = self.run_metrics()
+                self.assertEqual(result['days'][0]['spend'], 3)
+                for d in result['days']:
+                    self.assertEqual([d[k] for k in ('workers', 'worker_touches', 'workers_merged', 'workers_merged_hands_off')], [None] * 4)
+                self.assertIn('workers: HWORKS_FM_WORKER_PROMPT unset or empty', result['coverage']['missing_sources'])
+
     def test_cache_and_open_refresh(self):
         first = self.run_metrics()
         self.assertEqual(first['coverage']['counts']['fetched'], 9)
