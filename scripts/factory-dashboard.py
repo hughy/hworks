@@ -659,9 +659,12 @@ def extension(path, series, rate_parts, sample_counts):
             xs = value if isinstance(value, list) else [value]
             if any(x is not None and (not isinstance(x, (int, float)) or not math.isfinite(x) or x < 0) for x in xs):
                 raise ValueError('series values must be finite nonnegative numbers or null')
-        rate_parts.pop(name, None)
-        sample_counts.pop(name, None)
         series[name] = [values.get(d) for d in dates]
+        if name in rate_parts:
+            rate_parts[name] = [(None, None, '', MIN_SAMPLES, None)] * N
+            series[name] = [None] * N
+        if name in sample_counts:
+            sample_counts[name] = [None] * N
     for tile_spec in data['tiles']:
         if any(not isinstance(tile_spec.get(k), str) for k in ('key', 'band', 'title', 'home', 'about', 'kind')):
             raise ValueError('tile needs string key, band, title, home, about and kind')
