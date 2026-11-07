@@ -60,6 +60,8 @@ hworks starts from the harness as it ships: a frontier model, its tools and suba
 - Multi-day work with several concurrent writers belongs to a multi-agent coordinator. When the harness has one, hworks uses it and does not rebuild it. pi ships subagents, workflows, and missions but no coordinator, so `skills/orchestrate` adapts pstack's orchestrate playbook and adds only what is missing, as a script over the runtime: durable per-unit state, launch refusals (window, path overlap, worktree ownership), a freshness check on results, and restart recovery that waits out live writers rather than replaying them. It is experimental and opt-in, also for a small set of independent items. Otherwise, and below that scale, a plain brief with review-loop, `progress.md`, and git are the record.
 - Model names live in `models.conf` and pi settings. Skills name roles and slots, so a new model or a provider outage is one profile switch.
 
+The durable preferences are mechanical: reversible Git work, green commits, explicit shipping authority, and small automation that earns its upkeep. Shared guidance and skills carry that policy; pstack supplies references; pi extensions and workflows are optional runtime implementations. Prefer the host's native orchestration and automation. Retire a compatibility fix when a verified native capability covers its behavior, after checking the affected workflow still works.
+
 ## Why a layer
 
 pstack's skills reference each other by name (`/poteto-mode` appears 120 times across `skills/`, `agents/`, and `docs/`), and eight skills call Cursor's `Task` tool. Editing those files in place risks a merge conflict at every upstream sync. A separate directory of symlinks costs nothing at sync time. The mirror stays a byte-exact input, and this repo holds every opinion.
@@ -73,13 +75,23 @@ git clone https://github.com/hughy/hworks ~/dev/hworks
 ~/dev/hworks/scripts/install.sh --profile inherit
 ```
 
-`global/AGENTS.md` refers to `~/dev/hworks`, so clone there or link that path to your clone. `install.sh` refuses to replace a real file that differs from what it would link, such as an existing `~/.claude/CLAUDE.md`; compare the two, move yours aside, and rerun. It removes a `global/AGENTS.md` that links to `global/AGENTS.md`, because pi reads `AGENTS.md` from every ancestor of the working directory as well as its agent dir, and would load the guidance twice under `~`. Install an overlay repo after hworks if you use one (see [Local overlays](#local-overlays)).
+`global/AGENTS.md` and agent prompts refer to `~/dev/hworks`, so clone there or link that path to your clone. Use a durable standalone clone: installation from a linked Git worktree is refused before any changes, so deleting a task worktree cannot break permanent links. Custom standalone clone locations remain supported. `--check` is read-only and can inspect a worktree. The installer preserves unrelated settings and does not remove old skills paths whose ownership it cannot establish; inspect those separately.
+
+`install.sh` refuses to replace a real file that differs from what it would link, such as an existing `~/.claude/CLAUDE.md`; compare the two, move yours aside, and rerun. It removes `~/AGENTS.md` only when it links to hworks' `global/AGENTS.md`, because pi would load that guidance twice under `~`. Install an overlay repo after hworks if you use one (see [Local overlays](#local-overlays)).
 
 Then `/reload` and start a task with `/skill:hughy-router <task>`. The skills root follows symlinks. Agent prompts name the skills they use by `~/dev/hworks/skills/...` path, which resolves the same links.
 
 pi-subagents resolves one model per launch and fails when it is unavailable. When a provider is down, apply another profile, for example `scripts/models.sh inherit`, then `/reload`.
 
 Claude Code and Codex load only `skills/` through the plugin manifests. The agent files are pi-specific, so on those harnesses `hughy-router`'s roles map to the harness's own subagent and `adapters/pi.md` does not apply. Symlink following on those harnesses is unverified.
+
+## Other consumers
+
+For local Amp use, run `scripts/install.sh --amp` from the durable clone. It links guidance to `~/.config/amp/AGENTS.md` and skills individually under `~/.config/amp/skills/`, preserving differing real files. Amp loads only the first skill with a given frontmatter name. Enabled shared roots (`~/.config/agents/skills/` and `~/.agents/skills/`) take precedence over these fallback links without loading a skill twice. The links also work when shared roots are disabled. Inspect `amp skills list --json` for name collisions or configured roots; hworks does not rewrite Amp settings.
+
+These paths follow Amp's [guidance contract](https://ampcode.com/docs/customize/agents-md) and [skill discovery contract](https://ampcode.com/docs/customize/skills). Installation can be checked with `scripts/install.sh --amp --check`. Runtime loading and symlink traversal remain unverified until tested in Amp. Pi roles, extensions, model profiles, and JavaScript workflows do not run in Amp; use native tools and the skills' manual fallbacks.
+
+Cursor remains an optional target, with no installer support or verified discovery contract here. A work-host integration can map capabilities through an overlay without putting private tool names in public guidance; support for shared instructions does not imply runtime feature parity.
 
 ## Local overlays
 

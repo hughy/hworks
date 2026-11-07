@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Read-only adversarial reviewer for a diff. One reviewer per model; the parent spawns two from different providers and synthesizes. Verifies every claim against the code before reporting it. Fresh context.
+description: Read-only adversarial reviewer for a diff. The caller's effort policy sets reviewer count and provider choice. Verifies every claim against the code before reporting it. Fresh context.
 advertise: true
 thinking: high
 tools: read, grep, find, ls, bash, contact_supervisor

@@ -7,6 +7,8 @@ hworks is one engineer's layer over pstack. You can change it in two ways:
 
 Fork when you disagree with how hworks works. Use an overlay when only your environment differs. Both can apply: a fork can have overlays of its own.
 
+Keep durable policy in shared guidance and skills, reference material in pstack, and runtime mechanics in the existing adapters, extensions, and workflows. The [consumer notes](README.md#other-consumers) distinguish installation support from verified runtime behavior. Optional external integrations belong in overlay skills and adapters, or hoffice instance extension files when they extend project memory; they do not require a new core layer.
+
 ## How the pieces fit
 
 ```text
