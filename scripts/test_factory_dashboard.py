@@ -219,7 +219,7 @@ class RendererTest(unittest.TestCase):
             path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
             extension = Path(temp) / 'tiles.json'; extension.write_text(json.dumps(ext))
             text = self.run_dashboard(path, '--tiles', str(extension))
-        self.assertIn('50%, $14.00 of $28.00', text)
+        self.assertIn('50%, $14.00 of $28.00, 7 days', text)
         self.assertIn('0.1, 7 of 70', text)
         self.assertIn('<td>20%, 1 of 5</td><td>40%, 2 of 5</td><td>-\n4 of 5 needed</td>', text)
         weekly = text[text.index('Merged with no rework, by week'):text.index('Review dispatcher verdicts against outcome')]
@@ -228,6 +228,64 @@ class RendererTest(unittest.TestCase):
         unknown = text[text.index('Unknown rate</span>'):text.index('<h2>Cost')]
         self.assertIn('-<br>count unavailable', unknown)
         self.assertNotIn('90%', unknown)
+
+    def test_spend_shares_count_observed_days_not_rolling_outputs(self):
+        for previous, current in ((1, 1), (4, 5), (5, 4), (5, 5), (7, 7)):
+            with self.subTest(previous=previous, current=current):
+                data = json.loads((FIX / 'metrics.json').read_text())
+                for d in data['days']:
+                    d.update(cw=None, longc=None, linked=None, spend_factory=None, spend=None)
+                for end, amount, count in ((-7, 1, previous), (0, 2, current)):
+                    start = len(data['days']) + end - 7
+                    for i in range(start, start + count):
+                        data['days'][i].update(cw=amount, longc=amount, linked=amount, spend_factory=amount, spend=4)
+                with tempfile.TemporaryDirectory() as temp:
+                    path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+                    text = self.run_dashboard(path)
+                score = text[text.index('<td>Cache-write share of spend</td>'):]
+                fragments = [score[:score.index('</tr>')]]
+                for title in ('Cache-write share of spend', 'Long-context share of spend', 'Spend linked to a PR', 'Factory share of spend'):
+                    start = text.index(title + '</span>')
+                    fragments.append(text[start:text.index('</details>', start)])
+                for fragment in fragments:
+                    if current < 5:
+                        self.assertIn(f'-<br>{current} of 5 needed', fragment)
+                        self.assertNotIn('50%', fragment)
+                    else:
+                        self.assertIn(f'50%, ${2*current:.2f} of ${4*current:.2f}, {current} days', fragment)
+                    if previous < 5:
+                        self.assertIn(f'-<br>{previous} of 5 needed', fragment)
+                        self.assertNotIn('25%', fragment)
+                    else:
+                        self.assertIn(f'25%, ${previous:.2f} of ${4*previous:.2f}, {previous} days', fragment)
+                    if min(previous, current) < 5:
+                        self.assertNotIn('class="chg', fragment)
+                    else:
+                        self.assertIn('>+100%</span>', fragment)
+
+    def test_extension_names_do_not_collide_with_internal_metadata(self):
+        data = json.loads((FIX / 'metrics.json').read_text())
+        for d in data['days']:
+            d.update(fr_rows=1, fr_inschema=1, htm=[1])
+        ext = {'series': {name: {'2026-01-21': value} for name, value in
+                          [('schema_rate', 123), ('htm7_n', 456)]},
+               'tiles': [dict(key='metadata_names', band='Output', title='Extension values', home='test',
+                              about='Numeric extension series', kind='table', series=['schema_rate', 'htm7_n'])]}
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'metrics.json'; path.write_text(json.dumps(data))
+            extension = Path(temp) / 'tiles.json'; extension.write_text(json.dumps(ext))
+            text = self.run_dashboard(path, '--tiles', str(extension))
+            ext['series']['schema'] = {'2026-01-21': .9}
+            extension.write_text(json.dumps(ext))
+            overridden = self.run_dashboard(path, '--tiles', str(extension))
+        self.assertIn('<td>2026-01-21</td><td>123</td><td>456</td>', text)
+        schema = text[text.index('Friction rows in schema'):]
+        self.assertIn('<span class="lv">100%, 7 of 7</span>', schema)
+        duration = text[text.index('Hours to merge</span>'):text.index('Main-session time by who held the turn')]
+        self.assertIn('<span class="lv">1.0 h</span><span class="chg', duration)
+        schema = overridden[overridden.index('Friction rows in schema'):]
+        self.assertIn('<span class="lv">-<br>count unavailable</span>', schema)
+        self.assertNotIn('90%', schema)
 
     def test_rejects_invalid_extension_at_boundary(self):
         with tempfile.TemporaryDirectory() as temp:
