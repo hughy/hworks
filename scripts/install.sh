@@ -73,7 +73,12 @@ fi
 link "$root/global/AGENTS.md" "$HOME/.claude/CLAUDE.md"
 link "$root/global/AGENTS.md" "$HOME/.codex/AGENTS.md"
 if [ "$amp" = 1 ]; then
-  link "$root/global/AGENTS.md" "$HOME/.config/amp/AGENTS.md"
+  if [ -L "$HOME/.config/amp/AGENTS.md" ] && [ "$(resolved "$HOME/.config/amp/AGENTS.md")" != "$(resolved "$root/global/AGENTS.md")" ]; then
+    say differs "$HOME/.config/amp/AGENTS.md is not a link to $root/global/AGENTS.md; compare them, move it aside, and rerun"
+    status=1
+  else
+    link "$root/global/AGENTS.md" "$HOME/.config/amp/AGENTS.md"
+  fi
   for skill in "$root"/skills/*; do
     [ -f "$skill/SKILL.md" ] || continue
     name=$(basename "$skill")
