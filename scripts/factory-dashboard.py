@@ -573,12 +573,12 @@ def render_tile(spec, series, rate_parts, sample_counts):
     prefixes = {'cpp': 'all spend, ', 'landed': 'fixed within 7 days, ', 'queue': 'open PRs, ', 'touches': 'corrections and aborts per merged PR, ', 'decisions': 'reversed, '}
     kval = kval.replace('prior 7d', prefixes.get(key, '') + 'prior 7d')
     if key == 'htm':
-        kval += kpi(series['htm90'], 'last', 'h', 'down', samples=sample_counts['htm7']).replace('prior 7d', 'p90, prior 7d')
+        kval += kpi(series['htm90'], 'last', 'h', 'down', samples=sample_counts.get('htm90')).replace('prior 7d', 'p90, prior 7d')
         kval = kval.replace('prior 7d', 'median, prior 7d', 1)
     if key == 'decisions':
-        kval += kpi(series['oq_judged'], 'last', '%', 'none', rate_parts['oq_judged']).replace('prior 7d', 'judged, prior 7d')
+        kval += kpi(series['oq_judged'], 'last', '%', 'none', rate_parts.get('oq_judged')).replace('prior 7d', 'judged, prior 7d')
     if key == 'cpp':
-        kval += kpi(series['attr7'], 'last', '$', 'down', samples=sample_counts['attr7']).replace('prior 7d', 'direct, median, prior 7d')
+        kval += kpi(series['attr7'], 'last', '$', 'down', samples=sample_counts.get('attr7')).replace('prior 7d', 'direct, median, prior 7d')
     colors = spec.get('colors', [INK, ACC, GREY, LIGHT, '#e08a7f'])
     if kind == 'table':
         rows = spec.get('rows') or [['date', *fields], *[[dd, *[rate_text(v[i], form, rate_parts.get(field, [None] * N)[i]) for field, v in zip(fields, vals)]] for i, dd in enumerate(dates)]]

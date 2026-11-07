@@ -194,10 +194,10 @@ class RendererTest(unittest.TestCase):
             extension = Path(temp) / 'tiles.json'; extension.write_text(json.dumps(ext))
             text = self.run_dashboard(path, '--tiles', str(extension))
         score = text[text.index('<h2>Scorecard'):text.index('<h2>Output')]
-        self.assertIn('<td>Hours to merge (median)</td>', score)
-        self.assertIn('<td>Hours to merge (p90)</td>', score)
-        self.assertIn('<b>1.0 h</b>', score)
-        self.assertIn('<b>96 h</b>', score)
+        for title, value in (('Hours to merge (median)', '1.0 h'), ('Hours to merge (p90)', '96 h')):
+            row = score[score.index('<td>' + title + '</td>'):]
+            row = row[:row.index('</tr>')]
+            self.assertIn('<b>' + value + '</b>', row)
         latency = text[text.index('Latency</span>'):text.index('<h2>Cost')]
         self.assertIn('median, prior 7d', latency)
         self.assertIn('p90, prior 7d', latency)
@@ -278,6 +278,22 @@ class RendererTest(unittest.TestCase):
             ext['series']['schema'] = {'2026-01-21': .9}
             extension.write_text(json.dumps(ext))
             overridden = self.run_dashboard(path, '--tiles', str(extension))
+            for name, title, index, value, expected in (
+                ('htm7', 'Hours to merge', 0, 123, '123 h'),
+                ('htm90', 'Hours to merge', 1, 123, '123 h'),
+                ('oq_judged', 'Agent decisions: reversed and judged', 1, .9, '-<br>count unavailable'),
+                ('attr7', 'Cost per merged PR', 1, 123, '$123'),
+            ):
+                with self.subTest(override=name):
+                    extension.write_text(json.dumps({'series': {name: {'2026-01-21': value}}, 'tiles': []}))
+                    result = self.run_dashboard(path, '--tiles', str(extension))
+                    tile = result[result.index(title + '</span>'):]
+                    tile = tile[:tile.index('</details>')]
+                    kpi = tile.split('<div class="kpi">')[index + 1].split('</div>')[0]
+                    self.assertIn('<span class="lv">' + expected + '</span>', kpi)
+                    self.assertNotIn('class="chg', kpi)
+                    if name == 'oq_judged':
+                        self.assertNotIn('90%', tile)
         self.assertIn('<td>2026-01-21</td><td>123</td><td>456</td>', text)
         schema = text[text.index('Friction rows in schema'):]
         self.assertIn('<span class="lv">100%, 7 of 7</span>', schema)
