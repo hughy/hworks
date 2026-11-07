@@ -196,7 +196,7 @@ export function workspace(ctx, from, current = null) {
   const nav = `<nav class="ws-nav" aria-label="Projects"><div class="ws-brand">Projects<small>${ctx.projects.length} projects · ${ctx.docs.length} documents</small></div>
 <input class="ws-filter" data-ws-filter placeholder="Filter projects and documents  ( / )" aria-label="Filter projects and documents">
 ${navLink(null, `<span class="icon ws-home" aria-hidden="true">◎</span><span class="ws-t"><span>Overview</span><small>${rows.filter(r => r.a.reasons.length).length} need a look</small></span>`)}
-${rows.map(({ p, a }) => `<div class="ws-p" data-p="${ctx.esc(p.title)}">${navLink(p.slug, `${icon(p)}<span class="ws-t"><span>${ctx.esc(p.title)}</span><small>${ageLabel(a.stats.activityAge)} · ${a.stats.open} open</small></span><span class="ws-dot ${level(a.score)}" title="${ctx.esc(a.reasons.map(r => r.text).join('; ') || 'Healthy')}"></span>`)}
+${rows.map(({ p, a }) => `<div class="ws-p" data-p="${ctx.esc(p.title)}">${navLink(p.slug, `${icon(p)}<span class="ws-t"><span>${ctx.esc(p.title)}</span><small>${ageLabel(a.stats.activityAge)}${a.stats.total ? ` · ${a.stats.open} open` : ''}</small></span><span class="ws-dot ${level(a.score)}" title="${ctx.esc(a.reasons.map(r => r.text).join('; ') || 'Healthy')}"></span>`)}
 <div class="ws-tree${p.slug === current ? ' on' : ''}" data-for="${viewId(p.slug)}">${tree(p, ctx, from)}</div></div>`).join('')}
 <noscript><p>Project pages</p>${ctx.projects.map(p => `<p>${ctx.link(p.title, ctx.hrefTo(from, p.page))}</p>`).join('')}</noscript>
 <p class="ws-help"><span class="kbd">j</span> <span class="kbd">k</span> project · <span class="kbd">/</span> filter · Escape clear</p></nav>`;
@@ -410,7 +410,7 @@ ${strip(p, ctx, r.list)}
 ${a.reasons.length ? `<div class="look"><b>Needs a look</b><ul>${a.reasons.map(x => `<li>${ctx.esc(x.text)}</li>`).join('')}</ul></div>` : ''}
 <div class="cols"><div><h2 class="sh">Next steps</h2>${steps(p, ctx, from)}
 <details class="sec"><summary><b>Open questions (${p.questions.length})</b><span>${p.questions.length ? 'Unresolved items from STATE' : 'None recorded'}</span></summary>${questions(p, ctx, from)}</details></div>
-<div><h2 class="sh">Recent activity <span>${r.list.length} notes</span></h2>${r.html || '<p class="muted">No dated notes.</p>'}</div></div>
+<div><h2 class="sh">Recent activity <span>${r.list.length} note${r.list.length === 1 ? '' : 's'}</span></h2>${r.html || '<p class="muted">No dated notes.</p>'}</div></div>
 <h2 class="sh">State ${foldButtons}</h2>
 ${stateSections(p).map(k => `<details class="sec fold"><summary><b>${ctx.esc(title(k))}</b><span>${preview(p.narrative[k], p, ctx, from)}</span></summary><div class="prose">${ctx.markdown(p.narrative[k], p.state, from)}</div></details>`).join('')}
 <details class="sec"><summary><b>Properties and sources</b><span>Repositories, links, and authoritative documents</span></summary>${ctx.properties(p, from)}${ctx.repositories(p, from)}${ctx.documents(p, from)}${ctx.sources(p, from)}</details>`;

@@ -558,6 +558,10 @@ test('workspace renders unique views, folded events and safe source headings for
   assert.match(index, /Fallback session\./);
   assert.match(index, /<section class="view" id="v-_home">/);
   assert.match(index, /<section class="view" id="v-home" hidden>/);
+  // Prose next steps have no open count, and a single note reads as singular.
+  assert.doesNotMatch(index.match(/href="#v-beta"[\s\S]*?<\/a>/)[0], /open/);
+  assert.match(index.match(/href="#v-alpha"[\s\S]*?<\/a>/)[0], /1 open/);
+  assert.match(index.match(/id="v-home"[\s\S]*?<\/section>/)[0], />1 note</);
   assert.match(index, /<noscript>[\s\S]*href="projects\/home\.html"/);
   assert.match(index, /<b>Decision\.<\/b> Use &lt;way> here\./);
   assert.match(index, /\+1 more in the full note/);
