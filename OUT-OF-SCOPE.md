@@ -17,10 +17,13 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 | PR body Evidence and Merge Danger | mattpocock/skills `pr` (49dd158) | Before/after evidence and a one-way or two-way door call with blast radius in `skills/edit-prose/references/issues-prs.md` | Reviewers ask how a PR was verified or how risky it is, in 3 PRs |
 | Wizard scripts for human-only steps | mattpocock/skills `wizard` (49dd158) | An interactive bash script for the irreversible or outside-the-machine steps Autonomy skips | The same skipped step is a multi-step manual procedure in 2 runs |
 | Whole-change verdict | private skill collection (2026-10-17) | The reviewer ends with "worth it / questionable / not worth it" for the change as a whole | Unrequired mechanism survives reviewer item 2 and is caught after review (CI, the operator, or a later change), in 3 sessions |
-| Per-repo lessons file | private skill collection (2026-10-17) | A lessons file per repo, kept outside the repo, fed to coder and reviewer briefs | A defect class specific to one repo, which no global rule covers, survives review and is caught after it (CI, the operator, or a later change) in that repo across 3 sessions in `friction.md` |
+| Per-repo lessons file | private skill collection (2026-10-17) | A lessons file per repo, kept outside the repo, fed to coder and reviewer briefs: a short entry file plus an index, a snapshot taken when the run starts, and each revision stamped with the run that wrote it | A defect class specific to one repo, which no global rule covers, survives review and is caught after it (CI, the operator, or a later change) in that repo across 3 sessions in `friction.md` |
 | Daily service health watch | private skill collection (2026-10-17) | A recurring check over the observability backend for a service's monitors | The operator owns a production service with monitors and asks for a recurring check |
 | Cleanup scan to tracker | private skill collection (2026-10-17) | A cleanup scan files one tracker issue with subissues instead of opening PRs | The operator asks for it twice |
 | Shortcut debt ledger | dietrichgebert/ponytail `ponytail-debt` (09c434a) | A `shortcut: <limit>, <when to upgrade>` comment for a deliberate shortcut, and a grep that lists them with a `no-trigger` flag | A deferred limit is found shipped and forgotten, in 2 sessions in `friction.md` |
+| Nudge an idle worker with no recorded outcome | private factory platform (2026-11-06) | Nudge a worker that went idle without recording an outcome; checked 2026-11-06: 1 claim parked as "session gone" in 145 | Stuck running claims recur after a worker session ends without recording an outcome |
+| Report a per-claim spend ceiling | private factory platform (2026-11-06) | Report a claim's spend against a ceiling without enforcing it | A claim's spend lands far above the merged-PR cost p90 reported by `factory-metrics`, with the claim spend and p90 recorded together as evidence |
+| Dispatcher decisions in its state script | private factory platform (2026-11-06) | "Agent fetches, script decides": a subcommand reads saved session-list and comment results and prints each claim's action instead of deciding in prose; checked 2026-11-06: 197 ended passes, 8 non-ok outcomes, none a session-reconciliation or resume misjudgment | A dispatcher pass misjudges a session-reconciliation or resume branch |
 
 ## Declined
 
@@ -79,3 +82,15 @@ The smallest-complete-change ladder and the never-cut floor were adopted into `a
 | idea | reason |
 |---|---|
 | Score every session on a fixed rubric | kaizen triages groups that recur across sessions and verifies them; scoring every session costs a judgment per session and is unverifiable at that scale, so a sample is scored instead (`skills/kaizen/references/scorecard.md`) |
+
+### private factory platform (2026-11-06)
+
+The hands-off rate and small-sample display rules in `factory-metrics` and `factory-dashboard` were adopted from it. The ideas in Watching above are not repeated here.
+
+| idea | reason |
+|---|---|
+| Graph DSL and editor with forks, joins, and version migration | pi-subagents workflows and host sessions cover them |
+| In-run self-modification patches with rebase | git and `kaizen-weekly` draft PRs cover them, with evidence |
+| Hosted runner, database, leases, and a live UI | Multi-user infrastructure |
+| Factory assistant chat | Any session in the repo already does this |
+| Agent-written memory without review | Conflicts with the evidence rule in the `README.md` Rationale |
