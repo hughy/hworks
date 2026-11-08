@@ -5,7 +5,9 @@ import { join } from "node:path";
 const logPath = join(mkdtempSync(join(tmpdir(), "autonomy-test-")), "blockers.jsonl");
 process.env.HWORKS_BLOCKERS_LOG = logPath;
 delete process.env.PI_AUTONOMY;
-const { classify, grantsFrom, default: register } = await import("./autonomy.ts");
+delete process.env.PI_SUBAGENT_CHILD;
+delete process.env.PI_HUGHY_MODE;
+const { classify, grantsFrom, guardedSkill, isOrchestrateCall, default: register } = await import("./autonomy.ts");
 const block = ["git reset --hard HEAD~1","git -C repo reset --hard","git clean -fdx","git push --force origin feat","git push -f","git push --force-with-lease origin feat","git push origin +feat","git branch -D old","git stash drop","git worktree remove --force ../wt","DROP TABLE users;","kubectl delete pod x","terraform apply","psql -c \"drop table users\"","cd \"my repo\" && git reset --hard","python3 - <<'EOF'\nprint(1)\nEOF\ngit reset --hard","git commit -m 'wip' && git push --force origin x"];
 const allow = ["git worktree remove --force /tmp/wt","rm -rf build","git checkout -- src/a.ts","rm -rf /tmp/foo","rm -f $TMPDIR/x","rm ~/.local/state/agent-tasks/t/a.md","find /tmp/x -delete","git rm src/old.ts","git status","git push origin feat","git restore --staged a.ts","git checkout -b new","git checkout main","git branch -d merged","git stash push","git reset HEAD~1","git reset --soft HEAD~1","grep -rn 'rm -rf' .","npm run format","git commit -m 'remove dead code'","echo terraform plan","agent -p \"run git reset --hard and report\"","git commit -m 'docs: never git reset --hard'","python3 - <<'EOF'\ns = 'never `git reset --hard`'\nEOF","cat > f.md <<EOF\nuse git push --force rarely\nEOF\necho ok","grep -n \"git-reset-hard\\|reset --hard\" log"];
 block.push("git push --force-with-lease=feat origin feat", "git push --force-if-includes --force origin x", "git push --force-with-lease= origin x", "git reset --merge", "d=$(mktemp -d); git worktree remove --force $other", "git worktree remove -f ~/dev/repo-wt");
@@ -46,21 +48,26 @@ for (const [prompt, want] of [
 }
 
 // Fake pi API: records every registered hook, tool, and command.
-function fakePi() {
+function fakePi(branch: any[] = []) {
   const hooks: Record<string, any[]> = {};
   const tools: Record<string, any> = {};
   const commands: Record<string, any> = {};
   return {
-    hooks, tools, commands,
+    hooks, tools, commands, branch,
+    appendEntry(customType: string, data: any) { branch.push({ type: "custom", customType, data }); },
     registerCommand(name: string, def: any) { commands[name] = def; },
     registerTool(def: any) { tools[def.name] = def; },
     on(name: string, fn: any) { (hooks[name] ??= []).push(fn); },
     emit(name: string, event: any = {}, c: any = ctx) { let r; for (const fn of hooks[name] ?? []) r = fn({ type: name, ...event }, c) ?? r; return r; },
   };
 }
-const ctx = { cwd: "/repo", sessionManager: { getSessionId: () => "s1" }, ui: { notify() {} } };
+const ctxFor = (branch: any[]) => ({ cwd: "/repo", sessionManager: { getSessionId: () => "s1", getBranch: () => branch }, ui: { notify() {}, setStatus() {} } });
+// PI_AUTONOMY=1 keeps the guard active everywhere, as in a guarded run; auto mode is checked further down.
+process.env.PI_AUTONOMY = "1";
 const pi = fakePi();
+const ctx = ctxFor(pi.branch);
 register(pi);
+delete process.env.PI_AUTONOMY;
 const call = (toolName: string, input: any) => pi.emit("tool_call", { toolName, input });
 const setPhase = (phase: string) => pi.tools.autonomy_phase.execute("id", { phase }, undefined, undefined, ctx);
 const readLog = () => existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
@@ -115,13 +122,13 @@ for (const [event, payload] of [["agent_start", {}], ["session_start", { reason:
   expectBlock(`${event} ${JSON.stringify(payload)} resets`, "bash", destructive, true);
 }
 
-// /autonomy off lets everything through without logging destructive calls; on restores blocking.
+// /autonomy off lets everything through without logging; on restores blocking.
 await pi.commands.autonomy.handler("off", ctx);
 const offStart = readLog().length;
 expectBlock("off ask", "ask_user_question", ask, false);
 expectBlock("off destructive", "bash", destructive, false);
 const offLog = readLog().slice(offStart).map((r) => `${r.kind}:${r.blocked}`).join(",");
-check("off log", offLog === "ask:false", offLog);
+check("off log", offLog === "", offLog);
 await pi.commands.autonomy.handler("on", ctx);
 expectBlock("on destructive", "bash", destructive, true);
 
@@ -149,6 +156,56 @@ expectBlock("grant survives later runs", "bash", { command: "git push --force-wi
 check("grant logged once", readLog().filter((r) => r.kind === "grant").length === 1);
 pi.emit("session_start", { reason: "new" });
 expectBlock("session_start clears grants", "bash", { command: "git push --force-with-lease origin x" }, true);
+
+// Auto mode (the default): inactive until a guarded run starts, then active for the rest of the session.
+check("guardedSkill", guardedSkill('<skill name="orchestrate" location="/x">\nbody\n</skill>\n\ngo') === "orchestrate"
+  && guardedSkill('<skill name="hughy-router" location="/x">b</skill>') === "hughy-router"
+  && guardedSkill('<skill name="edit-prose" location="/x">hughy-router</skill>') === null
+  && guardedSkill("/skill:hughy-router") === null);
+for (const c of ['python3 $O --store "$S" init --repo .', "python3 ~/dev/hworks/scripts/orchestrate.py --store /t/s status", 'python3 "$O" --store x next'])
+  check(`orchestrate call ${c}`, isOrchestrateCall(c));
+for (const c of ["python3 -m unittest test_orchestrate", "rg orchestrate.py skills", "python3 $O status", "printf '%s\\n' 'Usage: python3 orchestrate.py --store DIR status'"])
+  check(`not orchestrate call ${c}`, !isOrchestrateCall(c));
+const autoTest = (label: string, setup: (p: any, c: any) => void) => {
+  const p = fakePi();
+  const c = ctxFor(p.branch);
+  register(p);
+  p.emit("session_start", { reason: "new" }, c);
+  const callIn = (toolName: string, input: any) => p.emit("tool_call", { toolName, input }, c);
+  checks++;
+  check(`${label}: inactive before trigger`, !callIn("ask_user_question", ask)?.block && !callIn("bash", destructive)?.block);
+  setup(p, c);
+  checks++;
+  check(`${label}: active after trigger`, !!callIn("ask_user_question", ask)?.block && !!callIn("bash", destructive)?.block);
+  return { p, c, callIn };
+};
+const autoLogStart = readLog().length;
+const user = (p: any, c: any, prompt: string) => p.emit("before_agent_start", { messageType: "user", prompt }, c);
+const skillRun = autoTest("skill prompt", (p, c) => user(p, c, '<skill name="orchestrate" location="/x">\nrebase onto main\n</skill>\n\ndrive ENG-1'));
+check("auto: inactive calls not logged", readLog().slice(autoLogStart).every((r) => r.kind !== "ask" || r.blocked), readLog().slice(autoLogStart));
+check("skill body grants nothing", !!skillRun.callIn("bash", { command: "git push --force-with-lease origin x" })?.block);
+// A resumed session restores the trigger from its branch.
+const resumed = fakePi(skillRun.p.branch);
+register(resumed);
+resumed.emit("session_start", { reason: "resume" }, ctxFor(resumed.branch));
+check("trigger survives resume", !!resumed.emit("tool_call", { toolName: "ask_user_question", input: ask }, ctxFor(resumed.branch))?.block);
+// /autonomy off overrides a trigger; auto restores it.
+await skillRun.p.commands.autonomy.handler("off", skillRun.c);
+check("off overrides trigger", !skillRun.callIn("bash", destructive)?.block);
+await skillRun.p.commands.autonomy.handler("auto", skillRun.c);
+check("auto restores trigger", !!skillRun.callIn("bash", destructive)?.block);
+autoTest("orchestrate.py", (_p, c) => { _p.emit("tool_call", { toolName: "bash", input: { command: 'python3 $O --store "$S" status' } }, c); });
+const hughy = autoTest("hughy-mode", (p, c) => { p.branch.push({ type: "custom", customType: "hughy-mode", data: { enabled: true } }); user(p, c, "fix the bug"); });
+hughy.p.branch.push({ type: "custom", customType: "hughy-mode", data: { enabled: false } });
+user(hughy.p, hughy.c, "next");
+check("hughy-mode off deactivates", !hughy.callIn("ask_user_question", ask)?.block);
+check("plain prompt stays inactive", (() => { const p = fakePi(); const c = ctxFor(p.branch); register(p); p.emit("session_start", {}, c); user(p, c, "rebase onto main and ask me which color"); return !p.emit("tool_call", { toolName: "ask_user_question", input: ask }, c)?.block && !p.emit("tool_call", { toolName: "bash", input: { command: "git push --force origin x" } }, c)?.block; })());
+process.env.PI_SUBAGENT_CHILD = "1";
+const kid = fakePi();
+register(kid);
+kid.emit("session_start", {}, ctxFor(kid.branch));
+check("subagent child is guarded", !!kid.emit("tool_call", { toolName: "ask_user_question", input: ask }, ctxFor(kid.branch))?.block);
+delete process.env.PI_SUBAGENT_CHILD;
 
 // PI_AUTONOMY=0 registers nothing.
 process.env.PI_AUTONOMY = "0";
