@@ -20,11 +20,20 @@ function make(branch: any[] = []) {
   const ctx = { sessionManager: { getBranch: () => branch }, ui: { notify: (m: string) => notes.push(m), setStatus: (_k: string, v: any) => { status = v; } } };
   h.session_start({}, ctx);
   const turn = () => { const e = { systemPromptOptions: { sections: {} as Record<string, string> } }; h.before_agent_start(e, ctx); return e.systemPromptOptions.sections; };
-  return { run: (a: string) => command.handler(a, ctx), turn, entries, notes, status: () => status };
+  return { run: (a: string) => command.handler(a, ctx), turn, jump: () => h.session_tree({}, ctx), entries, notes, status: () => status };
 }
 
 const path = SECTION.match(/read (\S+SKILL\.md)/)?.[1];
 check("skill path exists", !!path && existsSync(path), path);
+
+const tree = make([{ type: "custom", customType: "hughy-mode", data: { enabled: true } }]);
+check("restored on start", "hughy_mode" in tree.turn());
+// Selecting a branch without the entry, as /tree does, turns it off in the same instance.
+const branch: any[] = [{ type: "custom", customType: "hughy-mode", data: { enabled: true } }];
+const nav = make(branch);
+branch.length = 0;
+nav.jump();
+check("session_tree restores the branch setting", !("hughy_mode" in nav.turn()));
 
 const s = make();
 check("off by default", !("hughy_mode" in s.turn()));

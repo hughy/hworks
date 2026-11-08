@@ -1,18 +1,22 @@
 // Keeps the agent from stalling on mid-task questions or running commands git cannot undo.
 // The block reason is returned to the model as the tool result, so it doubles as the redirect.
-// `/autonomy off` relaxes both checks for the current session; `/autonomy on` restores them.
+// The guard applies only in guarded runs: hughy-mode on, a prompt that invokes the hughy-router or orchestrate skill,
+// an orchestrate.py bookkeeping call, or a pi-subagents child. Elsewhere asks and classified commands pass to the
+// harness's own approvals. A skill or orchestrate.py trigger lasts for the session and survives resume and fork.
+// `/autonomy on|off|auto|status` overrides that for the session; PI_AUTONOMY=1 starts sessions with it on.
 // A rule the operator's own prompt asks for ("rebase onto main", "delete the merged branches") is granted for
 // the rest of the session, so a run does not stop on the step it was asked to do. A negated mention denies it.
 // The model can call autonomy_phase with phase "cleanup" once the work is done, so end-of-run asks and
 // classified commands pass on to the harness's own guards and approvals. The phase returns to "work" at
 // every agent_start, session_start, and session_tree.
 // Every block, every call let through in cleanup, and every ask or supervisor decision request is
-// appended to a JSONL log for scripts/blockers.sh. PI_AUTONOMY=0 disables the guard and the log.
+// appended to a JSONL log for scripts/blockers.sh; asks and commands only while the guard is active. PI_AUTONOMY=0 disables the guard and the log.
 
 import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { enabledFrom as hughyModeFrom } from "./hughy-mode.ts";
 
 const TASKS_ROOT =
   process.env.HWORKS_TASKS_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "agent-tasks");
@@ -162,6 +166,22 @@ export function grantsFrom(prompt: string): Set<string> {
   return want;
 }
 
+// pi expands `/skill:<name>` into this block before before_agent_start, so the prompt names the skill exactly.
+const SKILL_BLOCK = /<skill name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/g;
+const GUARDED_SKILLS = new Set(["hughy-router", "orchestrate"]);
+// The orchestrate skill calls its script as `python3 $O --store "$S" <command>`.
+const ORCHESTRATE_CALL = /(?:orchestrate\.py|\$\{?O\}?)\s+--store\b/;
+
+export function guardedSkill(prompt: string): string | null {
+  for (const m of prompt.matchAll(SKILL_BLOCK)) if (GUARDED_SKILLS.has(m[1])) return m[1];
+  return null;
+}
+
+// Grants come from the operator's words, not from the text of a skill the prompt expanded.
+export const operatorText = (prompt: string) => prompt.replace(SKILL_BLOCK, "");
+
+export const isOrchestrateCall = (command: string) => ORCHESTRATE_CALL.test(stripData(command));
+
 function record(ctx: any, kind: string, rule: string, blocked: boolean, detail: unknown) {
   try {
     mkdirSync(dirname(LOG), { recursive: true });
@@ -182,37 +202,79 @@ function record(ctx: any, kind: string, rule: string, blocked: boolean, detail: 
 
 export default function (pi: any) {
   if (process.env.PI_AUTONOMY === "0") return;
-  let enabled = true;
+  type Mode = "auto" | "on" | "off";
+  const ENTRY = "autonomy";
+  const child = process.env.PI_SUBAGENT_CHILD === "1";
+  const initialMode: Mode = process.env.PI_AUTONOMY === "1" ? "on" : "auto";
+  let mode: Mode = initialMode;
+  let trigger: string | null = null;
+  let hughyMode = false;
   let phase: "work" | "cleanup" = "work";
   const grants = new Set<string>();
+  const active = () => mode === "on" || (mode === "auto" && (child || hughyMode || trigger !== null));
+  const why = () =>
+    mode !== "auto" ? `/autonomy ${mode}` : child ? "subagent child" : hughyMode ? "hughy-mode" : trigger ?? "no trigger";
+  const show = (ctx: any) => ctx?.ui?.setStatus?.("autonomy", active() ? "autonomy" : undefined);
+  const branch = (ctx: any) => ctx?.sessionManager?.getBranch?.() ?? [];
+  const restore = (ctx: any) => {
+    const entries = branch(ctx);
+    mode = initialMode;
+    trigger = null;
+    for (const e of entries) {
+      if (e.type !== "custom" || e.customType !== ENTRY) continue;
+      if (e.data?.mode === "auto" || e.data?.mode === "on" || e.data?.mode === "off") mode = e.data.mode;
+      if (typeof e.data?.trigger === "string") trigger = e.data.trigger;
+    }
+    hughyMode = hughyModeFrom(entries, process.env.PI_HUGHY_MODE === "1");
+    show(ctx);
+  };
+  const activate = (ctx: any, reason: string) => {
+    if (trigger !== null) return;
+    trigger = reason;
+    pi.appendEntry?.(ENTRY, { trigger });
+    record(ctx, "activate", reason, false, "");
+    show(ctx);
+  };
   const resetPhase = () => {
     phase = "work";
   };
   pi.on("agent_start", resetPhase);
   // A new, forked, or resumed session, or a jump in the tree, may no longer hold the prompt that granted a rule.
   for (const event of ["session_start", "session_tree"]) {
-    pi.on(event, () => {
+    pi.on(event, (_event: any, ctx: any) => {
       resetPhase();
       grants.clear();
+      restore(ctx);
     });
   }
 
   pi.on("before_agent_start", (event: any, ctx: any) => {
     if (event?.messageType !== "user" || typeof event.prompt !== "string") return;
-    for (const rule of grantsFrom(event.prompt)) {
+    // /hughy-mode appends its entry when toggled; it takes effect from the next turn, as its prompt section does.
+    hughyMode = hughyModeFrom(branch(ctx), process.env.PI_HUGHY_MODE === "1");
+    const skill = guardedSkill(event.prompt);
+    if (skill) activate(ctx, `skill:${skill}`);
+    show(ctx);
+    for (const rule of grantsFrom(operatorText(event.prompt))) {
       if (grants.has(rule)) continue;
       grants.add(rule);
-      record(ctx, "grant", rule, false, event.prompt);
+      if (active()) record(ctx, "grant", rule, false, event.prompt);
     }
   });
 
   pi.registerCommand("autonomy", {
-    description: "on|off: block mid-task questions and irreversible commands (default on)",
+    description: "on|off|auto|status: block mid-task questions and irreversible commands (auto: only in guarded runs)",
     handler: async (arg: string, ctx: any) => {
       const a = (arg ?? "").trim();
-      if (a === "off") enabled = false;
-      else if (a === "on") enabled = true;
-      ctx.ui.notify(`Autonomy guard ${enabled ? "on" : "off"} for this session`, "info");
+      if (a === "on" || a === "off" || a === "auto") {
+        mode = a;
+        pi.appendEntry?.(ENTRY, { mode });
+        show(ctx);
+      } else if (a !== "" && a !== "status") {
+        ctx.ui.notify("usage: /autonomy [on|off|auto|status]", "warning");
+        return;
+      }
+      ctx.ui.notify(`Autonomy guard ${active() ? "active" : "inactive"} (${why()})`, "info");
     },
   });
 
@@ -236,8 +298,9 @@ export default function (pi: any) {
     async execute(_id: string, params: any) {
       if (params?.phase !== "work" && params?.phase !== "cleanup") throw new Error('phase must be "work" or "cleanup"');
       phase = params.phase;
-      const text =
-        phase === "cleanup"
+      const text = !active()
+        ? "Autonomy guard inactive in this session; it blocks nothing, so no phase change is needed."
+        : phase === "cleanup"
           ? "Autonomy phase: cleanup. Asks and classified commands now reach the harness's other guards and " +
             "approvals, which still decide. Call autonomy_phase with phase \"work\" before any substantive work."
           : "Autonomy phase: work. Mid-task asks and irreversible commands are blocked.";
@@ -247,18 +310,20 @@ export default function (pi: any) {
 
   pi.on("tool_call", (event: any, ctx: any) => {
     const input = event.input ?? {};
-    if (event.toolName === "ask_user_question") {
-      const qs = Array.isArray(input.questions) ? input.questions.map((q: any) => q?.question).join(" / ") : "";
-      const block = enabled && phase === "work";
-      record(ctx, "ask", "ask_user_question", block, qs);
-      if (block) return { block: true, reason: ASK_REASON };
-      return;
-    }
+    if (event.toolName === "bash" && isOrchestrateCall(String(input.command ?? ""))) activate(ctx, "orchestrate.py");
     if (event.toolName === "contact_supervisor" && input.reason !== "progress_update") {
       record(ctx, "supervisor", String(input.reason ?? "unknown"), false, input.message);
       return;
     }
-    if (enabled && event.toolName === "bash") {
+    if (!active()) return;
+    if (event.toolName === "ask_user_question") {
+      const qs = Array.isArray(input.questions) ? input.questions.map((q: any) => q?.question).join(" / ") : "";
+      const block = phase === "work";
+      record(ctx, "ask", "ask_user_question", block, qs);
+      if (block) return { block: true, reason: ASK_REASON };
+      return;
+    }
+    if (event.toolName === "bash") {
       const command = String(input.command ?? "");
       const hit = classify(command);
       if (hit) {

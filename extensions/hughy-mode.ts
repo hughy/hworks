@@ -23,18 +23,27 @@ export const SECTION =
   "with a gate, and end with the reply format it defines. Re-read it if you no longer have its text in " +
   "context. Questions, lookups, and one-line edits do not need a route.";
 
+// The setting a session branch holds, so autonomy.ts can read it without sharing module state.
+export function enabledFrom(entries: any[], initial: boolean): boolean {
+  let on = initial;
+  for (const e of entries) {
+    if (e.type === "custom" && e.customType === ENTRY && typeof e.data?.enabled === "boolean") on = e.data.enabled;
+  }
+  return on;
+}
+
 export default function (pi: any) {
   let enabled = process.env.PI_HUGHY_MODE === "1";
 
   const show = (ctx: any) => ctx.ui?.setStatus?.("hughy-mode", enabled ? "hughy-mode" : undefined);
 
-  pi.on("session_start", (_event: any, ctx: any) => {
-    const entries = ctx.sessionManager?.getBranch?.() ?? [];
-    for (const e of entries) {
-      if (e.type === "custom" && e.customType === ENTRY && typeof e.data?.enabled === "boolean") enabled = e.data.enabled;
-    }
-    show(ctx);
-  });
+  // A jump in the tree keeps this instance but may select a branch with a different setting.
+  for (const event of ["session_start", "session_tree"]) {
+    pi.on(event, (_event: any, ctx: any) => {
+      enabled = enabledFrom(ctx.sessionManager?.getBranch?.() ?? [], process.env.PI_HUGHY_MODE === "1");
+      show(ctx);
+    });
+  }
 
   pi.registerCommand("hughy-mode", {
     description: "on|off|status: keep the hughy-router skill in force for this session (no argument toggles)",
