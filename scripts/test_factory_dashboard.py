@@ -262,6 +262,56 @@ class RendererTest(unittest.TestCase):
         unknown = text[text.index('Unknown rate</span>'):text.index('<h2>Cost')]
         self.assertIn('-<br>count unavailable', unknown)
         self.assertNotIn('90%', unknown)
+        days = [d['date'] for d in data['days']]
+        with tempfile.TemporaryDirectory() as temp:
+            extension = Path(temp) / 'rates.json'
+            override = Path(temp) / 'override.json'
+            for case, num, den, expected in (
+                ('valid', 2, 5, '40%, 2 of 5'),
+                ('small', 2, 4, '-<br>4 of 5 needed'),
+                ('zero', 0, 0, '-<br>0 of 5 needed'),
+                ('missing numerator', 2, 5, '-<br>count unavailable'),
+                ('missing denominator', 2, 5, '-<br>count unavailable'),
+                ('null numerator', 2, 5, '-<br>count unavailable'),
+                ('null denominator', 2, 5, '-<br>count unavailable'),
+            ):
+                with self.subTest(case=case):
+                    counters = {k: dict.fromkeys(days, 0) for k in ('subset', 'total')}
+                    counters['subset'].update({days[-8]: 1, days[-1]: num})
+                    counters['total'].update({days[-8]: 5, days[-1]: den})
+                    source = 'subset' if 'numerator' in case else 'total'
+                    if case.startswith('missing'):
+                        del counters[source][days[-2]]
+                    elif case.startswith('null'):
+                        counters[source][days[-2]] = None
+                    ext = {'series': counters,
+                           'rates': {'fraction': {'numerator': 'subset', 'denominator': 'total'}},
+                           'tiles': [dict(key='counted', band='Output', title='Counted rate', home='test', about='Daily counts',
+                                          kind='table', series=['fraction'], format='%',
+                                          kpi=dict(series='fraction', how='last', format='%', better='down'),
+                                          score_row=dict(title='Counted score', series='fraction', format='%', how='last', better='down'))]}
+                    extension.write_text(json.dumps(ext))
+                    text = self.run_dashboard(FIX / 'metrics.json', '--tiles', str(extension))
+                    score = text[text.index('<td>Counted score</td>'):].split('</tr>')[0]
+                    tile = text[text.index('Counted rate</span>'):text.index('<h2>Cost')]
+                    self.assertIn('<b>' + expected + '</b>', score)
+                    self.assertIn('<span class="lv">' + expected + '</span>', tile)
+                    self.assertIn('<td>' + days[-1] + '</td><td>' + expected.replace('<br>', '\n') + '</td>', tile)
+                    self.assertIn('20%, 1 of 5', score)
+                    if case == 'valid':
+                        self.assertIn('>+100%</span>', score)
+                        self.assertIn('Jan 21: 40%, 2 of 5', score)
+                        for name in ('subset', 'total', 'fraction', 'unrelated'):
+                            override.write_text(json.dumps({'series': {name: dict.fromkeys(days, 1)}, 'tiles': []}))
+                            result = self.run_dashboard(FIX / 'metrics.json', '--tiles', str(extension), '--tiles', str(override))
+                            row = result[result.index('<td>Counted score</td>'):].split('</tr>')[0]
+                            self.assertIn('<b>40%, 2 of 5</b>' if name == 'unrelated' else '<b>-<br>count unavailable</b>', row)
+                            if name != 'unrelated':
+                                self.assertNotIn('40%', row)
+                                self.assertNotIn('class="chg', row)
+                    else:
+                        self.assertNotIn('40%', score + tile)
+                        self.assertNotIn('class="chg', score + tile)
 
     def test_spend_shares_count_observed_days_not_rolling_outputs(self):
         for previous, current in ((1, 1), (4, 5), (5, 4), (5, 5), (7, 7)):
@@ -356,6 +406,25 @@ class RendererTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn('unknown extension band', result.stderr)
             self.assertIn('Dispatch verdicts', self.run_dashboard())
+            valid = {'series': {'subset': {'2026-01-21': 2}, 'total': {'2026-01-21': 5}},
+                     'rates': {'fraction': {'numerator': 'subset', 'denominator': 'total'}}, 'tiles': []}
+            bad_rates = [None, [], {'fraction': None}, {'fraction': {}},
+                         {'fraction': {'numerator': [], 'denominator': 'total'}},
+                         {'fraction': {'numerator': 'absent', 'denominator': 'total'}},
+                         {'fraction': {'numerator': 'fraction', 'denominator': 'total'}},
+                         {'fraction': {'numerator': 'subset', 'denominator': 'total', 'minimum': 1}},
+                         {'subset': {'numerator': 'subset', 'denominator': 'total'}}]
+            malformed = [{**valid, 'rates': rates} for rates in bad_rates]
+            for value in (True, -1, 1.5, float('nan'), float('inf'), [2], '2', 6):
+                malformed.append({**valid, 'series': {'subset': {'2026-01-21': value}, 'total': {'2026-01-21': 5}}})
+            malformed.append({**valid, 'series': {'subset': [2], 'total': {'2026-01-21': 5}}})
+            for doc in malformed:
+                with self.subTest(extension=doc):
+                    p.write_text(json.dumps(doc))
+                    result = subprocess.run([sys.executable, str(HERE / 'factory-dashboard.py'), str(FIX / 'metrics.json'), '--tiles', str(p)], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn('rate', result.stderr)
+                    self.assertEqual(result.stdout, '')
 
 
 if __name__ == '__main__':
