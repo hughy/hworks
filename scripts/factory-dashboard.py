@@ -5,6 +5,7 @@ Usage: factory-dashboard.py METRICS.json [--tiles FILE]... [--prose FILE] [-o OU
 Default prose: factory-dashboard-prose.json beside this script. Default output: stdout.
 Extension JSON schema:
  {"series": {"name": {"YYYY-MM-DD": number|[number,...]|null}},
+  "rates": {"rate_name": {"numerator": "daily_subset", "denominator": "daily_total"}},
   "tiles": [{"key": "id", "band": "Cost", "title": "Label", "home": "owner",
     "about": "Definition", "kind": "bars|stacked bars|lines|table|empty",
     "series": ["name", ...], "names": ["stack label", ...],
@@ -15,6 +16,10 @@ Extension JSON schema:
                   "how": "sum|last|mean", "format": "$|%|h|", "better": "up|down|none"},
     "rows": [["column", "column"], ["value", 1]]}]}
 Band must be an existing band. Series align to metrics dates; missing dates are null.
+Optional rates reference scalar daily counters in this extension's series, not other
+rates. Counts must be nonnegative integers, with numerator <= denominator. Rates use
+7-day sums and the sample floor; any missing/null source day makes a window unknown.
+Overriding a rate or its sources in a later extension invalidates its count metadata.
 Optional table rows include their header; otherwise dates and series become columns.
 Strings are escaped; markup is never accepted.
 All-null series render dim empty tiles. An extension with a generic key replaces
@@ -659,10 +664,33 @@ def render_tile(spec, series, rate_parts, sample_counts):
     return tile(title, body, key, spec['home'], kval, 'w2' if spec.get('wide') else '')
 
 
-def extension(path, series, rate_parts, sample_counts):
+def extension(path, series, rate_parts, sample_counts, rate_sources):
     data = json.loads(Path(path).read_text())
     if not isinstance(data, dict) or not isinstance(data.get('series'), dict) or not isinstance(data.get('tiles'), list):
         raise ValueError('extension needs series object and tiles list')
+    rates = data.get('rates', {})
+    if not isinstance(rates, dict):
+        raise ValueError('extension rates must be an object')
+    for name, descriptor in rates.items():
+        if not isinstance(descriptor, dict) or set(descriptor) != {'numerator', 'denominator'}:
+            raise ValueError('rate needs numerator and denominator series names')
+        sources = [descriptor[k] for k in ('numerator', 'denominator')]
+        if any(not isinstance(k, str) or k not in data['series'] or k in rates for k in sources) or name in data['series']:
+            raise ValueError('rate sources must be daily series in the same extension, not rates')
+        if any(not isinstance(data['series'][k], dict) for k in sources):
+            raise ValueError('rate sources must be keyed by date')
+        numerator, denominator = (data['series'][k] for k in sources)
+        for dd in numerator.keys() | denominator.keys():
+            a, b = numerator.get(dd), denominator.get(dd)
+            if any(v is not None and (type(v) not in (int, float) or not math.isfinite(v) or v < 0 or v != int(v)) for v in (a, b)):
+                raise ValueError('rate counters must be finite nonnegative integers or null')
+            if a is not None and b is not None and a > b:
+                raise ValueError('rate numerator cannot exceed denominator')
+    for name, sources in list(rate_sources.items()):
+        if name in data['series'] or any(k in data['series'] or k in rates for k in sources):
+            rate_parts[name] = [(None, None, '', MIN_SAMPLES, None)] * N
+            series[name] = [None] * N
+            del rate_sources[name]
     for name, values in data['series'].items():
         if not isinstance(values, dict):
             raise ValueError('extension series must be keyed by date')
@@ -677,6 +705,14 @@ def extension(path, series, rate_parts, sample_counts):
             series[name] = [None] * N
         if name in sample_counts:
             sample_counts[name] = [None] * N
+    for name, descriptor in rates.items():
+        sources = tuple(descriptor[k] for k in ('numerator', 'denominator'))
+        a, b = ([nullable_sum(series[k][max(0, i - 6):i + 1]) for i in range(N)] for k in sources)
+        parts = [(num, den, '', MIN_SAMPLES, den if num is not None else None) for num, den in zip(a, b)]
+        rate_parts[name] = parts
+        rate_sources[name] = sources
+        sample_counts.pop(name, None)
+        series[name] = [rate_value(p) for p in parts]
     for tile_spec in data['tiles']:
         if any(not isinstance(tile_spec.get(k), str) for k in ('key', 'band', 'title', 'home', 'about', 'kind')):
             raise ValueError('tile needs string key, band, title, home, about and kind')
@@ -699,8 +735,9 @@ def render(metrics, prose, paths=()):
     KEY.clear()
     series, rate_parts, sample_counts = derive(metrics)
     specs = generic_tiles(metrics)
+    rate_sources = {}
     for path in paths:
-        for spec in extension(path, series, rate_parts, sample_counts):
+        for spec in extension(path, series, rate_parts, sample_counts, rate_sources):
             specs = [s for s in specs if s['key'] != spec['key']]
             specs.append(spec)
     groups = defaultdict(list)
@@ -737,7 +774,7 @@ def render(metrics, prose, paths=()):
         values = series.get(conf.get('series'), [None] * N)
         if any(isinstance(v, list) for v in values if v is not None):
             continue
-        if any(v is not None for v in values):
+        if any(v is not None for v in values) or conf.get('series') in rate_parts:
             groups[conf.get('category', spec['band'])].append(score_row(conf.get('title', spec['title']), values, conf.get('how', 'last'), conf.get('format', ''), conf.get('better', 'none'), rates=rate_parts.get(conf.get('series', '')), samples=sample_counts.get(conf.get('series', ''))))
     score = ''.join(f'<tr class="grp"><td colspan="6">{esc(category)}</td></tr>' + ''.join(rows) for category, rows in groups.items())
     P['score'] = prose.get('score', '')
