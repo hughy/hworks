@@ -159,9 +159,9 @@ expectBlock("session_start clears grants", "bash", { command: "git push --force-
 
 // Auto mode (the default): inactive until a guarded run starts, then active for the rest of the session.
 check("guardedSkill", guardedSkill('<skill name="orchestrate" location="/x">\nbody\n</skill>\n\ngo') === "orchestrate"
-  && guardedSkill('<skill name="hughy-router" location="/x">b</skill>') === "hughy-router"
-  && guardedSkill('<skill name="edit-prose" location="/x">hughy-router</skill>') === null
-  && guardedSkill("/skill:hughy-router") === null);
+  && guardedSkill('<skill name="hughy-router" location="/x">b</skill>') === null
+  && guardedSkill('<skill name="edit-prose" location="/x">orchestrate</skill>') === null
+  && guardedSkill("/skill:orchestrate") === null);
 for (const c of ['python3 $O --store "$S" init --repo .', "python3 ~/dev/hworks/scripts/orchestrate.py --store /t/s status", 'python3 "$O" --store x next'])
   check(`orchestrate call ${c}`, isOrchestrateCall(c));
 for (const c of ["python3 -m unittest test_orchestrate", "rg orchestrate.py skills", "python3 $O status", "printf '%s\\n' 'Usage: python3 orchestrate.py --store DIR status'"])
@@ -198,16 +198,26 @@ check("isUnattended", isUnattended('<skill name="kaizen-weekly" location="/x">\n
   && !isUnattended('<skill name="x" location="/x">\nrun with --unattended\n</skill>\n\ngo') && !isUnattended("how does --unattended-mode work"));
 autoTest("unattended flag", (p, c) => user(p, c, '<skill name="weekly" location="/x">\nbody\n</skill>\n\n--unattended\n\nNever force-push.'));
 autoTest("orchestrate.py", (_p, c) => { _p.emit("tool_call", { toolName: "bash", input: { command: 'python3 $O --store "$S" status' } }, c); });
-const hughy = autoTest("hughy-mode", (p, c) => { p.branch.push({ type: "custom", customType: "hughy-mode", data: { enabled: true } }); user(p, c, "fix the bug"); });
-hughy.p.branch.push({ type: "custom", customType: "hughy-mode", data: { enabled: false } });
-user(hughy.p, hughy.c, "next");
-check("hughy-mode off deactivates", !hughy.callIn("ask_user_question", ask)?.block);
+const interactive = (setup: (p: any, c: any) => void) => {
+  const p = fakePi(); const c = ctxFor(p.branch); register(p); p.emit("session_start", {}, c); setup(p, c);
+  return !p.emit("tool_call", { toolName: "ask_user_question", input: ask }, c)?.block && !p.emit("tool_call", { toolName: "bash", input: destructive }, c)?.block;
+};
+check("hughy-mode stays inactive", interactive((p, c) => { p.branch.push({ type: "custom", customType: "hughy-mode", data: { enabled: true } }); user(p, c, "fix the bug"); }));
+check("hughy-router stays inactive", interactive((p, c) => user(p, c, '<skill name="hughy-router" location="/x">\nbody\n</skill>\n\nfix it')));
+// An operator who asks for questions in a guarded run gets ask_user_question; destructive commands stay blocked.
+const asked = autoTest("orchestrate, then ask me", (p, c) => user(p, c, '<skill name="orchestrate" location="/x">\nbody\n</skill>\n\ndrive ENG-1'));
+user(asked.p, asked.c, "use ask_user_question for open questions");
+check("ask grant unblocks asks", !asked.callIn("ask_user_question", ask)?.block && !!asked.callIn("bash", destructive)?.block);
+const noAsk = autoTest("orchestrate, do not ask", (p, c) => user(p, c, '<skill name="orchestrate" location="/x">\nbody\n</skill>\n\ndrive ENG-1. Do not ask me anything'));
+check("negated ask grants nothing", !!noAsk.callIn("ask_user_question", ask)?.block);
 check("plain prompt stays inactive", (() => { const p = fakePi(); const c = ctxFor(p.branch); register(p); p.emit("session_start", {}, c); user(p, c, "rebase onto main and ask me which color"); return !p.emit("tool_call", { toolName: "ask_user_question", input: ask }, c)?.block && !p.emit("tool_call", { toolName: "bash", input: { command: "git push --force origin x" } }, c)?.block; })());
 process.env.PI_SUBAGENT_CHILD = "1";
 const kid = fakePi();
 register(kid);
 kid.emit("session_start", {}, ctxFor(kid.branch));
 check("subagent child is guarded", !!kid.emit("tool_call", { toolName: "ask_user_question", input: ask }, ctxFor(kid.branch))?.block);
+kid.emit("before_agent_start", { messageType: "user", prompt: "ask me which option" }, ctxFor(kid.branch));
+check("subagent child ignores ask grant", !!kid.emit("tool_call", { toolName: "ask_user_question", input: ask }, ctxFor(kid.branch))?.block);
 delete process.env.PI_SUBAGENT_CHILD;
 
 // PI_AUTONOMY=0 registers nothing.
