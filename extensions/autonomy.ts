@@ -1,11 +1,13 @@
 // Keeps the agent from stalling on mid-task questions or running commands git cannot undo.
 // The block reason is returned to the model as the tool result, so it doubles as the redirect.
-// The guard applies only in guarded runs: hughy-mode on, a prompt that invokes the hughy-router or orchestrate skill
-// or passes --unattended, an orchestrate.py bookkeeping call, or a pi-subagents child. Elsewhere asks and classified commands pass to the
-// harness's own approvals. A skill or orchestrate.py trigger lasts for the session and survives resume and fork.
-// `/autonomy on|off|auto|status` overrides that for the session; PI_AUTONOMY=1 starts sessions with it on.
-// A rule the operator's own prompt asks for ("rebase onto main", "delete the merged branches") is granted for
+// The guard applies only in long-running autonomous runs: a prompt that invokes the orchestrate skill or passes
+// --unattended, an orchestrate.py bookkeeping call, or a pi-subagents child. Elsewhere the operator is at the keyboard,
+// so asks and classified commands pass to the harness's own approvals. A skill or orchestrate.py trigger lasts for the
+// session and survives resume and fork. `/autonomy on|off|auto|status` overrides that for the session; PI_AUTONOMY=1
+// starts sessions with it on.
+// A rule the operator's own prompt asks for ("rebase onto main", "delete the merged branches", "ask me") is granted for
 // the rest of the session, so a run does not stop on the step it was asked to do. A negated mention denies it.
+// A subagent child never gets the ask grant: its prompt comes from the parent, and nobody answers its asks.
 // The model can call autonomy_phase with phase "cleanup" once the work is done, so end-of-run asks and
 // classified commands pass on to the harness's own guards and approvals. The phase returns to "work" at
 // every agent_start, session_start, and session_tree.
@@ -16,7 +18,6 @@ import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { enabledFrom as hughyModeFrom } from "./hughy-mode.ts";
 
 const TASKS_ROOT =
   process.env.HWORKS_TASKS_DIR || join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "agent-tasks");
@@ -46,6 +47,8 @@ const ASK_REASON =
   "The one exception is the up-front round in the Autonomy section of global AGENTS.md (operator present, " +
   "large work, a product call no experiment can settle that changes most of the plan): ask it in your reply " +
   "text, record each question with state `asked`, and end the turn." + CLEANUP_HINT;
+
+const ASK_GRANT = "ask_user_question";
 
 const DESTRUCTIVE_REASON =
   "Autonomy: blocked a command git on the working branch cannot undo. ";
@@ -149,6 +152,7 @@ const INTENTS: Array<[string, RegExp]> = [
   ["git stash drop/clear", /\bstash\s+(?:drop|clear)\b|\bdrop\s+(?:the\s+|that\s+|my\s+)?stash/i],
   ["git clean -f", /\bgit\s+clean\b|\bremove\s+(?:all\s+)?untracked\s+files\b/i],
   ["git filter-branch / filter-repo", /\bfilter-(?:branch|repo)\b|\brewrite\s+(?:the\s+)?(?:commit\s+|git\s+)?history\b/i],
+  [ASK_GRANT, /\bask_user_question\b|\b(?:ask|interview|quiz|grill)\s+me\b/i],
 ];
 
 const NEGATION = /\b(?:don'?t|do\s+not|never|no|not|without|avoid)\b/i;
@@ -168,7 +172,7 @@ export function grantsFrom(prompt: string): Set<string> {
 
 // pi expands `/skill:<name>` into this block before before_agent_start, so the prompt names the skill exactly.
 const SKILL_BLOCK = /<skill name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/g;
-const GUARDED_SKILLS = new Set(["hughy-router", "orchestrate"]);
+const GUARDED_SKILLS = new Set(["orchestrate"]);
 // The orchestrate skill calls its script as `python3 $O --store "$S" <command>`.
 const ORCHESTRATE_CALL = /(?:orchestrate\.py|\$\{?O\}?)\s+--store\b/;
 
@@ -211,12 +215,10 @@ export default function (pi: any) {
   const initialMode: Mode = process.env.PI_AUTONOMY === "1" ? "on" : "auto";
   let mode: Mode = initialMode;
   let trigger: string | null = null;
-  let hughyMode = false;
   let phase: "work" | "cleanup" = "work";
   const grants = new Set<string>();
-  const active = () => mode === "on" || (mode === "auto" && (child || hughyMode || trigger !== null));
-  const why = () =>
-    mode !== "auto" ? `/autonomy ${mode}` : child ? "subagent child" : hughyMode ? "hughy-mode" : trigger ?? "no trigger";
+  const active = () => mode === "on" || (mode === "auto" && (child || trigger !== null));
+  const why = () => (mode !== "auto" ? `/autonomy ${mode}` : child ? "subagent child" : trigger ?? "no trigger");
   const show = (ctx: any) => ctx?.ui?.setStatus?.("autonomy", active() ? "autonomy" : undefined);
   const branch = (ctx: any) => ctx?.sessionManager?.getBranch?.() ?? [];
   const restore = (ctx: any) => {
@@ -228,7 +230,6 @@ export default function (pi: any) {
       if (e.data?.mode === "auto" || e.data?.mode === "on" || e.data?.mode === "off") mode = e.data.mode;
       if (typeof e.data?.trigger === "string") trigger = e.data.trigger;
     }
-    hughyMode = hughyModeFrom(entries, process.env.PI_HUGHY_MODE === "1");
     show(ctx);
   };
   const activate = (ctx: any, reason: string) => {
@@ -253,8 +254,6 @@ export default function (pi: any) {
 
   pi.on("before_agent_start", (event: any, ctx: any) => {
     if (event?.messageType !== "user" || typeof event.prompt !== "string") return;
-    // /hughy-mode appends its entry when toggled; it takes effect from the next turn, as its prompt section does.
-    hughyMode = hughyModeFrom(branch(ctx), process.env.PI_HUGHY_MODE === "1");
     const skill = guardedSkill(event.prompt);
     if (skill) activate(ctx, `skill:${skill}`);
     else if (isUnattended(event.prompt)) activate(ctx, "unattended");
@@ -322,7 +321,7 @@ export default function (pi: any) {
     if (!active()) return;
     if (event.toolName === "ask_user_question") {
       const qs = Array.isArray(input.questions) ? input.questions.map((q: any) => q?.question).join(" / ") : "";
-      const block = phase === "work";
+      const block = phase === "work" && (child || !grants.has(ASK_GRANT));
       record(ctx, "ask", "ask_user_question", block, qs);
       if (block) return { block: true, reason: ASK_REASON };
       return;

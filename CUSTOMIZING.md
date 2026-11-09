@@ -28,7 +28,7 @@ cursor/plugins/pstack            upstream, written for Cursor
 | `skills/<name>` symlinks | The allowlist of pstack skills that load | Choose your own with `scripts/skill.sh` |
 | `DIVERGENCE.md` | Why each pstack skill is not linked | Rewrite the reasons to match your choices |
 | `agents/` | The `coder`, `reviewer`, `explorer`, and `synthesizer` roles for pi-subagents | Keep the roles and edit the prompts |
-| `extensions/autonomy.ts` | pi guard that blocks mid-task questions and history-destroying git commands in guarded runs (hughy-mode, hughy-router, orchestrate, subagent children) | Keep, edit the patterns, or skip the symlink |
+| `extensions/autonomy.ts` | pi guard that blocks mid-task questions and history-destroying git commands in long-running autonomous runs (orchestrate, `--unattended`, subagent children) | Keep, edit the patterns, or skip the symlink |
 | `extensions/runner-exit-guard.ts` | Keeps extensions from killing a pi-subagents async runner with `process.exit()` | Keep it if your extensions force-exit headless runs; otherwise skip the symlink |
 | `adapters/pi.md` | Maps Cursor terms in pstack to pi | Keep it unless you change harness |
 | `models.conf` | Model profiles | Replace the profiles with your own |

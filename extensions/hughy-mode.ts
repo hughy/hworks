@@ -23,8 +23,8 @@ export const SECTION =
   "with a gate, and end with the reply format it defines. Re-read it if you no longer have its text in " +
   "context. Questions, lookups, and one-line edits do not need a route.";
 
-// The setting a session branch holds, so autonomy.ts can read it without sharing module state.
-export function enabledFrom(entries: any[], initial: boolean): boolean {
+// The setting a session branch holds.
+function enabledFrom(entries: any[], initial: boolean): boolean {
   let on = initial;
   for (const e of entries) {
     if (e.type === "custom" && e.customType === ENTRY && typeof e.data?.enabled === "boolean") on = e.data.enabled;
