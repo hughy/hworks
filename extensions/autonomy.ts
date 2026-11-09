@@ -1,7 +1,7 @@
 // Keeps the agent from stalling on mid-task questions or running commands git cannot undo.
 // The block reason is returned to the model as the tool result, so it doubles as the redirect.
-// The guard applies only in guarded runs: hughy-mode on, a prompt that invokes the hughy-router or orchestrate skill,
-// an orchestrate.py bookkeeping call, or a pi-subagents child. Elsewhere asks and classified commands pass to the
+// The guard applies only in guarded runs: hughy-mode on, a prompt that invokes the hughy-router or orchestrate skill
+// or passes --unattended, an orchestrate.py bookkeeping call, or a pi-subagents child. Elsewhere asks and classified commands pass to the
 // harness's own approvals. A skill or orchestrate.py trigger lasts for the session and survives resume and fork.
 // `/autonomy on|off|auto|status` overrides that for the session; PI_AUTONOMY=1 starts sessions with it on.
 // A rule the operator's own prompt asks for ("rebase onto main", "delete the merged branches") is granted for
@@ -180,6 +180,9 @@ export function guardedSkill(prompt: string): string | null {
 // Grants come from the operator's words, not from the text of a skill the prompt expanded.
 export const operatorText = (prompt: string) => prompt.replace(SKILL_BLOCK, "");
 
+// Scheduled runs start with `/skill:<name> --unattended`; nobody is there to answer an ask.
+export const isUnattended = (prompt: string) => /(?:^|\s)--unattended(?=\s|$)/.test(operatorText(prompt));
+
 export const isOrchestrateCall = (command: string) => ORCHESTRATE_CALL.test(stripData(command));
 
 function record(ctx: any, kind: string, rule: string, blocked: boolean, detail: unknown) {
@@ -254,6 +257,7 @@ export default function (pi: any) {
     hughyMode = hughyModeFrom(branch(ctx), process.env.PI_HUGHY_MODE === "1");
     const skill = guardedSkill(event.prompt);
     if (skill) activate(ctx, `skill:${skill}`);
+    else if (isUnattended(event.prompt)) activate(ctx, "unattended");
     show(ctx);
     for (const rule of grantsFrom(operatorText(event.prompt))) {
       if (grants.has(rule)) continue;
