@@ -238,7 +238,7 @@ function dashboardFixture(t, prefix = '') {
   write('HOFFICE.md', '---\nname: Example registry\n---\n');
   const out = realpathSync(mkdtempSync(join(tmpdir(), 'hoffice-dashboard output-')));
   t.after(() => rmSync(out, { recursive: true, force: true }));
-  const render = () => f.run('render-dashboard.mjs', '--instance', instance, out);
+  const render = (...args) => f.run('render-dashboard.mjs', '--instance', instance, out, ...args);
   const html = (path = 'index.html') => readFileSync(join(out, path), 'utf8');
   return { ...f, instance, out, write, render, html };
 }
@@ -298,6 +298,7 @@ Architecture stays in the source.
     assert.ok(index.includes('href="projects/zeta.html"'));
     assert.match(alpha, /STATE reviewed/);
     assert.match(index, /Projects ranked by what needs a look/);
+    assert.doesNotMatch(index, /<h2 class="sh">Sessions<\/h2>/);
     assert.ok(index.includes('href="https://tracker.example.test/alpha"'));
     assert.ok(index.includes('href="https://chat.example.test/alpha"'));
     assert.match(alpha, /First owner/);
@@ -338,6 +339,91 @@ Architecture stays in the source.
     assert.deepEqual(filesUnder(f.instance), before, 'rendering does not change instance sources');
   });
 }
+
+test('dashboard roster lists every role on Overview and only project roles beside project health', (t) => {
+  const f = dashboardFixture(t);
+  for (const slug of ['alpha', 'beta']) f.write(`projects/${slug}/README.md`, `# ${slug}\n`);
+  success(f.render());
+  const baseline = f.html();
+  assert.ok(baseline.indexOf('data-p="alpha"') < baseline.indexOf('data-p="beta"'));
+  const roster = {
+    generatedAt: '2026-05-03T18:00:00Z',
+    roles: [
+      { id: 'chief', name: 'Chief <staff>', project: null, live: true, beat: '2026-05-02T17:58:00Z', link: 'https://example.test/s/1?a=1&b=2', generation: 2, openItems: 3 },
+      { id: 'lead-a', name: 'Alpha lead', project: 'alpha', live: true, beat: '2026-05-03T18:00:00Z', link: 'session://example/alpha', generation: 4, openItems: 5 },
+      { id: 'lead-b', name: 'Beta lead', project: 'beta', live: false, beat: null, link: 'javascript:alert("unsafe")', generation: 0, openItems: 0 },
+      { id: 'unknown', name: 'Unknown lead', project: 'missing<project>', live: false, beat: null, link: null, generation: 0, openItems: 0 },
+    ],
+  };
+  const path = f.write('roster.json', JSON.stringify(roster));
+  success(f.render('--roster', path));
+  const overview = f.html().split('<section class="view" id="v-alpha"')[0];
+  for (const name of ['Chief &lt;staff>', 'Alpha lead', 'Beta lead', 'Unknown lead']) assert.ok(overview.includes(`<td>${name}</td>`));
+  assert.ok(overview.indexOf('Session stale: Beta lead') < overview.indexOf('<h2 class="sh">Sessions</h2>'));
+  assert.match(overview, /<td>missing&lt;project> \(unknown\)<\/td>/);
+  assert.match(overview, /href="#v-alpha">alpha<\/a>/);
+  assert.match(overview, /href="https:\/\/example.test\/s\/1\?a=1&amp;b=2"/);
+  assert.doesNotMatch(overview, /href="(?:javascript|session):/);
+  assert.match(overview, /javascript:alert\(&quot;unsafe&quot;\)/);
+  assert.match(overview, /<td>stale<\/td><td>never<\/td><td>0<\/td><td>0<\/td>/);
+  assert.match(f.html('projects/beta.html'), /ws-dot hi" title="Session stale: Beta lead;/);
+  assert.ok(f.html().indexOf('data-p="beta"') < f.html().indexOf('data-p="alpha"'), 'stale role raises attention ranking');
+  for (const [slug, own, other] of [['alpha', 'Alpha lead', 'Beta lead'], ['beta', 'Beta lead', 'Alpha lead']]) {
+    const page = f.html(`projects/${slug}.html`);
+    assert.match(page, new RegExp(`<td>${own}</td>`));
+    assert.ok(page.indexOf('<h2 class="sh">Sessions</h2>') < page.indexOf('<h2 class="sh">Next steps</h2>'));
+    assert.ok(!page.includes(`<td>${other}</td>`));
+    assert.doesNotMatch(page, /<td>Chief &lt;staff>|<td>Unknown lead/);
+    assert.match(page, new RegExp(`href="../index.html#v-${slug}">${slug}</a>`));
+  }
+  renderDashboard({ instance: f.instance, out: f.out, roster: path, now: new Date('2026-05-04T00:00:00Z') });
+  assert.match(f.html(), /Roster generated 1 day ago/);
+  assert.match(f.html(), /<td>live<\/td><td>2 days ago<\/td><td>3<\/td><td>2<\/td>/);
+  assert.match(f.html('projects/alpha.html'), /<td>live<\/td><td>1 day ago<\/td><td>5<\/td><td>4<\/td>/);
+  roster.linkSchemes = ['HTTPS', 'session', 'javascript'];
+  f.write('roster.json', JSON.stringify(roster));
+  success(f.render('--roster', path));
+  assert.match(f.html(), /href="session:\/\/example\/alpha"/);
+  assert.match(f.html(), /href="https:\/\/example.test/);
+  assert.doesNotMatch(f.html(), /href="javascript:/);
+});
+
+test('dashboard rejects malformed rosters with exit 1 and no output writes', (t) => {
+  const f = dashboardFixture(t);
+  f.write('projects/alpha/README.md', '# Alpha\n');
+  const valid = { generatedAt: '2026-05-03T18:00:00Z', roles: [
+    { id: 'lead', name: 'Lead', project: 'alpha', live: true, beat: null, link: null, generation: 0, openItems: 0 },
+  ] };
+  const sentinel = join(f.out, 'index.html');
+  writeFileSync(sentinel, 'SENTINEL');
+  const before = filesUnder(f.out);
+  const cases = [
+    ['{', /JSON/], ['null', /expected an object/],
+    [JSON.stringify({ ...valid, generatedAt: '2026-02-30' }), /generatedAt/],
+    [JSON.stringify({ ...valid, roles: {} }), /roles must be a list/],
+    [JSON.stringify({ ...valid, linkSchemes: 'https' }), /linkSchemes/],
+    [JSON.stringify({ ...valid, linkSchemes: ['https:'] }), /linkSchemes/],
+    ...Object.entries({ id: '', name: null, project: 3, live: 'false', beat: 'invalid', link: {}, generation: -1, openItems: 1.5 })
+      .map(([field, value]) => [JSON.stringify({ ...valid, roles: [{ ...valid.roles[0], [field]: value }] }), /roles\[0\]/]),
+  ];
+  for (const [text, error] of cases) {
+    const path = f.write('roster.json', text);
+    const failed = f.render('--roster', path);
+    assert.equal(failed.status, 1, failed.stderr);
+    assert.match(failed.stderr, /render-dashboard: invalid roster/);
+    assert.match(failed.stderr, error);
+    assert.equal(failed.stdout, '');
+    assert.deepEqual(filesUnder(f.out), before);
+  }
+  const missing = f.render('--roster', join(f.root, 'missing.json'));
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /invalid roster.*ENOENT/);
+  assert.deepEqual(filesUnder(f.out), before);
+  const path = f.write('roster.json', JSON.stringify({ ...valid, roles: [] }));
+  success(f.render('--roster', path));
+  assert.match(f.html(), /<h2 class="sh">Sessions<\/h2>/);
+  assert.match(f.html(), /Roster generated/);
+});
 
 test('dashboard tolerates absent optional project files and empty registries without inventing status', (t) => {
   const f = dashboardFixture(t);

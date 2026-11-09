@@ -98,6 +98,29 @@ Open the printed `file:` URL. The left pane lists Overview and projects ranked b
 
 The right pane starts with Overview: attention reasons, the next open step, and last activity. Each project view has a health strip, next steps as read-only checkboxes (completed items folded), open questions, six recent activity rows with summaries, findings and PR links, and folded STATE sections with first-sentence previews. Daily digests fold into one activity row. Properties, repositories and sources are folded below. Expand all and Collapse all affect only that project's view.
 
+Pass `--roster <file>` to show live session health from a local JSON file:
+
+```bash
+node hoffice/scripts/render-dashboard.mjs --instance "/path/to/project memory" "/path/to/dashboard output" --roster "/path/to/roster.json"
+```
+
+```json
+{
+  "generatedAt": "2026-11-09T18:00:00Z",
+  "linkSchemes": ["https", "http"],
+  "roles": [
+    {"id": "chief", "name": "Chief of Staff", "project": null, "live": true,
+     "beat": "2026-11-09T17:58:00Z", "link": "https://example.test/s/1", "generation": 2, "openItems": 3},
+    {"id": "lead-a", "name": "Lead: A", "project": "a", "live": false,
+     "beat": null, "link": null, "generation": 0, "openItems": 0}
+  ]
+}
+```
+
+Overview lists every role in a Sessions table; each project view lists its own roles beside the health strip. A role with `live: false` adds an attention reason to its project. A null project means an instance-wide role; an unrecognized project slug appears on Overview marked unknown. Last beat and roster generation show ages in days, relative to render time; a null beat shows "never". Generation and open items are nonnegative integers. Malformed rosters stop rendering before any output is written.
+
+`linkSchemes` defaults to `["https", "http"]` when absent. List a custom URL scheme to make session links clickable; other links remain plain text. Executable `javascript`, `data`, and `vbscript` links always remain plain text. Without `--roster`, the dashboard is unchanged. The renderer only reads the roster; it never refreshes sessions or queries a service.
+
 Keys: `j` / `k` move through the visible project list (including Overview); `/` focuses the filter; Escape clears it. URL hashes select views, so a view can be bookmarked. At narrow widths the panes stack. Without JavaScript, Overview still shows and each project is reachable through the sidebar’s project-page links.
 
 The renderer writes `index.html`, `projects/<slug>.html` (the same workspace with only that project's view), and `source/<path>.html` for every regular instance Markdown file, skipping hidden directories, `node_modules`, and symlinks. Local Markdown links, heading anchors and code-span paths point to these readable pages; each source page links back to the original file. Unsafe link targets are dropped. Generated pages are overwritten on later renders; sources are never edited and nothing is published. Treat the output as private instance content.
