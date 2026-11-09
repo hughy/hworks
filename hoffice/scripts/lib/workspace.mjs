@@ -27,7 +27,8 @@ const ageClass = days => days === null || days === undefined ? 'unknown' : days 
 // Reasons a project needs a look, heaviest first. The score orders the attention queue.
 function attention(project, ctx) {
   const s = stats(project, ctx);
-  const reasons = [];
+  const reasons = (ctx.roster?.roles ?? []).filter(r => r.project === project.slug && !r.live)
+    .map(r => ({ weight: 3, text: `Session stale: ${r.name}` }));
   if (s.reviewAge === null) reasons.push({ weight: 3, text: 'STATE has no review date' });
   else if (s.reviewAge > 21) reasons.push({ weight: 3, text: `STATE reviewed ${s.reviewAge} days ago` });
   else if (s.reviewAge > 7) reasons.push({ weight: 1, text: `STATE reviewed ${s.reviewAge} days ago` });
@@ -401,12 +402,27 @@ function strip(p, ctx, list) {
 <div>${spark(weekly(list, ctx.now))}<small style="display:block">notes per week, 12 weeks</small></div></div>`;
 }
 
+function sessions(ctx, from, project = null) {
+  if (!ctx.roster) return '';
+  const roles = ctx.roster.roles.filter(r => project === null || r.project === project);
+  return `<h2 class="sh">Sessions</h2><p class="muted">Roster generated ${ageLabel(ctx.age(ctx.date(ctx.roster.generatedAt)))}</p>
+<table class="rank"><thead><tr><th>Name</th><th>Project</th><th>Status</th><th>Last beat</th><th>Open items</th><th>Generation</th><th>Link</th></tr></thead><tbody>${roles.map(r => {
+    const p = ctx.projects.find(p => p.slug === r.project);
+    let url;
+    try { url = new URL(r.link); } catch { /* invalid links stay plain text */ }
+    const scheme = url?.protocol.slice(0, -1);
+    // An allowlist may enable session handlers, never executable page content.
+    const safe = ctx.roster.linkSchemes.includes(scheme) && !['javascript', 'data', 'vbscript'].includes(scheme);
+    return `<tr><td>${ctx.esc(r.name)}</td><td>${p ? `<a href="${viewHref(ctx, from, p.slug)}">${ctx.esc(p.title)}</a>` : r.project === null ? 'All projects' : `${ctx.esc(r.project)} (unknown)`}</td><td>${r.live ? 'live' : 'stale'}</td><td>${ageLabel(ctx.age(ctx.date(r.beat)))}</td><td>${r.openItems}</td><td>${r.generation}</td><td>${r.link === null ? ctx.unavailable : safe ? ctx.link(r.link, url.href) : ctx.esc(r.link)}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
 function pane(ctx) {
   return (p, from) => {
     const a = attention(p, ctx), r = recent(p, ctx, from, 6);
     return `<div class="ph">${icon(p)}<div><h1>${ctx.esc(p.title)}</h1><p class="sub">${ctx.esc(p.slug)} · ${ctx.optionalLink('Full STATE', p.state, from)} · ${ctx.link('Project page', ctx.hrefTo(from, p.page))}</p></div></div>
 ${p.lead ? `<p class="lead">${ctx.markdown(p.lead, p.source, from, { inline: true })}</p>` : ''}
-${strip(p, ctx, r.list)}
+${strip(p, ctx, r.list)}${sessions(ctx, from, p.slug)}
 ${a.reasons.length ? `<div class="look"><b>Needs a look</b><ul>${a.reasons.map(x => `<li>${ctx.esc(x.text)}</li>`).join('')}</ul></div>` : ''}
 <div class="cols"><div><h2 class="sh">Next steps</h2>${steps(p, ctx, from)}
 <details class="sec"><summary><b>Open questions (${p.questions.length})</b><span>${p.questions.length ? 'Unresolved items from STATE' : 'None recorded'}</span></summary>${questions(p, ctx, from)}</details></div>
@@ -423,7 +439,7 @@ function home(ctx) {
     return `<h1>Overview</h1><p class="muted">Projects ranked by what needs a look. Select one on the left or here.</p>
 <table class="rank"><thead><tr><th>Project</th><th>Needs a look</th><th>Next open step</th><th>Last activity</th></tr></thead><tbody>${rows.map(({ p, a }) => {
       return `<tr><td style="width:170px"><a href="${viewHref(ctx, from, p.slug)}">${ctx.esc(p.title)}</a></td><td class="r" style="width:210px">${a.reasons.slice(0, 2).map(x => ctx.esc(x.text)).join('<br>') || 'Nothing'}</td><td>${nextStep(p, ctx, from) || '<span class="muted">None</span>'}</td><td class="r" style="white-space:nowrap">${ageLabel(a.stats.activityAge)}</td></tr>`;
-    }).join('')}</tbody></table>${rows.length ? '' : '<p class="muted">No projects registered.</p>'}`;
+    }).join('')}</tbody></table>${rows.length ? '' : '<p class="muted">No projects registered.</p>'}${sessions(ctx, from)}`;
   };
 }
 

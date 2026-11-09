@@ -41,6 +41,31 @@ function date(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(Date.parse(text)) &&
     new Date(day).toISOString().slice(0, 10) === day ? day : '';
 }
+function readRoster(path) {
+  if (path === undefined) return null;
+  try {
+    const roster = JSON.parse(readFileSync(path, 'utf8'));
+    const nonempty = value => typeof value === 'string' && value.trim().length > 0;
+    const timestamp = value => typeof value === 'string' && !!date(value);
+    const count = value => Number.isSafeInteger(value) && value >= 0;
+    if (!roster || typeof roster !== 'object' || Array.isArray(roster)) throw new Error('expected an object');
+    if (!timestamp(roster.generatedAt)) throw new Error('generatedAt must be a valid date');
+    const schemes = roster.linkSchemes === undefined ? ['https', 'http'] : roster.linkSchemes;
+    if (!Array.isArray(schemes) || !schemes.every(s => typeof s === 'string' && /^[a-z][a-z0-9+.-]*$/i.test(s))) {
+      throw new Error('linkSchemes must be a list of URL scheme names');
+    }
+    if (!Array.isArray(roster.roles)) throw new Error('roles must be a list');
+    for (const [i, role] of roster.roles.entries()) {
+      if (!role || !nonempty(role.id) || !nonempty(role.name) ||
+          !(role.project === null || nonempty(role.project)) || typeof role.live !== 'boolean' ||
+          !(role.beat === null || timestamp(role.beat)) || !(role.link === null || typeof role.link === 'string') ||
+          !count(role.generation) || !count(role.openItems)) {
+        throw new Error(`roles[${i}] must have id, name, project (string or null), live (boolean), beat (date or null), link (string or null), and nonnegative integer generation and openItems`);
+      }
+    }
+    return { ...roster, linkSchemes: schemes.map(s => s.toLowerCase()) };
+  } catch (error) { throw new Error(`invalid roster ${path}: ${error.message}`); }
+}
 function tables(text) {
   return marked.lexer(text).filter(t => t.type === 'table').flatMap(t =>
     t.rows.map(row => Object.fromEntries(t.header.map((cell, i) => [cell.text.toLowerCase(), row[i]?.text ?? '']))));
@@ -140,7 +165,8 @@ const withinPath = (parent, child) => {
   return !path || (path !== '..' && !path.startsWith('../') && !isAbsolute(path));
 };
 
-export function renderDashboard({ instance: instanceArg, out: outArg, now = new Date() }) {
+export function renderDashboard({ instance: instanceArg, out: outArg, roster: rosterPath, now = new Date() }) {
+  const roster = readRoster(rosterPath);
   const instance = realpathSync(resolve(instanceArg));
   if (!exists(join(instance, 'HOFFICE.md'))) throw new Error('instance root must contain HOFFICE.md');
   const out = resolve(outArg);
@@ -292,7 +318,7 @@ export function renderDashboard({ instance: instanceArg, out: outArg, now = new 
     },
   };
 
-  const ctx = { instance, now, projects, docs, esc, date, age, unavailable,
+  const ctx = { instance, now, projects, docs, roster, esc, date, age, unavailable,
     link, fileLink, optionalLink, hrefTo, markdown, ...render };
   const pages = new Map();
   const destinations = new Set();
