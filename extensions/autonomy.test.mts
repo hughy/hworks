@@ -7,7 +7,7 @@ process.env.HWORKS_BLOCKERS_LOG = logPath;
 delete process.env.PI_AUTONOMY;
 delete process.env.PI_SUBAGENT_CHILD;
 delete process.env.PI_HUGHY_MODE;
-const { classify, grantsFrom, guardedSkill, isOrchestrateCall, default: register } = await import("./autonomy.ts");
+const { classify, grantsFrom, guardedSkill, isOrchestrateCall, isUnattended, default: register } = await import("./autonomy.ts");
 const block = ["git reset --hard HEAD~1","git -C repo reset --hard","git clean -fdx","git push --force origin feat","git push -f","git push --force-with-lease origin feat","git push origin +feat","git branch -D old","git stash drop","git worktree remove --force ../wt","DROP TABLE users;","kubectl delete pod x","terraform apply","psql -c \"drop table users\"","cd \"my repo\" && git reset --hard","python3 - <<'EOF'\nprint(1)\nEOF\ngit reset --hard","git commit -m 'wip' && git push --force origin x"];
 const allow = ["git worktree remove --force /tmp/wt","rm -rf build","git checkout -- src/a.ts","rm -rf /tmp/foo","rm -f $TMPDIR/x","rm ~/.local/state/agent-tasks/t/a.md","find /tmp/x -delete","git rm src/old.ts","git status","git push origin feat","git restore --staged a.ts","git checkout -b new","git checkout main","git branch -d merged","git stash push","git reset HEAD~1","git reset --soft HEAD~1","grep -rn 'rm -rf' .","npm run format","git commit -m 'remove dead code'","echo terraform plan","agent -p \"run git reset --hard and report\"","git commit -m 'docs: never git reset --hard'","python3 - <<'EOF'\ns = 'never `git reset --hard`'\nEOF","cat > f.md <<EOF\nuse git push --force rarely\nEOF\necho ok","grep -n \"git-reset-hard\\|reset --hard\" log"];
 block.push("git push --force-with-lease=feat origin feat", "git push --force-if-includes --force origin x", "git push --force-with-lease= origin x", "git reset --merge", "d=$(mktemp -d); git worktree remove --force $other", "git worktree remove -f ~/dev/repo-wt");
@@ -194,6 +194,9 @@ await skillRun.p.commands.autonomy.handler("off", skillRun.c);
 check("off overrides trigger", !skillRun.callIn("bash", destructive)?.block);
 await skillRun.p.commands.autonomy.handler("auto", skillRun.c);
 check("auto restores trigger", !!skillRun.callIn("bash", destructive)?.block);
+check("isUnattended", isUnattended('<skill name="kaizen-weekly" location="/x">\nbody\n</skill>\n\n--unattended\n\nRun unattended.')
+  && !isUnattended('<skill name="x" location="/x">\nrun with --unattended\n</skill>\n\ngo') && !isUnattended("how does --unattended-mode work"));
+autoTest("unattended flag", (p, c) => user(p, c, '<skill name="weekly" location="/x">\nbody\n</skill>\n\n--unattended\n\nNever force-push.'));
 autoTest("orchestrate.py", (_p, c) => { _p.emit("tool_call", { toolName: "bash", input: { command: 'python3 $O --store "$S" status' } }, c); });
 const hughy = autoTest("hughy-mode", (p, c) => { p.branch.push({ type: "custom", customType: "hughy-mode", data: { enabled: true } }); user(p, c, "fix the bug"); });
 hughy.p.branch.push({ type: "custom", customType: "hughy-mode", data: { enabled: false } });
