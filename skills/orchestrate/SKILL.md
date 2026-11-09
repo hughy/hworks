@@ -86,6 +86,7 @@ Ship one clean unit:
 4. From the unit worktree: `git push -u origin <branch>`, then `gh pr create --draft --base <trunk> --head <branch>` with the unit's title and a body per the repo template. A stacked unit whose parent is unmerged uses `--base <parent branch>` and follows Stacks. Find the template with `scripts/pr-template.sh` run in the worktree; never guess its filename, which may be lowercase or live in `docs/` or a `PULL_REQUEST_TEMPLATE/` directory. Pass the body with `--body-file`. When the PR already exists (a restacked or re-reviewed unit), push and skip `gh pr create`.
 5. Run `gh pr checks <n>` once, without `--watch`. A pending or failing policy check whose description names missing PR-body fields means fix the body now; a tracker may show only that a policy gate blocks.
 6. Track the PR with the harness PR tracker if there is one. `set <id> pr-open --reason <url>` and write the URL to `progress.md`.
+7. When recording any unit as merged (`set <id> merged`), delete only its worktree's confirmed regenerable build directories and dependency installs (such as `target/` or `node_modules/`) and report the space freed from before/after disk-usage measurements. This is the sole cleanup exception: never delete source files, the worktree itself, or its branch.
 
 The coordinator never edits a unit's code or reviews it in place of the workflow. Reading a worktree, a run, or a diff to decide what to do is fine.
 
