@@ -37,6 +37,9 @@ class OrchestrateTest(unittest.TestCase):
             f.write("seed\n")
         sh(repo, "add", "README")
         sh(repo, "commit", "-q", "-m", "seed")
+        # orchestrate.py commits restack merges with the repo's own identity and signing settings.
+        for k, v in (("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")):
+            sh(repo, "config", k, v)
 
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orchestrate-test-"))
@@ -553,6 +556,80 @@ class OrchestrateTest(unittest.TestCase):
         self.assertEqual(self.next(), [], "head not yet in main")
         sh(self.repo, "merge", "-q", "--ff-only", "orchestrate/A")
         self.assertEqual(self.next(), ["B"])
+
+    def stacked_pair(self):
+        """A clean, and B stacked on it with overlapping paths, launched and bound."""
+        self.init()
+        self.load([{"id": "A", "title": "a", "paths": ["src/*"]},
+                   {"id": "B", "title": "b", "blockedBy": ["A"], "stack": True, "paths": ["src/b.py"]}])
+        self.started("A")
+        a_head = self.commit("A", "a.txt")
+        self.g("record", "A", "1", self.workflow("clean", "wf-1", a_head))
+        self.assertEqual(self.next(), ["B"])
+        spec = self.launch("B")
+        self.g("bind", "B", "1", "wf-b1")
+        return a_head, spec
+
+    def test_stacked_unit_starts_on_its_clean_parent_and_reviews_only_its_own_commits(self):
+        a_head, spec = self.stacked_pair()
+        self.assertEqual(sh(self.wt("B"), "rev-parse", "HEAD"), a_head)
+        args = orchestrate.read_json(spec["args_path"])
+        self.assertEqual(args["base"], a_head)
+        with open(args["brief"]) as f:
+            self.assertIn("stacked on orchestrate/A", f.read())
+        r = self.rows()["B"]
+        self.assertEqual((r["parent"], r["onto"]), ("A", a_head))
+
+    def test_parent_move_makes_child_stale_and_relaunch_restacks_by_merge(self):
+        a_head, _ = self.stacked_pair()
+        self.g("record", "B", "1", self.workflow("clean", "wf-b1", self.commit("B", "b.txt")))
+        new = self.commit("A", "fix.txt")
+        self.g("advance", "A", "--task-dir", self.ledger(a_head, new), "--reason", "pre-push fix")
+        st = {u["id"]: u for u in json.loads(self.g("status", "--json"))}
+        self.assertEqual(st["B"]["state"], "stale")
+        self.assertIn("stack parent A moved", st["B"]["reason"])
+        self.g("set", "B", "queued", "--reason", "restack")
+        spec = self.launch("B")
+        self.assertEqual(sh(self.wt("B"), "merge-base", "--is-ancestor", new, "HEAD"), "")
+        self.assertEqual(len(sh(self.wt("B"), "rev-list", "--parents", "-n1", "HEAD").split()), 3, "a merge commit")
+        args = orchestrate.read_json(spec["args_path"])
+        self.assertEqual(args["base"], new)
+        with open(args["brief"]) as f:
+            self.assertIn("merged orchestrate/A into this branch", f.read())
+
+    def test_squash_merged_parent_frees_the_child_and_relaunch_restacks_onto_base(self):
+        a_head, _ = self.stacked_pair()
+        self.g("record", "B", "1", self.workflow("clean", "wf-b1", self.commit("B", "b.txt")))
+        sh(self.repo, "merge", "-q", "--squash", "orchestrate/A")
+        sh(self.repo, "commit", "-q", "-m", "squash A")
+        self.g("set", "A", "merged", "--reason", "squash-merged")
+        st = {u["id"]: u for u in json.loads(self.g("status", "--json"))}
+        self.assertEqual(st["B"]["state"], "stale")
+        self.assertIn("restack onto main", st["B"]["reason"])
+        self.g("set", "B", "queued", "--reason", "restack")
+        spec = self.launch("B")
+        main = sh(self.repo, "rev-parse", "main")
+        self.assertEqual(orchestrate.read_json(spec["args_path"])["base"], main)
+        self.g("bind", "B", "2", "wf-b2")
+        self.g("record", "B", "2", self.workflow("clean", "wf-b2", sh(self.wt("B"), "rev-parse", "HEAD")))
+        st = {u["id"]: u for u in json.loads(self.g("status", "--json"))}
+        self.assertEqual(st["B"]["state"], "clean")
+
+    def test_conflicting_restack_blocks_with_a_clean_tree(self):
+        a_head, _ = self.stacked_pair()
+        self.g("record", "B", "1", self.workflow("clean", "wf-b1", self.commit("B", "same.txt")))
+        with open(os.path.join(self.wt("A"), "same.txt"), "w") as f:
+            f.write("other\n")
+        sh(self.wt("A"), "add", "same.txt")
+        sh(self.wt("A"), "commit", "-q", "-m", "conflict")
+        new = sh(self.wt("A"), "rev-parse", "HEAD")
+        self.g("advance", "A", "--task-dir", self.ledger(a_head, new), "--reason", "pre-push fix")
+        self.g("set", "B", "queued", "--reason", "restack")
+        self.launch("B", code=3)
+        r = self.rows()["B"]
+        self.assertEqual(r["state"], "blocked")
+        self.assertIn("merge", r["reason"])
+        self.assertEqual(sh(self.wt("B"), "status", "--porcelain"), "")
 
     def test_exclusive_scheduling_without_paths(self):
         self.init()

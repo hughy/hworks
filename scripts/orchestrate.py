@@ -28,8 +28,10 @@ DEFAULT_WORKFLOW = os.path.normpath(os.path.join(HERE, "..", "workflows", "revie
 # cleared only by a requeue that finds every bound controller and child terminal.
 # created: the worktree path this store's git worktree add made for the unit; launch reuses only that
 # path without --adopt.
+# stack: "1" when the unit may start on top of its one unmerged dependency (its stack parent).
+# parent: the stack parent the branch was built on; onto: the commit the branch was last built on or merged.
 COLUMNS = ["id", "state", "deps", "paths", "branch", "worktree", "effort", "attempt", "run",
-           "start_head", "head", "claim", "reason", "reserved", "created"]
+           "start_head", "head", "claim", "reason", "reserved", "created", "stack", "parent", "onto"]
 LIVE = {"launching", "running"}
 WORKFLOW_STATES = {"clean", "unresolved", "gate-failed", "review-failed", "blocked", "coder-timeout", "coder-failed"}
 # The coder run hit its deadline or failed without a proven gate failure: retrying the same brief would likely
@@ -205,6 +207,49 @@ def freshness(cfg, row, head):
     return tree_dirty(row["worktree"])
 
 
+def unmerged_parent(row, rows_by_id):
+    """The id of a stacking unit's unmerged dependency, its stack parent, or ''."""
+    if not row["stack"]:
+        return ""
+    for dep in split_list(row["deps"]):
+        d = rows_by_id.get(dep)
+        if d is not None and d["state"] != "merged":
+            return dep
+    return ""
+
+
+def stack_ancestors(row, rows_by_id):
+    seen, cur = [], row
+    while True:
+        p = unmerged_parent(cur, rows_by_id)
+        if not p or p in seen or p == row["id"]:
+            return seen
+        seen.append(p)
+        cur = rows_by_id[p]
+
+
+def drift(cfg, row, rows_by_id):
+    """Why a stacked unit's branch no longer sits on its stack parent (it needs a restack), or ''."""
+    p = rows_by_id.get(row["parent"]) if row["parent"] else None
+    head = branch_head(cfg, row["branch"])
+    if p is None or not head:
+        return ""
+    if p["state"] == "merged":
+        if row["onto"] and not is_ancestor(cfg, row["onto"], cfg["base"]):
+            return "stack parent %s merged but %s is not in %s; restack onto %s" % (
+                p["id"], row["onto"][:12], cfg["base"], cfg["base"])
+        return ""
+    ph = branch_head(cfg, p["branch"])
+    if ph and not is_ancestor(cfg, ph, head):
+        return "stack parent %s moved to %s; restack" % (p["id"], ph[:12])
+    return ""
+
+
+def accepted_reason(cfg, row, rows_by_id):
+    """Why a clean or pr-open unit no longer holds, or ''."""
+    return freshness(cfg, row, row["head"]) or drift(cfg, row, rows_by_id)
+
+
 # ---------- validation and import ----------
 
 def validate_units(data):
@@ -231,6 +276,8 @@ def validate_units(data):
             v = u.get(key)
             if v is not None and (not isinstance(v, list) or not all(isinstance(x, str) and x for x in v)):
                 raise BadInput("%s: %s must be a list of non-empty strings" % (where, key))
+        if "stack" in u and not isinstance(u["stack"], bool):
+            raise BadInput("%s: stack must be true or false" % where)
         for dep in u.get("blockedBy") or []:
             if dep == uid:
                 raise BadInput("%s: depends on itself" % where)
@@ -277,6 +324,7 @@ def cmd_import(store, a):
             r["branch"] = u.get("branch") or "orchestrate/" + u["id"]
             r["effort"] = u.get("effort") or cfg["effort"]
             r["claim"] = " | ".join(one_line(c) for c in u.get("claimedBy") or [])
+            r["stack"] = "1" if u.get("stack") else ""
         for r in rows:
             unknown = [d for d in split_list(r["deps"]) if d not in by_id]
             was_unknown = r["state"] == "blocked" and r["reason"].startswith("unknown dependency")
@@ -360,16 +408,31 @@ def ineligible(cfg, row, rows_by_id):
         return "state is %s" % st
     if row["claim"]:
         return "claimed: " + row["claim"]
+    parent = ""
     for dep in split_list(row["deps"]):
         d = rows_by_id.get(dep)
         if d is None:
             return "unknown dependency " + dep
-        if d["state"] != "merged":
+        if d["state"] == "merged":
+            if not d["head"]:
+                return "dependency %s is merged but has no recorded head to check against %s" % (dep, cfg["base"])
+            # A branch built on its stack parent already holds the parent's commits, so a squash merge,
+            # whose head never reaches base, still frees it; launch then restacks it onto base.
+            if not is_ancestor(cfg, d["head"], cfg["base"]) and dep != row["parent"]:
+                return "dependency %s head %s is not in %s" % (dep, d["head"][:12], cfg["base"])
+            continue
+        if not row["stack"]:
             return "dependency %s is %s, not merged" % (dep, d["state"])
-        if not d["head"]:
-            return "dependency %s is merged but has no recorded head to check against %s" % (dep, cfg["base"])
-        if not is_ancestor(cfg, d["head"], cfg["base"]):
-            return "dependency %s head %s is not in %s" % (dep, d["head"][:12], cfg["base"])
+        if parent:
+            return "dependencies %s and %s are both unmerged; a stack has one parent" % (parent, dep)
+        parent = dep
+        if d["state"] not in ("clean", "pr-open"):
+            return "stack parent %s is %s, not clean or pr-open" % (dep, d["state"])
+        stale = accepted_reason(cfg, d, rows_by_id)
+        if stale:
+            return "stack parent %s is stale: %s" % (dep, stale)
+    if row["parent"] and parent and parent != row["parent"]:
+        return "branch %s was built on %s, not %s" % (row["branch"], row["parent"], parent)
     return ""
 
 
@@ -385,12 +448,16 @@ def plan(cfg, rows, units, window):
     # A reserved attempt's writers may still run, so it counts against the window and holds its paths.
     active = [r for r in rows if r["state"] in LIVE or r["reserved"]]
     holding = active + [r for r in rows if r["state"] in ACCEPTED_UNMERGED and r not in active]
-    exclusive = next((r for r in holding if not split_list(r["paths"])), None)
+    pathless = [r for r in holding if not split_list(r["paths"])]
     order = {r["id"]: i for i, r in enumerate(rows)}
 
     def key(r):
         p = (units.get(r["id"]) or {}).get("priority")
         return (p if p in (1, 2, 3, 4) else 5, order[r["id"]])
+
+    # A stacked unit builds on its ancestors' commits, so it holds no paths against them, nor they against it.
+    def related(r, o):
+        return o["id"] in stack_ancestors(r, by_id) or r["id"] in stack_ancestors(o, by_id)
 
     picked, why = [], {}
     slots = window - len(active)
@@ -398,14 +465,15 @@ def plan(cfg, rows, units, window):
         reason = ineligible(cfg, r, by_id)
         paths = split_list(r["paths"])
         if not reason:
+            exclusive = next((o for o in pathless if not related(r, o)), None)
             if exclusive:
                 reason = "%s has no paths and is %s" % (exclusive["id"], held(exclusive))
-            elif not paths and (holding or picked):
+            elif not paths and any(not related(r, o) for o in holding + picked):
                 reason = "no paths: runs only when nothing else is active or accepted but unmerged"
             elif picked and not split_list(picked[0]["paths"]):
                 reason = "a unit without paths was picked first"
             else:
-                for o in holding + picked:
+                for o in [o for o in holding + picked if not related(r, o)]:
                     if overlaps(paths, split_list(o["paths"])):
                         reason = "paths overlap %s (%s)" % (o["id"], held(o) if o in holding else "picked")
                         break
@@ -431,7 +499,7 @@ def cmd_next(store, a):
 
 # ---------- launch ----------
 
-def render_brief(cfg, row, unit, prev_state, prev_reason):
+def render_brief(cfg, row, unit, prev_state, prev_reason, base, parent_branch="", restacked=""):
     lines = ["# %s" % unit.get("title", row["id"]), "", "Unit: %s" % row["id"]]
     if unit.get("url"):
         lines.append("URL: %s" % unit["url"])
@@ -441,36 +509,58 @@ def render_brief(cfg, row, unit, prev_state, prev_reason):
               "- Work in %s on branch %s. Commit on this branch with new commits only." % (row["worktree"], row["branch"])]
     if row["paths"]:
         lines.append("- Expected paths: %s. Say so in your summary if the change needs others." % ", ".join(split_list(row["paths"])))
+    if parent_branch:
+        lines.append("- This branch is stacked on %s (unit %s), which is not merged yet. Deliver only this unit; the parent's "
+                     "commits belong to its own unit. Review covers `git diff %s...HEAD`." % (parent_branch, row["parent"], base))
+    if restacked:
+        lines.append("- orchestrate merged %s into this branch before this attempt. Run the gate before other edits and "
+                     "fix anything the merge broke." % restacked)
     if row["attempt"] > 1:
         lines.append("- This is attempt %d. The previous attempt ended `%s`%s. Read `git log %s..HEAD` before editing."
-                     % (row["attempt"], prev_state, (": " + prev_reason) if prev_reason else "", cfg["base"]))
+                     % (row["attempt"], prev_state, (": " + prev_reason) if prev_reason else "", base))
     return "\n".join(lines) + "\n"
 
 
-def prepare_worktree(cfg, row):
-    """Create or adopt the unit worktree; return a blocking reason or ''."""
+def prepare_worktree(cfg, row, start=None, restack=""):
+    """Create or adopt the unit worktree; return a blocking reason or ''.
+
+    A new branch starts at start (default: base). With restack (a label for start), an existing branch that
+    does not contain start gets start merged in: a new commit, so a pushed branch never needs a force push."""
     wt, branch = row["worktree"], row["branch"]
+    start = start or cfg["base"]
     if not os.path.lexists(wt):
         os.makedirs(os.path.dirname(wt), exist_ok=True)
         git(cfg["repo"], "worktree", "prune")
         has_branch = git(cfg["repo"], "rev-parse", "--verify", "-q", "refs/heads/" + branch)[0] == 0
-        add = [wt, branch] if has_branch else ["-b", branch, wt, cfg["base"]]
+        add = [wt, branch] if has_branch else ["-b", branch, wt, start]
         rc, _, err = git(cfg["repo"], "worktree", "add", "-q", *add)
         if rc != 0:
             return "git worktree add failed: %s" % err
         row["created"] = wt
+        if not has_branch:
+            return ""
+    else:
+        rc, top, _ = git(wt, "rev-parse", "--show-toplevel")
+        if rc != 0 or real(top) != real(wt):
+            return "%s exists and is not a worktree root" % wt
+        _, listing, _ = git(cfg["repo"], "worktree", "list", "--porcelain")
+        known = {real(l[len("worktree "):]) for l in listing.splitlines() if l.startswith("worktree ")}
+        if real(wt) not in known:
+            return "%s is not a worktree of %s" % (wt, cfg["repo"])
+        rc, cur, _ = git(wt, "symbolic-ref", "--short", "-q", "HEAD")
+        if rc != 0 or cur != branch:
+            return "%s is on %s, expected branch %s" % (wt, cur or "a detached HEAD", branch)
+        dirty = tree_dirty(wt)
+        if dirty:
+            return dirty
+    if not restack or git(wt, "merge-base", "--is-ancestor", start, "HEAD")[0] == 0:
         return ""
-    rc, top, _ = git(wt, "rev-parse", "--show-toplevel")
-    if rc != 0 or real(top) != real(wt):
-        return "%s exists and is not a worktree root" % wt
-    _, listing, _ = git(cfg["repo"], "worktree", "list", "--porcelain")
-    known = {real(l[len("worktree "):]) for l in listing.splitlines() if l.startswith("worktree ")}
-    if real(wt) not in known:
-        return "%s is not a worktree of %s" % (wt, cfg["repo"])
-    rc, cur, _ = git(wt, "symbolic-ref", "--short", "-q", "HEAD")
-    if rc != 0 or cur != branch:
-        return "%s is on %s, expected branch %s" % (wt, cur or "a detached HEAD", branch)
-    return tree_dirty(wt)
+    rc, _, err = git(wt, "merge", "-q", "--no-edit", "-m", "Merge %s into %s" % (restack, branch), start)
+    if rc != 0:
+        git(wt, "merge", "--abort")
+        return ("restacking %s onto %s failed: %s; merge %s into it by hand in %s, commit, then set queued"
+                % (branch, restack, one_line(err), start[:12], wt))
+    return ""
 
 
 def cmd_launch(store, a):
@@ -497,20 +587,36 @@ def cmd_launch(store, a):
             print(json.dumps({"id": row["id"], "attempt": row["attempt"], "state": "blocked", "reason": reason}))
             return 3
 
-        reason = prepare_worktree(cfg, row)
+        by_id = {r["id"]: r for r in rows}
+        parent = unmerged_parent(row, by_id)
+        stacked = bool(parent or row["parent"])
+        if parent:
+            label = by_id[parent]["branch"]
+            start = branch_head(cfg, label)
+        else:
+            label = cfg["base"]
+            start = git(cfg["repo"], "rev-parse", "--verify", "-q", cfg["base"] + "^{commit}")[1]
+        old_head = branch_head(cfg, row["branch"])
+        reason = prepare_worktree(cfg, row, start if stacked else None, label if stacked else "")
         if reason:
             return block(reason)
+        if parent:
+            row["parent"] = parent
         _, row["start_head"], _ = git(row["worktree"], "rev-parse", "HEAD")
+        row["onto"] = start if stacked else ""
+        review_base = start if stacked else cfg["base"]
         write_rows(store, rows)
         brief = os.path.join(store, "briefs", tag + ".md")
-        atomic_write(brief, render_brief(cfg, row, units.get(row["id"], {}), prev_state, prev_reason))
+        restacked = label if stacked and old_head and row["start_head"] != old_head else ""
+        atomic_write(brief, render_brief(cfg, row, units.get(row["id"], {}), prev_state, prev_reason, review_base,
+                                         label if parent else "", restacked))
         gate = units.get(row["id"], {}).get("gate") or cfg.get("gate")
         if not gate:
             return block("no gate: pass --gate to init or set gate on the unit")
         out_dir = os.path.join(store, "outputs", row["id"], "a%d" % row["attempt"])
         os.makedirs(out_dir, exist_ok=True)
         args_script = os.environ.get("ORCHESTRATE_ARGS_SCRIPT") or ARGS_SCRIPT
-        p = subprocess.run(["bash", args_script, brief, gate, cfg["base"], row["effort"], row["worktree"], out_dir],
+        p = subprocess.run(["bash", args_script, brief, gate, review_base, row["effort"], row["worktree"], out_dir],
                            cwd=cfg["repo"], capture_output=True, text=True)
         if p.returncode != 0:
             return block("review-loop-args.sh failed: %s" % one_line(p.stderr.strip()))
@@ -705,15 +811,17 @@ def cmd_status(store, a):
     with locked(store):
         cfg = load_config(store)
         rows = read_rows(store)
+    by_id = {r["id"]: r for r in rows}
     out = []
     for r in rows:
         state, reason = r["state"], r["reason"]
         if state in ("clean", "pr-open"):
-            stale = freshness(cfg, r, r["head"])
+            stale = accepted_reason(cfg, r, by_id)
             if stale:
                 state, reason = "stale", stale
         out.append({"id": r["id"], "state": state, "attempt": r["attempt"], "branch": r["branch"],
-                    "head": r["head"], "run": split_list(r["run"]), "reason": reason})
+                    "head": r["head"], "run": split_list(r["run"]), "reason": reason,
+                    "parent": r["parent"]})
     if a.json:
         print(json.dumps(out, indent=2))
     else:
