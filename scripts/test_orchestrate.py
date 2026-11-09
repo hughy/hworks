@@ -615,6 +615,31 @@ class OrchestrateTest(unittest.TestCase):
         st = {u["id"]: u for u in json.loads(self.g("status", "--json"))}
         self.assertEqual(st["B"]["state"], "clean")
 
+    def test_parent_that_moved_then_merged_with_a_merge_commit_keeps_the_child_stale(self):
+        a_head, _ = self.stacked_pair()
+        self.g("record", "B", "1", self.workflow("clean", "wf-b1", self.commit("B", "b.txt")))
+        new = self.commit("A", "fix.txt")
+        self.g("advance", "A", "--task-dir", self.ledger(a_head, new), "--reason", "pre-push fix")
+        sh(self.repo, "merge", "-q", "--no-ff", "-m", "merge A", "orchestrate/A")
+        self.g("set", "A", "merged", "--reason", "merged")
+        st = {u["id"]: u for u in json.loads(self.g("status", "--json"))}
+        self.assertEqual(st["B"]["state"], "stale")
+        self.assertIn("stack parent A merged", st["B"]["reason"])
+
+    def test_drift_propagates_up_a_stack(self):
+        a_head, _ = self.stacked_pair()
+        self.g("record", "B", "1", self.workflow("clean", "wf-b1", self.commit("B", "b.txt")))
+        self.load([{"id": "C", "title": "c", "blockedBy": ["B"], "stack": True, "paths": ["src/c.py"]}])
+        self.started("C", "wf-c1")
+        self.g("record", "C", "1", self.workflow("clean", "wf-c1", self.commit("C", "c.txt")))
+        self.load([{"id": "D", "title": "d", "blockedBy": ["C"], "stack": True, "paths": ["src/d.py"]}])
+        new = self.commit("A", "fix.txt")
+        self.g("advance", "A", "--task-dir", self.ledger(a_head, new), "--reason", "pre-push fix")
+        st = {u["id"]: u for u in json.loads(self.g("status", "--json"))}
+        self.assertEqual(st["C"]["state"], "stale")
+        self.assertIn("stack parent B needs a restack first", st["C"]["reason"])
+        self.assertNotIn("D", self.next())
+
     def test_conflicting_restack_blocks_with_a_clean_tree(self):
         a_head, _ = self.stacked_pair()
         self.g("record", "B", "1", self.workflow("clean", "wf-b1", self.commit("B", "same.txt")))

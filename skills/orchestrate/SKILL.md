@@ -94,8 +94,8 @@ The coordinator never edits a unit's code or reviews it in place of the workflow
 A stacked unit lets work continue on a feature before its parent PR merges. It keeps one parent: `stack: true` plus exactly one unmerged `blockedBy` unit; every other dependency must be merged into base. orchestrate.py enforces this:
 
 - `next` offers the child once the parent is `clean` or `pr-open` and not stale. `launch` branches the child from the parent's branch head and hands review-loop that head as the review base, so reviewers read only the child's commits while the gate runs on the whole stack. A unit and its stack ancestors or descendants hold no paths against each other; siblings still do.
-- `status` derives `stale` with a `stack parent ...` reason when the parent's branch moved past what the child contains (a parent re-review, an `advance` for PR fixes), or when the parent was squash-merged so its commits are not in base. A merged parent frees the child even though its head never reaches base.
-- Restack: `set <id> queued --reason restack`, then launch as usual once `next` offers it (the parent must be accepted again). Launch merges the parent's head, or base once the parent merged, into the child branch as a new commit and tells the coder to run the gate first. No rebase and no force push, so a child with an open PR takes a plain push. A conflicting merge is aborted and the launch blocks: park the unit and add the conflict to `open-questions.md`; once someone commits the merge by hand in the worktree, `set <id> queued`. Restacks spend attempts like any relaunch.
+- `status` derives `stale` with a `stack parent ...` reason when the parent's branch moved past what the child contains (a parent re-review, an `advance` for PR fixes), or when the parent merged without the child holding it in base (a squash merge, or a parent that moved before it merged). Drift propagates: a unit whose parent needs a restack is stale too, and nothing launches on it. A merged parent frees the child even though a squash-merged head never reaches base.
+- Restack: `set <id> queued --reason restack`, then launch as usual once `next` offers it (the parent must be accepted again). Launch merges the parent's head, or base once the parent merged, into the child branch as a new commit and tells the coder to run the gate first. No rebase and no force push, so a child with an open PR takes a plain push. A conflicting merge is aborted and the launch blocks: park the unit and add the conflict to `open-questions.md` with state `asked`; once the operator commits the merge in the worktree, `set <id> queued`. Restacks spend attempts like any relaunch.
 - Window: the child counts against the window like any unit. Launch children only after the pilot, and keep a stack short; each restack reruns the child's review.
 
 Ship a stack bottom-up under the grant:
@@ -146,7 +146,7 @@ Stopping early: launch nothing new and drain. Never kill a child to stop; a park
 ## Rules
 
 - One writer per worktree. orchestrate.py refuses the unsafe launches it can see; it cannot see a writer outside its store, which is why worktrees start fresh.
-- No merges into trunk, no pushes to trunk, no history rewrites, no deleting worktrees or branches. Ship only under the grant. The only merges are the restack merges launch makes into a stacked unit's own branch.
+- No merges into trunk, no pushes to trunk, no history rewrites, no deleting worktrees or branches. Ship only under the grant. The only merges into unit branches are the restack merges launch makes and a conflicting restack the operator resolves by hand.
 - Cost is bounded by count, not tokens. With `--max-attempts 2` and review-loop's default three rounds, a unit runs at most 24 children at standard effort and 36 at exhaustive (a coder retry and a reviewer re-ask in every round), plus any requeued attempts. Keep the selection small until the pilot measured real cost.
 
 ## Known runtime defects

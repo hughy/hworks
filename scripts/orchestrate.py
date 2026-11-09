@@ -228,20 +228,30 @@ def stack_ancestors(row, rows_by_id):
         cur = rows_by_id[p]
 
 
-def drift(cfg, row, rows_by_id):
+def drift(cfg, row, rows_by_id, seen=()):
     """Why a stacked unit's branch no longer sits on its stack parent (it needs a restack), or ''."""
     p = rows_by_id.get(row["parent"]) if row["parent"] else None
     head = branch_head(cfg, row["branch"])
-    if p is None or not head:
+    if p is None or not head or p["id"] in seen:
         return ""
     if p["state"] == "merged":
-        if row["onto"] and not is_ancestor(cfg, row["onto"], cfg["base"]):
-            return "stack parent %s merged but %s is not in %s; restack onto %s" % (
-                p["id"], row["onto"][:12], cfg["base"], cfg["base"])
-        return ""
+        # Settled when the branch holds the parent's final head and base does too (a merge-commit merge), or
+        # when it was last built on a base commit that is not part of the parent's history (a restack after
+        # the merge, which a squash merge needs).
+        ph = p["head"]
+        if ph and is_ancestor(cfg, ph, head) and is_ancestor(cfg, ph, cfg["base"]):
+            return ""
+        onto = row["onto"]
+        if onto and is_ancestor(cfg, onto, cfg["base"]) and not (ph and is_ancestor(cfg, onto, ph)):
+            return ""
+        return "stack parent %s merged and this branch lacks it in %s; restack onto %s" % (
+            p["id"], cfg["base"], cfg["base"])
     ph = branch_head(cfg, p["branch"])
     if ph and not is_ancestor(cfg, ph, head):
         return "stack parent %s moved to %s; restack" % (p["id"], ph[:12])
+    below = drift(cfg, p, rows_by_id, seen + (row["id"],))
+    if below:
+        return "stack parent %s needs a restack first (%s)" % (p["id"], below)
     return ""
 
 
