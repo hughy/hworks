@@ -6,7 +6,7 @@
 #   effort: quick (gate only, coder at :low), standard (1 reviewer), exhaustive (2 reviewers, coder on the exhaustive slot)
 #   worktree: where the children run (default: the current directory); emitted as cwd when given
 #   task-dir: directory for each child's output file (created if missing); emitted as an absolute taskDir when given
-#   env GATE_TIMEOUT_MS: host gate timeout in ms, emitted as gateTimeoutMs when set (workflow default: 600000)
+#   env GATE_TIMEOUT_MS: host gate timeout in ms, emitted as gateTimeoutMs when set (workflow default: 2400000, 40 minutes, covering a typical heavy-slot queue wait plus a full gate); projects with longer gates set GATE_TIMEOUT_MS.
 # The gate is emitted wrapped in scripts/heavy.py, so the coder's, the host's, and each reviewer's gate runs share
 # the host's heavy-job slots with every other loop on the machine; HWORKS_HEAVY_SLOTS=0 at run time turns that off.
 set -euo pipefail
