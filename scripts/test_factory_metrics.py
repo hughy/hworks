@@ -180,6 +180,22 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual([result['days'][1][k] for k in ('subagent_fail', 'babysitter_fail')], [1, 1])
         self.assertEqual(result['days'][1]['runs_never_started'], 2)
 
+    def test_capture_starts_null_earlier_days_and_keep_measured_zeros(self):
+        history = self.root / 'history.jsonl'
+        history.write_text(json.dumps(dict(ts='2026-01-03T12:00:00Z', status='error', outcome='failed', agent='coder', duration=3)) + '\n')
+        audit = self.root / 'audit.log'
+        audit.write_text(json.dumps(dict(ts='2026-01-04T05:00:00Z', action='block', rule='r')) + '\n')
+        self.env.update(HWORKS_RUN_HISTORY=str(history), HWORKS_HARNESS_AUDIT_LOG=str(audit),
+                        HWORKS_FM_CAPTURED_SINCE='{"subagent_fail": "2026-01-03"}')
+        result = self.run_metrics()
+        self.assertEqual([d['subagent_fail'] for d in result['days'][:4]], [None, None, 1, 0])
+        self.assertEqual([d['guard'] for d in result['days'][3:6]], [None, 0, 0])
+        self.assertEqual(result['captured_since'], {'guard': '2026-01-05', 'subagent_fail': '2026-01-03'})
+        self.env['HWORKS_FM_CAPTURED_SINCE'] = '{"no_such_field": "2026-01-03"}'
+        p = subprocess.run([sys.executable, str(HERE / 'factory-metrics.py'), '--since', '2026-01-01', '--until', '2026-01-02', '--no-fetch', '--cache', str(self.root / 'cache')], env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('captured since', p.stderr)
+
     def test_default_subagent_directory_availability(self):
         self.env.pop('HWORKS_SUBAGENT_RUNS')
         self.env['TMPDIR'] = str(self.root)
