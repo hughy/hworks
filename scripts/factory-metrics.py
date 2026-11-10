@@ -19,6 +19,9 @@ are also loaded by the existing reporter loader.
   HWORKS_FM_WORKER_PROMPT: regex matched with re.match against the first user
     message after operator-signals' leading injection stripping. Unset/empty makes
     worker fields null; configure overlay-specific prompt text in the environment.
+  HWORKS_FM_CAPTURED_SINCE: JSON {day field: YYYY-MM-DD}, the first full day each
+    field's source captured. Earlier days report null, not zero. guard also starts no
+    earlier than the day after the first row of HWORKS_HARNESS_AUDIT_LOG, which rotates.
   HWORKS_PI_SESSIONS, HWORKS_PR_TOOLS, HWORKS_GH, HWORKS_OPERATOR_SKIP,
   HWORKS_INJECTED_PREFIX, HWORKS_REDACT, HWORKS_TASKS_DIR, HWORKS_BLOCKERS_LOG,
   HWORKS_SUBAGENT_RUNS, HWORKS_RUN_HISTORY, HWORKS_HARNESS_AUDIT_LOG:
@@ -77,6 +80,7 @@ Output fields:
    entirely unavailable hosts are recorded separately, not reported as zero.
    Failed git sources null aggregate churn fields; a failed factory checkout also
    nulls factory_commits. Successful per-checkout tables remain available.
+ captured_since: {field: first captured date} applied to days; null before it.
 """
 import argparse
 import glob
@@ -493,12 +497,18 @@ def collect(start, end, tz, tasks_path, no_fetch, cache):
     for d in days.values():
         for field in missing_git:
             d[field] = None
+    starts = capture_starts(set(next(iter(days.values()))), tz, cov)
+    for d in days.values():
+        for field, first in starts.items():
+            if date.fromisoformat(d['date']) < first:
+                d[field] = None
     cov['failures'].extend(notes)
     for row in cov['missing_prs']:
         print(f"PR unavailable {row['url']}: {row['error']}", file=sys.stderr)
     for note in cov['missing_sources'] + cov['failures']:
         print(note, file=sys.stderr)
-    return dict(generated=datetime.now(tz).isoformat(), tz=str(tz), start=start.isoformat(), end=end.isoformat(), days=list(days.values()), tables=tables, coverage=cov)
+    return dict(generated=datetime.now(tz).isoformat(), tz=str(tz), start=start.isoformat(), end=end.isoformat(), days=list(days.values()), tables=tables, coverage=cov,
+                captured_since={k: v.isoformat() for k, v in sorted(starts.items())})
 
 
 def findings(start, end, cov):
@@ -547,6 +557,23 @@ def findings(start, end, cov):
             except (OSError, ValueError, KeyError, TypeError) as e:
                 cov['failures'].append(f'findings {path}: {e}')
     return rows
+
+
+def capture_starts(fields, tz, cov):
+    raw = json.loads(os.environ.get('HWORKS_FM_CAPTURED_SINCE') or '{}')
+    if not isinstance(raw, dict) or any(k not in fields or not isinstance(v, str) for k, v in raw.items()):
+        raise ValueError('captured since must map day fields to YYYY-MM-DD dates')
+    starts = {k: date.fromisoformat(v) for k, v in raw.items()}
+    log = os.environ.get('HWORKS_HARNESS_AUDIT_LOG')
+    if log:
+        try:
+            with open(log) as f:
+                first = datetime.fromisoformat(json.loads(f.readline())['ts'].replace('Z', '+00:00'))
+            # The first day holds only part of a day's rows, so capture starts the next day.
+            starts['guard'] = max(starts.get('guard', date.min), first.astimezone(tz).date() + timedelta(days=1))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            cov['missing_sources'].append(f'harness audit log start: {e}')
+    return starts
 
 
 def blockers(days, since, tz, cov):

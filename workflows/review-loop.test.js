@@ -131,6 +131,19 @@ test("maxRounds exhausted leaves the loop unresolved", async () => {
   assert.equal(out.blocking[0].claim, "off by one");
   assert.equal(out.nonBlocking.length, 1);
   assert.equal(calls.length, 4);
+  // The round-2 reviewer leaves the finding untagged, so it is neither a prior repeat nor a fix that made no commit.
+  assert.deepEqual(out.stopReasons, [{ reason: "stalled-count", round: 2, detail: "blocking findings went from 1 to 1" }]);
+});
+
+test("stopReasons names a repeated finding and a fix round that made no commit, without stopping early", async () => {
+  const again = { ok: true, output: "", structuredOutput: { verdict: "blocked", findings: [{ ...finding, origin: "prior" }] } };
+  const { out, calls } = await run({
+    "code-1": coded("a1"), "review-1-1": blocked, "fix-2": coded("a1"), "review-2-1": again, "fix-3": coded("a3"), "review-3-1": clean,
+  });
+  assert.equal(out.state, "clean");
+  assert.equal(calls.length, 6);
+  assert.deepEqual(out.stopReasons.map((r) => [r.reason, r.round]), [["stuck-fixer", 2], ["stalled-count", 2], ["repeated-finding", 2]]);
+  assert.match(out.stopReasons[2].detail, /a\.js: off by one/);
 });
 
 test("after round 1, new blocking findings are downgraded and the loop converges", async () => {
@@ -531,9 +544,19 @@ test("an ok verdict without evidence is re-asked once and ends clean when the re
     assert.equal(reask.model, "prov/model-b");
     assert.equal(reask.output, "/tmp/task/u-r1-reviewer-2-reask.md");
     assert.ok(reask.task.startsWith(calls[2].task), reask.task);
-    assert.match(reask.task, /returned ok without evidence/);
+    assert.match(reask.task, /was not accepted:\n- `(checked|addedFiles|addedTests)/);
     assert.deepEqual(out.runs.map((r) => r.key), ["code-1", "review-1-1", "review-1-2", "review-1-2-reask"]);
   }
+});
+
+test("the re-ask names each field that made the review unacceptable", async () => {
+  const { calls } = await run({
+    "code-1": coded("a1"), "review-1-1": unproven({ checked: [{ claim: "fine", evidence: " " }] }), "review-1-1-reask": clean,
+  });
+  assert.match(calls[2].task, /`checked\[0\]\.evidence` is empty/);
+  assert.match(calls[2].task, /`addedFiles` is missing/);
+  assert.match(calls[2].task, /`addedTests` is missing/);
+  assert.doesNotMatch(calls[2].task, /`checked\[0\]\.claim`/);
 });
 
 test("a re-ask that returns ok without evidence again, or fails, ends review-failed", async () => {
@@ -541,6 +564,7 @@ test("a re-ask that returns ok without evidence again, or fails, ends review-fai
     const { out, calls } = await run({ "code-1": coded("a1"), "review-1-1": unproven({}), "review-1-1-reask": second });
     assert.equal(out.state, "review-failed");
     assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1", "review-1-1-reask"]);
+    assert.equal(out.stopReasons[0].reason, "review-rejected");
   }
 });
 
