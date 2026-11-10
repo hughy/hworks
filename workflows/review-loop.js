@@ -94,8 +94,21 @@ const RUN_TIMEOUT = /Subagent timed out after \d+ms\./;
 const runTimedOut = (r) => !r.ok && (r.timedOut === true || RUN_TIMEOUT.test(failureText(r)));
 const GATE_FAILED = /Acceptance verification 'gate' failed/;
 const nonEmpty = (v) => typeof v === "string" && v.trim() !== "";
-const hasEvidence = (out) => Array.isArray(out.checked) && out.checked.some((c) => c && nonEmpty(c.claim) && nonEmpty(c.evidence)) &&
-  Array.isArray(out.addedFiles) && Array.isArray(out.addedTests);
+// Each problem names the field to fix, so the re-ask can say what was wrong instead of only that it was rejected.
+function evidenceProblems(out) {
+  const problems = [];
+  if (!Array.isArray(out.checked)) problems.push("`checked` is missing: list each property you verified with its `evidence`");
+  else if (out.checked.length === 0) problems.push("`checked` is empty: an ok verdict needs at least one verified property");
+  else if (!out.checked.some((c) => c && nonEmpty(c.claim) && nonEmpty(c.evidence))) {
+    out.checked.forEach((c, i) => {
+      if (!c || !nonEmpty(c.claim)) problems.push("`checked[" + i + "].claim` is empty");
+      if (!c || !nonEmpty(c.evidence)) problems.push("`checked[" + i + "].evidence` is empty: give the file:line and the test or command");
+    });
+  }
+  if (!Array.isArray(out.addedFiles)) problems.push("`addedFiles` is missing: list every added path, [] when none");
+  if (!Array.isArray(out.addedTests)) problems.push("`addedTests` is missing: list every added test, [] when none");
+  return problems;
+}
 
 const commitRules =
   "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. " +
@@ -223,10 +236,10 @@ function launchReview(round, prior, priorHead, gateCheck) {
   return runs.all(items);
 }
 
-function launchReask(round, i, prior, priorHead, gateCheck) {
+function launchReask(round, i, prior, priorHead, gateCheck, problems) {
   const task =
     reviewerTask(round, prior, priorHead, gateCheck) +
-    "\n\nThe previous reviewer for this slot returned ok without evidence in `checked`, so its review was not accepted.";
+    "\n\nThe previous reviewer for this slot returned ok, and its review was not accepted:\n- " + problems.join("\n- ");
   return runs.all([reviewItem(round, i, task, "-reask")]);
 }
 
@@ -238,6 +251,9 @@ const riskLog = [];
 let rounds = 0;
 let gateBy = null;
 let failure = null;
+// One entry per reviewed round, for stopReasons; it never changes when the loop stops.
+const history = [];
+const rejected = [];
 
 function record(key, result) {
   runLog.push({ key, runId: result && result.runId ? result.runId : null, ok: !!(result && result.ok) });
@@ -248,8 +264,21 @@ function noteRisks(result) {
   if (out && Array.isArray(out.risks)) out.risks.filter(nonEmpty).forEach((risk) => riskLog.push({ round: rounds, risk }));
 }
 
+// Diagnostics only: why the last rounds did not converge. The loop's stop rules are the outcome checks below.
+function stopReasons() {
+  const reasons = [];
+  for (let i = 1; i < history.length; i++) {
+    const [before, after] = [history[i - 1], history[i]];
+    if (after.head && after.head === before.head) reasons.push({ reason: "stuck-fixer", round: after.round, detail: "fix round made no new commit (head " + after.head + ")" });
+    if (after.blocking > 0 && after.blocking >= before.blocking) reasons.push({ reason: "stalled-count", round: after.round, detail: "blocking findings went from " + before.blocking + " to " + after.blocking });
+    if (after.repeated.length) reasons.push({ reason: "repeated-finding", round: after.round, detail: after.repeated.join("; ") });
+  }
+  rejected.forEach((r) => reasons.push({ reason: "review-rejected", round: r.round, detail: r.reviewer + ": " + r.problems.join("; ") }));
+  return reasons;
+}
+
 function finish(finalState) {
-  return { state: finalState, rounds, head, gateBy, blocking, nonBlocking, risks: riskLog, runs: runLog, failure };
+  return { state: finalState, rounds, head, gateBy, blocking, nonBlocking, risks: riskLog, runs: runLog, failure, stopReasons: stopReasons() };
 }
 
 function progress(phase) {
@@ -316,12 +345,17 @@ while (outcome === null) {
     let reviewer = "review-" + rounds + "-" + (i + 1);
     record(reviewer, review);
     let out = review.ok ? review.structuredOutput : null;
-    if (out && Array.isArray(out.findings) && out.verdict === "ok" && !hasEvidence(out)) {
+    if (out && Array.isArray(out.findings) && out.verdict === "ok" && evidenceProblems(out).length) {
+      const problems = evidenceProblems(out);
+      rejected.push({ round: rounds, reviewer, problems });
       reviewer += "-reask";
-      [review] = await launchReask(rounds, i + 1, prior, priorHead, gateCheck);
+      [review] = await launchReask(rounds, i + 1, prior, priorHead, gateCheck, problems);
       record(reviewer, review);
       out = review.ok ? review.structuredOutput : null;
-      if (out && out.verdict === "ok" && !hasEvidence(out)) out = null;
+      if (out && out.verdict === "ok" && evidenceProblems(out).length) {
+        rejected.push({ round: rounds, reviewer, problems: evidenceProblems(out) });
+        out = null;
+      }
     }
     if (!out || !Array.isArray(out.findings)) {
       reviewFailed = true;
@@ -361,6 +395,12 @@ while (outcome === null) {
     blocking.push(...hard);
     nonBlocking.push(...soft);
   }
+  history.push({
+    round: rounds,
+    head,
+    blocking: blocking.length,
+    repeated: blocking.filter((f) => f.origin === "prior").map((f) => (f.file || "?") + ": " + String(f.claim).slice(0, 200)),
+  });
   await progress("reviewed");
 
   if (reviewFailed) outcome = "review-failed";
