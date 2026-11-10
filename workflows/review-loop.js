@@ -158,7 +158,9 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
     "that fits in or could share an existing one, or a committed one-off script or codemod. Each `keep: false` blocks. " +
     "In `addedTests`, list every test function or test case the diff adds, in new or existing files ([] when none), " +
     "each with `keep` and in `covers` the behavior only it catches: a mutant of the code, or the reverted fix, that fails it while every test " +
-    "that existed at " + args.base + " passes, and the command you ran. Set `keep: false` when no such mutant exists " +
+    "that existed at " + args.base + " passes, and the command you ran. Run each mutant on its own against the pre-existing tests, never one combined overlay. " +
+    "A mutant that changes only message or log text does not count unless a caller, test fixture, or documented contract depends on that exact text. " +
+    "Set `keep: false` for a test that only re-checks what a lint or type check in the gate already enforces. Set `keep: false` when no such mutant exists " +
     "(name the existing test to extend instead), or for a test of a one-off process or of a script whose own run or dry run " +
     "reports the failure as fast and as precisely. A test that fails with a defect fix reverted covers a distinct behavior. Each `keep: false` blocks. " +
     "Return verdict `blocked` if any finding is blocking, else `ok`. " +

@@ -98,6 +98,9 @@ test("clean on first review", async () => {
   assert.match(calls[1].task, /a test of a one-off process or of a script whose own run or dry run reports the failure as fast and as precisely/);
   assert.match(calls[1].task, /In `addedTests`, list every test function or test case the diff adds, in new or existing files/);
   assert.match(calls[1].task, /fails it while every test that existed at 0123abc passes/);
+  assert.match(calls[1].task, /Run each mutant on its own against the pre-existing tests, never one combined overlay/);
+  assert.match(calls[1].task, /A mutant that changes only message or log text does not count unless a caller, test fixture, or documented contract depends on that exact text/);
+  assert.match(calls[1].task, /Set `keep: false` for a test that only re-checks what a lint or type check in the gate already enforces/);
   assert.ok(state.sets.length > 0);
   assert.equal(state.sets.at(-1).key, "review-loop.fix--issue-12");
   assert.equal(state.sets.at(-1).value.phase, "clean");
