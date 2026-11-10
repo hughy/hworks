@@ -80,7 +80,7 @@ test("clean on first review", async () => {
     { key: "review-1-1", runId: "run-review-1-1", ok: true },
   ]);
   assert.equal(calls[0].agent, "coder");
-  assert.deepEqual(calls[0].acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test", timeoutMs: 600000 }], report: "on" });
+  assert.deepEqual(calls[0].acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test", timeoutMs: 2400000 }], report: "on" });
   assert.equal(calls[0].gate, undefined);
   assert.ok(calls[0].outputSchema);
   assert.equal(calls[0].worktree, false);
@@ -114,7 +114,7 @@ test("blocking then clean runs a fix round with the findings", async () => {
   assert.equal(out.rounds, 2);
   assert.equal(out.head, "a2");
   const fix = calls.find((c) => c.key === "fix-2");
-  assert.deepEqual(fix.acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test", timeoutMs: 600000 }], report: "on" });
+  assert.deepEqual(fix.acceptance, { level: "verified", verify: [{ id: "gate", command: "npm test", timeoutMs: 2400000 }], report: "on" });
   assert.match(fix.task, /off by one/);
   assert.doesNotMatch(fix.task, /naming/);
   assert.deepEqual(calls.map((c) => c.key), ["code-1", "review-1-1", "fix-2", "review-2-1"]);
@@ -227,17 +227,17 @@ test("a runner exit on the retry also hands the gate to reviewers", async () => 
 
 const gateTimeout = { ok: false, error: "Acceptance verification 'gate' timed-out." };
 
-test("gateTimeoutMs sets the gate timeout and defaults to 600000", async () => {
+test("gateTimeoutMs sets the gate timeout and defaults to 2400000", async () => {
   const dflt = await run({ "code-1": coded("a"), "review-1-1": clean });
-  assert.equal(dflt.calls[0].acceptance.verify[0].timeoutMs, 600000);
-  assert.match(dflt.calls[0].task, /600 s timeout/);
+  assert.equal(dflt.calls[0].acceptance.verify[0].timeoutMs, 2400000);
+  assert.match(dflt.calls[0].task, /2400 s timeout/);
   const custom = await run({ "code-1": coded("a"), "review-1-1": clean }, { gateTimeoutMs: 900000 });
   assert.equal(custom.calls[0].acceptance.verify[0].timeoutMs, 900000);
   assert.match(custom.calls[0].task, /900 s timeout/);
 });
 
 test("an invalid gateTimeoutMs is rejected", async () => {
-  for (const gateTimeoutMs of [0, -1, 1.5, "600000", null]) {
+  for (const gateTimeoutMs of [0, -1, 1.5, "2400000", null]) {
     await assert.rejects(run({}, { gateTimeoutMs }), /args\.gateTimeoutMs/, String(gateTimeoutMs));
   }
 });

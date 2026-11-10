@@ -10,7 +10,7 @@ if (args.cwd !== undefined && (typeof args.cwd !== "string" || !args.cwd)) throw
 if (args.taskDir !== undefined && (typeof args.taskDir !== "string" || !/^(?:\/|[A-Za-z]:[\\/])/.test(args.taskDir))) throw new Error("args.taskDir must be an absolute path");
 if (args.coderModel !== undefined && (typeof args.coderModel !== "string" || !args.coderModel)) throw new Error("args.coderModel must be a non-empty model id");
 if (args.preRead !== undefined && (typeof args.preRead !== "string" || !args.preRead)) throw new Error("args.preRead must be a non-empty path to scripts/review-pre-read.py");
-const gateTimeoutMs = args.gateTimeoutMs === undefined ? 600000 : args.gateTimeoutMs;
+const gateTimeoutMs = args.gateTimeoutMs === undefined ? 2400000 : args.gateTimeoutMs;
 if (!Number.isInteger(gateTimeoutMs) || gateTimeoutMs < 1) throw new Error("args.gateTimeoutMs must be a positive integer (milliseconds)");
 const reviewerCount = args.reviewers === undefined ? 1 : args.reviewers;
 if (![0, 1, 2].includes(reviewerCount)) throw new Error("args.reviewers must be 0, 1 or 2");
