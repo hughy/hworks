@@ -7,6 +7,7 @@
 #   worktree: where the children run (default: the current directory); emitted as cwd when given
 #   task-dir: directory for each child's output file (created if missing); emitted as an absolute taskDir when given
 #   env GATE_TIMEOUT_MS: host gate timeout in ms, emitted as gateTimeoutMs when set (workflow default: 2400000, 40 minutes, covering a typical heavy-slot queue wait plus a full gate); projects with longer gates set GATE_TIMEOUT_MS.
+#   env HWORKS_WORKFLOW_RUNTIME=codex: leave model selection to Codex instead of reading the pi model profile
 # The gate is emitted wrapped in scripts/heavy.py, so the coder's, the host's, and each reviewer's gate runs share
 # the host's heavy-job slots with every other loop on the machine; HWORKS_HEAVY_SLOTS=0 at run time turns that off.
 set -euo pipefail
@@ -59,7 +60,9 @@ fi
 session=""
 if [ -n "${PI_PROVIDER:-}" ] && [ -n "${PI_MODEL:-}" ]; then session="$PI_PROVIDER/$PI_MODEL"; fi
 
-shown=$("$root/scripts/models.sh" show)
+runtime=${HWORKS_WORKFLOW_RUNTIME:-pi}
+shown=""
+if [ "$runtime" != codex ]; then shown=$("$root/scripts/models.sh" show); fi
 # Prints the role's or slot's model; a session-model entry prints the session model, or nothing when unknown.
 model_of() {
   local m
@@ -71,8 +74,8 @@ model_of() {
 bare() { sed -E 's/:(off|minimal|low|medium|high|xhigh|max)$//' <<< "$1"; }
 
 coder_model=""
-case "$effort" in
-  quick)
+case "$runtime:$effort" in
+  pi:quick)
     coder_model=$(model_of coder)
     if [ -n "$coder_model" ]; then
       coder_model="$(bare "$coder_model"):low"
@@ -80,7 +83,7 @@ case "$effort" in
       echo "warning: coder runs on the session model and PI_PROVIDER/PI_MODEL are unset; quick effort runs it without :low" >&2
     fi
     ;;
-  exhaustive)
+  pi:exhaustive)
     coder_model=$(model_of exhaustive)
     if [ -z "$coder_model" ]; then
       echo "warning: exhaustive slot is the session model and PI_PROVIDER/PI_MODEL are unset; coder runs on its role default" >&2
@@ -89,7 +92,7 @@ case "$effort" in
 esac
 
 review2=""
-if [ "$reviewers" -eq 2 ]; then
+if [ "$runtime" != codex ] && [ "$reviewers" -eq 2 ]; then
   review2=$(model_of review2)
   reviewer=$(model_of reviewer)
   if [ -z "$review2" ]; then

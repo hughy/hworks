@@ -124,6 +124,7 @@ function reviewItem(target, targetIndex, reviewer, index) {
     worktree: false,
     outputSchema: schema,
   };
+  if (args.runtime === "codex" && target.head) item.pinnedHead = target.head;
   if (reviewer.model) item.model = reviewer.model;
   if (args.taskDir) {
     // Sanitized or truncated names can collide ("a b" and "a-b"), so the target and reviewer ordinals keep

@@ -192,17 +192,18 @@ def build_args(task_dir, trunk, effort, intent, cwd, label):
     top = git(cwd, "rev-parse", "--show-toplevel").stdout.strip()
     reviewers = [{"agent": "reviewer", "label": "reviewer"}]
     if effort == "exhaustive":
-        m = models()
-        r2, r1 = m.get("review2", ""), m.get("reviewer", "")
         second = {"agent": "reviewer", "label": "review2"}
-        if r2:
-            second["model"] = r2
-        else:
-            print("warning: review2 slot is the session model and PI_PROVIDER/PI_MODEL are unset; "
-                  "the second reviewer runs on the reviewer model", file=sys.stderr)
-        if bare(r2 or r1) == bare(r1):
-            print(f"warning: review2 runs the reviewer model ({r1 or 'session model'}); both reviews run on one model",
-                  file=sys.stderr)
+        if os.environ.get("HWORKS_WORKFLOW_RUNTIME") != "codex":
+            m = models()
+            r2, r1 = m.get("review2", ""), m.get("reviewer", "")
+            if r2:
+                second["model"] = r2
+            else:
+                print("warning: review2 slot is the session model and PI_PROVIDER/PI_MODEL are unset; "
+                      "the second reviewer runs on the reviewer model", file=sys.stderr)
+            if bare(r2 or r1) == bare(r1):
+                print(f"warning: review2 runs the reviewer model ({r1 or 'session model'}); both reviews run on one model",
+                      file=sys.stderr)
         reviewers.append(second)
     scope = (f"Review only the commits after {base[:12]}: the commits before it, back to the merge-base "
              f"{mb[:12]}, already passed review." if base != mb else "Review the whole branch.")
