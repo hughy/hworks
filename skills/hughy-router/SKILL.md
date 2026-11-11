@@ -1,11 +1,11 @@
 ---
 name: hughy-router
-description: Entry point for non-trivial engineering work. Routes a task to one of six routes (investigate, fix, build, measure, ship, long run). Each route starts from a goal, effort, and verify brief, with pstack playbooks as references and the hworks deltas applied. Use for /skill:hughy-router (one task) or /hughy-mode on (every turn), "do this rigorously", or any task with a check that can pass or fail.
+description: Entry point for non-trivial engineering work. Routes a task to one of six routes (investigate, fix, build, measure, ship, long run). Each route starts from a goal, effort, and verify brief, with pstack playbooks as references and the hworks deltas applied. Use for /skill:hughy-router or /hughy-mode on in pi, $hughy-router in Codex, "do this rigorously", or any task with a check that can pass or fail.
 ---
 
 # hughy-router
 
-On pi, read `../../adapters/pi.md` once per session before following any playbook. It maps Cursor terms in pstack text to pi mechanisms and names the agent for each role. Then read every file in `../../adapters/local/` if it exists (in a linked worktree without one, the main checkout's); local adapters map the generic terms below to this harness's tools and win where they conflict. On Claude Code and Codex only the skills load: the roles named below map to that harness's own subagent, and `adapters/pi.md` does not apply.
+Before following a playbook, read the host adapter once per session: `../../adapters/pi.md` on pi, or `../../adapters/codex.md` on Codex. On pi, then read every file in `../../adapters/local/` if it exists (in a linked worktree without one, the main checkout's); local adapters map the generic terms below to this harness's tools and win where they conflict. On Claude Code, use native subagents for the roles below.
 
 Skills named below live at `../<name>/SKILL.md`; read them by path, since the commands among them (`orchestrate`, `handoff`) are hidden from the catalog. Playbooks live under `../../pstack/skills/poteto-mode/playbooks/`. Playbooks are references, not scripts. Read the matched one when a run stalls, the change is high-stakes, or it runs unattended, and apply the deltas below where they conflict. Do not copy its steps into a todo list.
 
@@ -19,7 +19,7 @@ Every brief, to a child or to yourself, states three things the way you would te
 2. Effort: the level below and its phrase.
 3. Verify: the gate command and what result proves the goal.
 
-Add scope and forbidden lines only when a second writer shares the repo or an irreversible action is in reach. Children can ask through `contact_supervisor`, so a brief does not need to anticipate every question.
+Add scope and forbidden lines only when a second writer shares the repo or an irreversible action is in reach. Children can report blockers to the parent (`contact_supervisor` on pi), so a brief does not need to anticipate every question.
 
 The user sets effort with a word on the invocation ("quick", "exhaustive"); default to standard.
 
@@ -31,7 +31,7 @@ The user sets effort with a word on the invocation ("quick", "exhaustive"); defa
 
 Effort does not decide `arena`; the design does (see Deltas).
 
-Slots are per-call model overrides from the active profile. `scripts/models.sh show` prints them. Under the `inherit` profile every slot is the session model, so a second-provider review needs a profile that sets `review2`. If a slot's model is unavailable, pick the closest available model and say so.
+The model suffixes and slots in the table are pi settings. `scripts/models.sh show` prints the active profile's per-call overrides. Under `inherit` every slot is the session model, so a second-provider review needs a profile that sets `review2`. If a slot's model is unavailable, pick the closest available model and say so. On Codex, follow the adapter's effort mapping.
 
 ## Routes
 
@@ -65,19 +65,22 @@ Work that outlives one session goes to a multi-agent coordinator only when all h
 
 On pi without such a coordinator, `orchestrate` (`../orchestrate/SKILL.md`) is an experimental, opt-in route for a set of items (issue ids, a milestone, a label), independent or stacked as dependent PRs on unmerged parents, when the user asks for it or wants several driven at once: it keeps one writer per branch and survives a reload. Run it with window 1 until a pilot passes. A short sequential list stays a plain brief with review-loop, and dependencies that are not stackable code changes (a deploy, a decision) use the loop below.
 
-Otherwise, and always on Claude Code and Codex, run this loop across sessions with `$TASK_DIR/progress.md` (`scripts/task-dir.sh <slug>`) and git as the record: read both before resuming, and update progress.md at each commit. Plan a multi-PR program with an issue-planning skill when one is installed; otherwise draft the issues in the reply.
+On Codex, when the user asks for hworks orchestration, follow `../orchestrate/SKILL.md` with `init --runtime codex`. Run it with window 1 until the pilot passes.
+
+Otherwise, run this loop across sessions with `$TASK_DIR/progress.md` (`scripts/task-dir.sh <slug>`) and git as the record: read both before resuming, and update progress.md at each commit. Plan a multi-PR program with an issue-planning skill when one is installed; otherwise draft the issues in the reply.
 
 ## Deltas
 
 These override the playbook text wherever they conflict.
 
-- Any spawn a playbook describes goes to `coder`, `reviewer`, `explorer`, or `synthesizer` per `adapters/pi.md`. `scripts/models.sh` sets each role's model and switches the roster. Override `model` per call only for exhaustive effort, the hardest code changes, or a different provider for the second review.
+- Any spawn a playbook describes goes to `coder`, `reviewer`, `explorer`, or `synthesizer` per the host adapter. On pi, `scripts/models.sh` sets each role's model and switches the roster. Override `model` per call only for exhaustive effort, the hardest code changes, or a different provider for the second review.
 - On pi, run a `coder` change and its review as one `review-loop` workflow (`../review-loop/SKILL.md`) instead of hand-writing a script per round.
+- On Codex, use the adapter's interactive review steps for a coder change or a review-only pass. For review only, pin the existing base and head and skip the coder step.
 - Every `coder` run carries a `gate` (tests, typecheck, or the repo's verify skill). The gate result is the verification. "Inconclusive" or a gate that did not run is not a pass; say which. Tests the gate skipped for a missing build tag or env var (an unset service URI) did not run. For a fix, the evidence also shows the new test failing with the fix reverted; `scripts/mutate.py` with a `rev` mutant produces it. Each mutant's `test` is the narrowest command that should kill it, not the full suite, and `--no-baseline` skips the unmutated run when the gate just passed on the same tree. A red commit in history is not required, and every commit passes the gate.
 - Run any command you expect to take over 60 seconds (a mutation run, a full test suite, a build) in the background and do independent work while it runs: review the diff, draft the commit or PR text, start the next item.
 - Run the `arena` skill only when the design is contested, crosses a public boundary, or has no precedent in the repo. Skip `architect`. One shape that follows the repo's existing pattern needs no bakeoff.
 - Where a playbook requires `show-me-your-work`, keep its per-attempt log as a plain TSV in `$TASK_DIR` and skip the transcript audit and cross-model review. Where a playbook routes to `figure-it-out`, use an issue-planning skill when one is installed, or draft the issues in the reply.
-- Review runs once per commit, through `review-fanout` (`../review-fanout/SKILL.md`), which owns the commands and the coverage ledger: a pre-push and a pre-merge pass each cover only commits no earlier review covered, and you ship only when it reports nothing left to review. Weight findings both reviewers raised highest. When `review2` matches `reviewer`, say so in the reply. Act on verified defects; dismiss the rest with a reason. Fix defects through review-loop, which reviews and records the fix.
+- Review runs once per commit. Follow `review-fanout` (`../review-fanout/SKILL.md`) for the coverage ledger and use the host adapter for dispatch: a pre-push and a pre-merge pass each cover only commits no earlier review covered, and you ship only when the ledger reports nothing left to review. Weight findings both reviewers raised highest. When both reviewers use the same model, say so in the reply. Act on verified defects; dismiss the rest with a reason. Review and record the fix through the host's review loop.
 - PRs open as drafts, with a Conventional Commits title, the `AGENTS.md` PR rules, and the repo's PR template, found with `scripts/pr-template.sh`. Use a PR-tracking tool instead of the watcher loop when the harness has one.
 - Self-review gates every push to a PR, not only the first. Before `gh pr create` or any `git push` to a branch with an open PR: the gate, and the project's push gate when it names one (a slow suite such as integration tests, run once per push instead of every review round), pass on the head being pushed, and both rerun after any merge of the base into the branch; the pre-push review runs (none when HEAD already passed review, or when the push only syncs a reviewed branch with its base, per `references/split-and-sync.md`); and `scripts/review-pre-read.py <base> <head>` runs, with every surviving reference it lists fixed or justified. Quick effort skips the review, never the gate or the pre-read. Requests to audit, tidy, or address feedback on an open PR count as pushes. The reply names the gate and push gate results, the review verdict or that nothing new needed review, and the pre-read result, or which did not run.
 - Prose and comments follow the global `AGENTS.md`. Skip `/deslop`, `/no-comments`, `/unslop`, and `/technical-writing` steps. Where a playbook says to use `create-skill`, write the skill per `../writing-for-agents/SKILL.md`, which also covers agent prompts and `AGENTS.md`.

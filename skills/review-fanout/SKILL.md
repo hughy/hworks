@@ -1,13 +1,24 @@
 ---
 name: review-fanout
-description: Run a review-only pass over one or more targets (a PR worktree, a plan file, a directory) as one pi-subagents workflow, including the pre-push and pre-merge review. Use instead of hand-writing a review script; for a coder change and its review, use review-loop.
+description: Run a review-only pass over one or more targets (a PR worktree, a plan file, a directory), including the pre-push and pre-merge review. Use instead of hand-writing a review script; for a coder change and its review, use review-loop.
 ---
 
 # review-fanout
 
-A review pass with no writer: open PRs, a plan, a branch before you brief a fix, or the review before a push or merge. Every reviewer reads every target read-only, a few targets at a time, and the result holds each reviewer's findings plus one merged list per target. It needs pi with pi-subagents; on other harnesses, run the reviewers by hand. A coder change plus its review is `review-loop` (`../review-loop/SKILL.md`).
+A review pass with no writer: open PRs, a plan, a branch before you brief a fix, or the review before a push or merge. Every reviewer reads every target read-only, a few targets at a time, and the result holds each reviewer's findings plus one merged list per target. Use pi-subagents on pi or the Codex runner below. On other harnesses, run the reviewers by hand. A coder change plus its review is `review-loop` (`../review-loop/SKILL.md`).
 
 The workflow is `../../workflows/review-fanout.js`, relative to this file. Pass it as an absolute path. To write args by hand or read a custom-schema result, read `references/args.md`.
+
+## Run on Codex
+
+Set `HWORKS_WORKFLOW_RUNTIME=codex` when building args with `review-range.py`. Keep args, `taskDir`, and redirected logs outside the reviewed worktree. If building args by hand, include a `reviewers` array such as `[{"agent":"reviewer"}]`. Use Codex model IDs in each reviewer's optional `model` field. A pinned target requires a clean checkout at the specified head. The runner verifies the checkout again after review.
+
+```sh
+node <hworks>/scripts/codex-workflow.mjs review-fanout "$TASK_DIR/args.json" \
+  >"$TASK_DIR/verdict.json" 2>"$TASK_DIR/workflow.log"
+```
+
+Read `verdict.json` after exit. Exit 0 means a result exists. Check `ok` and the findings before recording review coverage. Codex supports review schemas with declared object properties, arrays, enums, and scalar types. See `../review-loop/SKILL.md` for model defaults and timeouts.
 
 ## Pre-push and pre-merge review
 
@@ -23,7 +34,7 @@ A rebase or base merge keeps coverage only when it replays a byte-identical diff
 ## Steps
 
 1. Prepare each target: a PR goes in its own worktree at its head commit; a plan file needs only a `cwd` that contains it. Each `base` and `head` must be a full SHA, never a ref.
-2. Set `taskDir` to `$TASK_DIR`, then launch: `subagent({ workflow: "<abs>/workflows/review-fanout.js", args: <json>, async: true })`. Append the workflow run id and the mission id (when the launch reports one, as `details.missionId` or a `Mission: <id>` line) to `$TASK_DIR/progress.md`, and nothing else about the run.
+2. Set `taskDir` to `$TASK_DIR`. On pi, launch with `subagent({ workflow: "<abs>/workflows/review-fanout.js", args: <json>, async: true })`. Append the workflow run id and the mission id (when the launch reports one, as `details.missionId` or a `Mission: <id>` line) to `$TASK_DIR/progress.md`. On Codex, use the runner above.
 3. Wait for the completion notice and read the returned value (in the completion message, or `workflow.value` in the run's `status.json`).
 
 ## Result

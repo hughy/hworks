@@ -110,8 +110,11 @@ function evidenceProblems(out) {
   return problems;
 }
 
+const onCodex = args.runtime === "codex";
 const commitRules =
-  "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. " +
+  (onCodex
+    ? "Leave only the intended changes in the worktree. The host will stage and commit them. Do not stage, commit, change branches, or push. "
+    : "Commit on the current branch with new commits only: no amend, rebase, reset, or push. Leave the working tree clean. ") +
   "The gate `" + args.gate + "` runs on the host after you finish with a " + Math.ceil(gateTimeoutMs / 1000) + " s timeout; " +
   "a failing gate fails this run, so run it yourself first. " +
   "Return status `blocked` only when the brief cannot be met without a decision you cannot make; put the reason in summary. " +
@@ -127,9 +130,11 @@ function coderTask(round, findings, gateFailure) {
   }
   if (gateFailure) {
     task +=
-      "\n\nThe previous attempt failed its gate or did not finish. It may still have committed work: a run can fail after it finished. " +
+      "\n\nThe previous attempt failed its gate or did not finish. " +
+      (onCodex ? "It may have left changes or commits. " : "It may still have committed work: a run can fail after it finished. ") +
       "Before editing, read `git status`, `git log " + args.base + "..HEAD`, and `git diff " + args.base + "...HEAD`. " +
-      "If the brief is already met and the gate passes, return status `done` with the current head and make no new commit. " +
+      "If the brief is already met and the gate passes, return status `done` with the current head" +
+      (onCodex ? ". " : " and make no new commit. ") +
       "Otherwise find the cause and fix it. Failure:\n" + gateFailure;
   }
   return task;

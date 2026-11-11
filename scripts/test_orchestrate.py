@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -158,6 +159,106 @@ class OrchestrateTest(unittest.TestCase):
         return spec
 
     # ---------- tests ----------
+
+    def codex_runner(self, body):
+        script = os.path.join(self.tmp, "orchestrate.py")
+        shutil.copyfile(SCRIPT, script)
+        with open(os.path.join(self.tmp, "codex-workflow.mjs"), "w") as f:
+            f.write(body)
+
+        def dispatch():
+            return subprocess.Popen(
+                [sys.executable, script, "--store", self.store, "dispatch", "A", "1", "--wait"],
+                env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+
+        return dispatch
+
+    def test_codex_restart_waits_and_rejects_stale_verdict(self):
+        self.init("--runtime", "codex")
+        self.load([{"id": "A", "title": "a", "paths": ["a/*"]}])
+        spec = self.launch("A")
+        self.assertEqual(spec["runtime"], "codex")
+        self.assertEqual(json.loads(self.g("reconcile", "--json"))[0]["action"], "relaunch-same-args")
+        self.g("bind", "A", "1", "pi-run", code=3)
+        dispatch = self.codex_runner("""
+import fs from "node:fs";
+import {execFileSync} from "node:child_process";
+const args = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const head = execFileSync("git", ["rev-parse", "HEAD"], {encoding:"utf8"}).trim();
+const verdict = {state:"clean", gateBy:"host", head, rounds:1, blocking:[],
+                 runs:[{key:"review-1-1", runId:"review", ok:true}]};
+fs.writeFileSync(args.taskDir + "/started", "");
+const deadline = Date.now() + 10000;
+while (!fs.existsSync(args.taskDir + "/release")) {
+  if (Date.now() > deadline) process.exit(1);
+  await new Promise(resolve => setTimeout(resolve, 25));
+}
+console.log(JSON.stringify(verdict));
+""")
+        with open(spec["args_path"]) as f:
+            outputs = json.load(f)["taskDir"]
+        p = dispatch()
+        try:
+            deadline = time.monotonic() + 5
+            while not os.path.exists(os.path.join(outputs, "started")):
+                self.assertIsNone(p.poll())
+                self.assertLess(time.monotonic(), deadline, "runner never started")
+                time.sleep(0.02)
+            result = json.loads(p.stdout.readline())
+            p.terminate()
+            p.communicate(timeout=5)
+            self.assertEqual(json.loads(self.g("reconcile", "--json"))[0]["action"], "wait")
+            self.g("dispatch", "A", "1", code=3)
+            self.commit("A")
+        finally:
+            with open(os.path.join(outputs, "release"), "w"):
+                pass
+            if p.poll() is None:
+                p.communicate(timeout=10)
+        deadline = time.monotonic() + 5
+        action = json.loads(self.g("reconcile", "--json"))[0]
+        while action["action"] == "wait":
+            self.assertLess(time.monotonic(), deadline, "supervisor never recorded a verdict")
+            time.sleep(0.02)
+            action = json.loads(self.g("reconcile", "--json"))[0]
+        self.assertEqual((action["action"], action["file"]), ("record", result["file"]))
+        self.g("record", "A", "1", result["file"])
+        self.assertEqual(self.rows()["A"]["state"], "stale")
+
+    def test_codex_failure_retries_only_when_runner_exits_safely(self):
+        for code, expected in ((1, "retry"), (125, "hold")):
+            with self.subTest(code=code):
+                self.store = os.path.join(self.tmp, "store-%d" % code)
+                repo = os.path.join(self.tmp, "repo-%d" % code)
+                shutil.copytree(os.path.join(self.template, "repo"), repo)
+                self.g("init", "--repo", repo, "--base", "main", "--runtime", "codex",
+                       "--worktrees", os.path.join(self.tmp, "wt-%d" % code), "--gate", "true")
+                self.load([{"id": "A", "title": "a"}])
+                self.launch("A")
+                with self.codex_runner("process.exit(%d);" % code)() as p:
+                    stdout, stderr = p.communicate(timeout=10)
+                self.assertEqual(p.returncode, code, stderr)
+                result = json.loads(stdout)
+                self.assertEqual(json.loads(self.g("reconcile", "--json"))[0]["action"], expected)
+                if expected == "retry":
+                    dirty = os.path.join(self.rows()["A"]["worktree"], "uncommitted")
+                    with open(dirty, "w") as f:
+                        f.write("partial change\n")
+                    self.assertEqual(json.loads(self.g("reconcile", "--json"))[0]["action"], "hold")
+                    os.unlink(dirty)
+                    self.g("record", "A", "1", result["file"])
+                    self.assertEqual(self.rows()["A"]["state"], "run-failed")
+                else:
+                    self.g("record", "A", "1", result["file"], code=2)
+                    self.g("set", "A", "parked", "--reason", "uncertain writer exit")
+                    self.g("set", "A", "queued", "--reason", "retry", "--runs-dir", self.runs, code=2)
+                    self.g("set", "A", "queued", "--reason", "retry", code=3)
+                    self.assertEqual(self.next(), [])
+
+    def test_dead_codex_supervisor_does_not_prove_writer_exit(self):
+        self.assertEqual(orchestrate.liveness({"runtime": "codex", "state": "running",
+                                               "pid": self.dead_pid()}), "unknown")
 
     def test_launch_emits_args_and_brief_with_separate_process_section(self):
         del self.env["ORCHESTRATE_ARGS_SCRIPT"]

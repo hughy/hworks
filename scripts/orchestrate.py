@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bookkeeping for orchestrate: units driven through workflows/review-loop.js, one branch worktree each.
 
-The CLI never launches agents, pushes, deletes a worktree or branch, or discards uncommitted work.
-A coordinator runs it, dispatches the workflow itself, and feeds results back with bind and record.
+The coordinator dispatches pi workflows itself or uses this CLI to dispatch Codex workflows.
+The CLI never pushes, deletes a worktree or branch, or discards uncommitted work.
 
 Exit codes: 0 ok, 2 bad input or usage, 3 refused (the store is unchanged unless the message says otherwise).
 
@@ -19,10 +19,12 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ARGS_SCRIPT = os.path.join(HERE, "review-loop-args.sh")
 DEFAULT_WORKFLOW = os.path.normpath(os.path.join(HERE, "..", "workflows", "review-loop.js"))
+CODEX_RUNNER = os.path.join(HERE, "codex-workflow.mjs")
 
 # reserved: the attempt number whose writers may still own the worktree. Set when a live attempt is parked;
 # cleared only by a requeue that finds every bound controller and child terminal.
@@ -371,6 +373,8 @@ def cmd_init(store, a):
         raise BadInput("base %s does not resolve in %s" % (a.base, repo))
     cfg = {"repo": repo, "base": a.base, "worktrees": os.path.abspath(a.worktrees), "effort": a.effort,
            "max_attempts": a.max_attempts, "gate": a.gate}
+    if a.runtime == "codex":
+        cfg["runtime"] = "codex"
     with locked(store):
         path = os.path.join(store, "config.json")
         old = read_json(path)
@@ -626,8 +630,9 @@ def cmd_launch(store, a):
         out_dir = os.path.join(store, "outputs", row["id"], "a%d" % row["attempt"])
         os.makedirs(out_dir, exist_ok=True)
         args_script = os.environ.get("ORCHESTRATE_ARGS_SCRIPT") or ARGS_SCRIPT
+        env = dict(os.environ, HWORKS_WORKFLOW_RUNTIME=cfg.get("runtime", "pi"))
         p = subprocess.run(["bash", args_script, brief, gate, review_base, row["effort"], row["worktree"], out_dir],
-                           cwd=cfg["repo"], capture_output=True, text=True)
+                           cwd=cfg["repo"], env=env, capture_output=True, text=True)
         if p.returncode != 0:
             return block("review-loop-args.sh failed: %s" % one_line(p.stderr.strip()))
         args = json.loads(p.stdout)
@@ -639,11 +644,123 @@ def cmd_launch(store, a):
             sys.stderr.write(p.stderr)
         spec = {"id": row["id"], "attempt": row["attempt"], "cwd": cfg["repo"], "args_path": args_path,
                 "workflow": os.path.abspath(a.workflow)}
+        if cfg.get("runtime") == "codex":
+            spec.update(runtime="codex", workflow=CODEX_RUNNER)
         write_json(os.path.join(store, "args", tag + ".launch.json"), spec)
         # The args file is written last: reconcile treats it as the point after which the attempt
         # resumes with these exact args, and its absence as a launch that never finished.
         atomic_write(args_path, json.dumps(args, sort_keys=True) + "\n")
         print(json.dumps(spec))
+    return 0
+
+
+# ---------- Codex dispatch ----------
+
+def store_runs_dir(store, cfg, runs_dir):
+    if cfg.get("runtime") != "codex":
+        return runs_dir
+    expected = os.path.join(store, "runs")
+    if runs_dir and real(runs_dir) != real(expected):
+        raise BadInput("this Codex store keeps its run records in %s" % expected)
+    return expected
+
+
+def codex_run(store, uid, attempt):
+    tag = "%s-%d" % (uid, attempt)
+    run = "codex-" + tag
+    return run, os.path.join(store, "runs", run), os.path.join(store, "args", tag + ".json")
+
+
+def cmd_dispatch(store, a):
+    with locked(store):
+        cfg = load_config(store)
+        if cfg.get("runtime") != "codex":
+            raise Refused("dispatch requires a Codex store (init --runtime codex)")
+        rows = read_rows(store)
+        row = find_row(rows, a.id)
+        check_attempt(row, a.attempt)
+        if row["state"] != "launching":
+            raise Refused("%s is %s; only a launching attempt can be dispatched" % (a.id, row["state"]))
+        run, directory, args_path = codex_run(store, a.id, a.attempt)
+        args = read_json(args_path)
+        if (not isinstance(args, dict) or not isinstance(args.get("cwd"), str) or
+                real(args["cwd"]) != real(row["worktree"]) or
+                args.get("label") != a.id):
+            raise Refused("%s has no valid stored launch args" % a.id)
+        blockers = ownership_blockers(store_runs_dir(store, cfg, None), row)
+        if blockers:
+            raise Refused("; ".join(blockers))
+        branch = git(row["worktree"], "symbolic-ref", "--short", "HEAD")[1]
+        if (branch != row["branch"] or branch_head(cfg, branch) != row["start_head"] or
+                tree_dirty(row["worktree"])):
+            raise Refused("%s worktree changed after launch" % a.id)
+        if not os.path.isfile(CODEX_RUNNER):
+            raise Refused("Codex workflow runner is missing: %s" % CODEX_RUNNER)
+        if os.path.lexists(directory):
+            raise Refused("run directory already exists: %s" % directory)
+        # Bind before spawn. A crash here leaves an unknown reservation, so a restart cannot launch twice.
+        row.update(state="running", run=run)
+        write_rows(store, rows)
+        path = os.path.join(directory, "status.json")
+        status = {"runId": run, "runtime": "codex", "mode": "workflow", "state": "starting",
+                  "startedAt": int(time.time() * 1000), "workflow": {"args": args}}
+        write_json(path, status)
+        try:
+            with open(os.path.join(directory, "stderr.log"), "ab") as log:
+                worker = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--store", store,
+                                           "_codex-worker", a.id, str(a.attempt)], cwd=row["worktree"],
+                                          stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+        except OSError as e:
+            write_json(path, dict(status, state="failed", error=str(e)))
+            raise Refused("could not start Codex supervisor: %s" % e) from e
+    print(json.dumps({"id": a.id, "attempt": a.attempt, "run": run, "file": path}), flush=True)
+    if a.wait:
+        return worker.wait()
+    return 0
+
+
+def cmd_codex_worker(store, a):
+    with locked(store):
+        cfg = load_config(store)
+        row = find_row(read_rows(store), a.id)
+        run, directory, args_path = codex_run(store, a.id, a.attempt)
+        path = os.path.join(directory, "status.json")
+        status = read_json(path)
+        if (cfg.get("runtime") != "codex" or row["run"] != run or
+                not status or status["state"] != "starting"):
+            raise Refused("no reserved Codex dispatch for %s" % run)
+        if row["state"] != "running":
+            write_json(path, dict(status, state="cancelled"))
+            return 0
+        status.update(state="running", pid=os.getpid())
+        write_json(path, status)
+    result_path = os.path.join(directory, "verdict.json")
+    with open(result_path, "wb") as out:
+        try:
+            result = subprocess.run(["node", CODEX_RUNNER, "review-loop", args_path],
+                                    cwd=row["worktree"], stdout=out)
+        except OSError as e:
+            write_json(path, dict(status, state="failed", error=str(e)))
+            return 1
+    if result.returncode < 0 or result.returncode == 125:
+        # A killed runner may leave a child process group behind. Preserve ownership.
+        write_json(path, dict(status, state="uncertain", error="runner exit %d" % result.returncode))
+        return 125
+    if result.returncode:
+        write_json(path, dict(status, state="failed", error="runner exit %d" % result.returncode))
+        return result.returncode
+    try:
+        status["workflow"]["value"] = read_json(result_path)
+    except (ValueError, UnicodeError) as e:
+        write_json(path, dict(status, state="failed", error="invalid runner verdict: %s" % e))
+        return 1
+    verdict = workflow_value(status)
+    if verdict is None or (verdict["state"] == "clean" and
+                           (verdict.get("gateBy") != "host" or verdict.get("blocking") != [])):
+        status["workflow"].pop("value", None)
+        write_json(path, dict(status, state="failed", error="missing or unverified runner verdict"))
+        return 1
+    write_json(path, dict(status, state="completed"))
     return 0
 
 
@@ -658,7 +775,8 @@ def cmd_bind(store, a):
     if not re.match(r"^[A-Za-z0-9._-]+$", a.run_id):
         raise BadInput("run id %r is not valid" % a.run_id)
     with locked(store):
-        load_config(store)
+        if load_config(store).get("runtime") == "codex":
+            raise Refused("Codex attempts are bound by dispatch")
         rows = read_rows(store)
         row = find_row(rows, a.id)
         check_attempt(row, a.attempt)
@@ -750,9 +868,14 @@ def cmd_record(store, a):
         runs_dir = os.path.dirname(run_dir)
     with locked(store):
         cfg = load_config(store)
+        runs_dir = store_runs_dir(store, cfg, runs_dir)
         rows = read_rows(store)
         row = find_row(rows, a.id)
         check_attempt(row, a.attempt)
+        if cfg.get("runtime") == "codex":
+            expected, directory, _ = codex_run(store, a.id, a.attempt)
+            if run != expected or real(spath) != real(os.path.join(directory, "status.json")):
+                raise BadInput("record the Codex dispatch's own status.json")
         tag = "%s-%d" % (row["id"], row["attempt"])
         rpath = os.path.join(store, "receipts", tag + ".json")
         prior = read_json(rpath)
@@ -781,6 +904,8 @@ def cmd_record(store, a):
         ws = receipt["workflow_state"]
         if ws is None:
             state, reason = "run-failed", "workflow %s without a return value" % status.get("state")
+            if cfg.get("runtime") == "codex" and status.get("error"):
+                reason += ": " + one_line(status["error"])
             head = branch_head(cfg, row["branch"])
         elif ws in CODER_FAILED:
             state, head = ws, branch_head(cfg, row["branch"])
@@ -859,6 +984,8 @@ def liveness(st):
     """terminal, alive, dead (nonterminal with a gone pid), or unknown (nonterminal without a usable pid)."""
     if st.get("state") in RUNTIME_TERMINAL:
         return "terminal"
+    if st.get("runtime") == "codex":
+        return "alive" if st.get("state") == "running" and pid_alive(st.get("pid")) else "unknown"
     if not valid_pid(st.get("pid")):
         return "unknown"
     return "alive" if pid_alive(st["pid"]) else "dead"
@@ -959,6 +1086,8 @@ def describe(e):
     if e["status"] is None:
         return "%s %s has no status.json" % (what, e["run"])
     if e["liveness"] == "unknown":
+        if e["status"].get("runtime") == "codex":
+            return "%s %s is %s with no confirmed writer exit" % (what, e["run"], e["state"])
         return "%s %s is %s with no usable pid" % (what, e["run"], e["state"])
     return "%s %s is %s with a live pid" % (what, e["run"], e["state"])
 
@@ -1033,6 +1162,9 @@ def decide(cfg, store, row, runs_dir):
         if commits not in ("", "0"):
             return act("hold", "no run bound but %s commits since start head %s" % (commits, row["start_head"][:12]))
         spec = read_json(os.path.join(store, "args", tag + ".launch.json"), {})
+        if cfg.get("runtime") == "codex":
+            return act("relaunch-same-args", "intent written, nothing dispatched, no writer", args_path=args_path,
+                       runtime="codex")
         return act("relaunch-same-args", "intent written, nothing dispatched, no writer", args_path=args_path,
                    workflow=spec.get("workflow", DEFAULT_WORKFLOW), cwd=cfg["repo"])
     cur = current_run(runs_dir, runs)
@@ -1051,6 +1183,14 @@ def decide(cfg, store, row, runs_dir):
     if commits not in ("", "0"):
         evidence.append("%s commits since start head %s" % (commits, row["start_head"][:12]))
     outputs = structured_outputs(kids)
+    if cfg.get("runtime") == "codex":
+        dirty = tree_dirty(row["worktree"])
+        if dirty:
+            evidence.append(dirty)
+        out_dir = os.path.join(store, "outputs", row["id"], "a%d" % row["attempt"])
+        if os.path.isdir(out_dir):
+            outputs += [os.path.join(out_dir, name) for name in sorted(os.listdir(out_dir))
+                        if name.endswith(".md") and os.path.isfile(os.path.join(out_dir, name))]
     if outputs:
         evidence.append("structured output " + ", ".join(outputs))
     if evidence:
@@ -1065,7 +1205,10 @@ def cmd_reconcile(store, a):
     with locked(store):
         cfg = load_config(store)
         rows = read_rows(store)
-    out = [decide(cfg, store, r, a.runs_dir) for r in rows if r["state"] in LIVE or r["reserved"]]
+    runs_dir = store_runs_dir(store, cfg, a.runs_dir)
+    if not runs_dir:
+        raise BadInput("reconcile requires --runs-dir for a pi store")
+    out = [decide(cfg, store, r, runs_dir) for r in rows if r["state"] in LIVE or r["reserved"]]
     if a.json:
         print(json.dumps(out, indent=2))
     else:
@@ -1079,7 +1222,8 @@ def cmd_set(store, a):
     if a.state not in SET_TARGETS:
         raise BadInput("set accepts only %s" % ", ".join(sorted(SET_TARGETS)))
     with locked(store):
-        load_config(store)
+        cfg = load_config(store)
+        runs_dir = store_runs_dir(store, cfg, a.runs_dir)
         rows = read_rows(store)
         row = find_row(rows, a.id)
         if row["state"] in LIVE and a.state != "parked":
@@ -1087,12 +1231,13 @@ def cmd_set(store, a):
         if row["state"] in LIVE:
             row["reserved"] = str(row["attempt"])
         if a.state == "queued" and row["reserved"]:
-            if not a.runs_dir:
+            if not runs_dir:
                 raise Refused("%s attempt %s may still own %s; pass --runs-dir so set can check its runs"
                               % (a.id, row["reserved"], row["worktree"]))
             # A writer cannot still be working in a worktree directory that no longer exists (a reboot cleared
             # $TMPDIR), even when its run records vanished with it.
-            blockers = ownership_blockers(a.runs_dir, row) if os.path.lexists(row["worktree"]) else []
+            blockers = (ownership_blockers(runs_dir, row)
+                        if cfg.get("runtime") == "codex" or os.path.lexists(row["worktree"]) else [])
             if blockers:
                 raise Refused("%s attempt %s still owns %s: %s"
                               % (a.id, row["reserved"], row["worktree"], "; ".join(blockers)))
@@ -1165,6 +1310,7 @@ def parser():
     s.add_argument("--gate", default="")
     s.add_argument("--max-attempts", type=int, default=3)
     s.add_argument("--grant")
+    s.add_argument("--runtime", choices=["pi", "codex"], default="pi")
 
     s = sub.add_parser("import", parents=[common])
     s.add_argument("file")
@@ -1181,6 +1327,13 @@ def parser():
                    help="launch in an existing worktree this store did not create (it must be clean, on the unit branch)")
     s.add_argument("--workflow", default=DEFAULT_WORKFLOW)
 
+    for cmd in ("dispatch", "_codex-worker"):
+        s = sub.add_parser(cmd, parents=[common])
+        s.add_argument("id")
+        s.add_argument("attempt", type=int)
+        if cmd == "dispatch":
+            s.add_argument("--wait", action="store_true", help="wait for the detached supervisor to end")
+
     s = sub.add_parser("bind", parents=[common])
     s.add_argument("id")
     s.add_argument("attempt", type=int)
@@ -1196,7 +1349,7 @@ def parser():
     s.add_argument("--json", action="store_true")
 
     s = sub.add_parser("reconcile", parents=[common])
-    s.add_argument("--runs-dir", required=True)
+    s.add_argument("--runs-dir", help="required for pi; Codex uses the store's runs directory")
     s.add_argument("--json", action="store_true")
 
     s = sub.add_parser("set", parents=[common])
@@ -1214,6 +1367,7 @@ def parser():
 
 
 COMMANDS = {"init": cmd_init, "import": cmd_import, "next": cmd_next, "launch": cmd_launch, "bind": cmd_bind,
+            "dispatch": cmd_dispatch, "_codex-worker": cmd_codex_worker,
             "record": cmd_record, "status": cmd_status, "reconcile": cmd_reconcile, "set": cmd_set,
             "advance": cmd_advance}
 

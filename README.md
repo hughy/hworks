@@ -8,7 +8,7 @@ A personal layer over the [pstack](./pstack/) mirror. `pstack/` is a git subtree
 - `skills/review-loop/` and `workflows/review-loop.js` run a `coder` change and its review to a verdict as one pi-subagents workflow; `scripts/review-loop-args.sh` builds its args from the effort level. `node --test workflows/*.test.js` checks the loop logic.
 - `scripts/review-range.py record|base|args` keeps a per-branch ledger of reviewed ranges and hashes of their exact diffs in `$TASK_DIR/reviewed.tsv`, so a review covers only commits no earlier review covered. `args` prints review-fanout args for the unreviewed range with interrogate's rubric and the effort's reviewers, and exits 3 when there is nothing to review (quick effort, or HEAD already reviewed). A rebase or base merge keeps coverage only when it replays a byte-identical diff, as after merging trunk once a squash-merged parent has landed. `review-loop-args.sh` starts review-loop at the covered point when the task dir holds a ledger.
 - `skills/review-fanout/` and `workflows/review-fanout.js` run a review-only pass over one or more targets (a PR worktree, a plan file, a directory) as one workflow: every reviewer reads every target, a few targets at a time, and the result holds each reviewer's structured findings plus one merged list per target. Use it instead of a hand-written review script; review-loop covers a change and its review.
-- `scripts/orchestrate.py` is the bookkeeping for the `orchestrate` skill: it imports work units, picks launchable ones by priority, dependencies, claims, and path overlap, prepares one branch worktree and review-loop args per attempt (a stacked unit branches from its unmerged parent and restacks by merge when the parent moves or merges), records workflow results as acceptance receipts, and reconciles live units after a restart. It never launches agents or pushes. `python3 -m unittest discover -s scripts -p 'test_*.py'` runs its tests.
+- `scripts/orchestrate.py` is the bookkeeping for the `orchestrate` skill: it imports work units, picks launchable ones by priority, dependencies, claims, and path overlap, prepares one branch worktree and review-loop args per attempt (a stacked unit branches from its unmerged parent and restacks by merge when the parent moves or merges), records workflow results as acceptance receipts, and reconciles live units after a restart. With `init --runtime codex`, `dispatch` runs the Codex review loop and stores status under the orchestrate store. On pi the coordinator dispatches through pi-subagents. `python3 -m unittest discover -s scripts -p 'test_*.py'` runs its tests.
 - `hoffice/` is the personal project-memory engine: templates, procedures, launchers, and renderers for content instances. Register an instance with `~/dev/hworks/hoffice/scripts/install.sh <instance...>` (separate from hworks setup). Its check runs as the hoffice part of `scripts/check.sh`; see [hoffice/README.md](hoffice/README.md).
 - `scripts/check.sh` is the hworks full check and the gate to give orchestrate and review-loop: every `scripts/test_*.py` module, every `skills/<name>/tests/test_*.py` module of a skill hworks owns (not a symlinked pstack skill), `node --test workflows/*.test.js`, each `extensions/*.test.mts`, and `hoffice/scripts/check.sh` (from `hoffice/`), each part its own process, up to `CHECK_JOBS` at once (default: the CPU count). It prints each part's time and the output of every failed part, and exits nonzero if any part fails. Wall time is close to the slowest module rather than the sum.
 - `scripts/review-pre-read.py <base> <head> [--json] [--out FILE]` prints a map of a change for a reviewer to read before the diff: changed files, names the diff removed or renamed with their surviving references at `<head>`, test files that mention each changed file's stem, and the diff cut at 4000 lines. review-loop and `review-range.py args` open each reviewer task with it, and hughy-router's self-review runs it before a push.
@@ -83,7 +83,20 @@ Then `/reload` and start a task with `/skill:hughy-router <task>`. The skills ro
 
 pi-subagents resolves one model per launch and fails when it is unavailable. When a provider is down, apply another profile, for example `scripts/models.sh inherit`, then `/reload`.
 
-Claude Code and Codex load only `skills/` through the plugin manifests. The agent files are pi-specific, so on those harnesses `hughy-router`'s roles map to the harness's own subagent and `adapters/pi.md` does not apply. Symlink following on those harnesses is unverified.
+## Install (Codex)
+
+From a durable hworks clone, run:
+
+```bash
+scripts/install.sh --codex
+scripts/install.sh --codex --check
+```
+
+This links guidance to `$CODEX_HOME/AGENTS.md` (default `~/.codex/AGENTS.md`), links each skill into `~/.agents/skills/`, and creates the task scratch root. Existing conflicting files and symlinks are preserved and reported. The links keep skill assets and shared helpers in the clone. Resolve a linked skill's `SKILL.md` to its real path before following relative paths. Rerun the installer when the skills allowlist grows.
+
+In a new Codex session, select `hworks:hughy-router` from the skill picker. Codex may qualify the skill name with the manifest it finds at the resolved path, for example `pstack:arena` for a linked upstream skill. Use one install method per skill to avoid duplicate entries from a plugin or an existing personal install.
+
+The Claude Code and Codex plugin manifests also expose `skills/`. Their handling of hworks links and shared helper paths is unverified. The role files under `agents/` are for pi-subagents.
 
 ## Other consumers
 
