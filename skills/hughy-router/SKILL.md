@@ -65,7 +65,9 @@ Work that outlives one session goes to a multi-agent coordinator only when all h
 
 On pi without such a coordinator, `orchestrate` (`../orchestrate/SKILL.md`) is an experimental, opt-in route for a set of items (issue ids, a milestone, a label), independent or stacked as dependent PRs on unmerged parents, when the user asks for it or wants several driven at once: it keeps one writer per branch and survives a reload. Run it with window 1 until a pilot passes. A short sequential list stays a plain brief with review-loop, and dependencies that are not stackable code changes (a deploy, a decision) use the loop below.
 
-Otherwise, and always on Claude Code and Codex, run this loop across sessions with `$TASK_DIR/progress.md` (`scripts/task-dir.sh <slug>`) and git as the record: read both before resuming, and update progress.md at each commit. Plan a multi-PR program with an issue-planning skill when one is installed; otherwise draft the issues in the reply.
+On Codex, when the user asks for hworks orchestration, follow `../orchestrate/SKILL.md` with `init --runtime codex`. Run it with window 1 until the pilot passes.
+
+Otherwise, run this loop across sessions with `$TASK_DIR/progress.md` (`scripts/task-dir.sh <slug>`) and git as the record: read both before resuming, and update progress.md at each commit. Plan a multi-PR program with an issue-planning skill when one is installed; otherwise draft the issues in the reply.
 
 ## Deltas
 
