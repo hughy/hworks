@@ -83,7 +83,20 @@ Then `/reload` and start a task with `/skill:hughy-router <task>`. The skills ro
 
 pi-subagents resolves one model per launch and fails when it is unavailable. When a provider is down, apply another profile, for example `scripts/models.sh inherit`, then `/reload`.
 
-Claude Code and Codex load only `skills/` through the plugin manifests. The agent files are pi-specific, so on those harnesses `hughy-router`'s roles map to the harness's own subagent and `adapters/pi.md` does not apply. Symlink following on those harnesses is unverified.
+## Install (Codex)
+
+From a durable hworks clone, run:
+
+```bash
+scripts/install.sh --codex
+scripts/install.sh --codex --check
+```
+
+This links guidance to `$CODEX_HOME/AGENTS.md` (default `~/.codex/AGENTS.md`), links each skill into `~/.agents/skills/`, and creates the task scratch root. Existing conflicting files and symlinks are preserved and reported. The links keep skill assets and shared helpers in the clone. Resolve a linked skill's `SKILL.md` to its real path before following relative paths. Rerun the installer when the skills allowlist grows.
+
+In a new Codex session, select `hworks:hughy-router` from the skill picker. Codex may qualify the skill name with the manifest it finds at the resolved path, for example `pstack:arena` for a linked upstream skill. Use one install method per skill to avoid duplicate entries from a plugin or an existing personal install.
+
+The Claude Code and Codex plugin manifests also expose `skills/`. Their handling of hworks links and shared helper paths is unverified. The role files under `agents/` are for pi-subagents.
 
 ## Other consumers
 

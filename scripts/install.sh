@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Set up hworks on this machine. Safe to rerun.
-# usage: install.sh [--profile <name>] [--amp] [--check]
+# usage: install.sh [--profile <name>] [--amp] [--check] | install.sh --codex [--check]
+#   --codex           install only Codex guidance and local skills
 #   --amp             also link Amp guidance and machine-local skills
 #   --profile <name>  apply a model profile with models.sh after linking
 #   --check           report what is installed and what differs; change nothing
@@ -16,16 +17,21 @@ pi=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}
 settings=${PI_SETTINGS:-$pi/settings.json}
 tasks=${HWORKS_TASKS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-tasks}
 
-check=0; profile=; amp=0
+check=0; profile=; amp=0; codex_only=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) check=1; shift ;;
     --amp) amp=1; shift ;;
+    --codex) codex_only=1; shift ;;
     --profile) profile=${2:?--profile needs a name}; shift 2 ;;
-    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+if [ "$codex_only" = 1 ] && { [ "$amp" = 1 ] || [ -n "$profile" ]; }; then
+  echo "--codex cannot be combined with --amp or --profile" >&2
+  exit 2
+fi
 
 # A linked worktree is disposable; permanent user links must come from a standalone clone.
 git_dir=$(unset $(git rev-parse --local-env-vars); git -C "$root" rev-parse --absolute-git-dir 2>/dev/null || true)
@@ -55,8 +61,37 @@ link() {
   say linked "$dest -> $src$was"
 }
 
+ensure_tasks() {
+  if [ -d "$tasks" ]; then say ok "$tasks"
+  elif [ "$check" = 1 ]; then say missing "$tasks"; status=1
+  else mkdir -p "$tasks"; say created "$tasks"
+  fi
+}
+
+link_codex() {
+  local src=$1 dest=$2
+  if [ -L "$dest" ] && [ "$(resolved "$dest")" != "$(resolved "$src")" ]; then
+    say differs "$dest is not a link to $src; compare them, move it aside, and rerun"
+    status=1
+  else
+    link "$src" "$dest"
+  fi
+}
+
 if [ "$root" != "$HOME/dev/hworks" ] && [ "$(resolved "$HOME/dev/hworks")" != "$root" ]; then
   say warn "global/AGENTS.md refers to ~/dev/hworks; clone there or link ~/dev/hworks to $root"
+fi
+
+if [ "$codex_only" = 1 ]; then
+  codex_home=${CODEX_HOME:-$HOME/.codex}
+  link_codex "$root/global/AGENTS.md" "$codex_home/AGENTS.md"
+  for skill in "$root"/skills/*; do
+    [ -f "$skill/SKILL.md" ] || continue
+    link_codex "$skill" "$HOME/.agents/skills/${skill##*/}"
+  done
+  ensure_tasks
+  if [ "$check" = 0 ] && [ "$status" = 0 ]; then echo "installed Codex skills; start a new Codex session"; fi
+  exit "$status"
 fi
 
 link "$root/global/AGENTS.md" "$pi/AGENTS.md"
@@ -115,10 +150,7 @@ case "$result" in
   added) say added "$skills_path to $settings skills (backup: $settings.bak-install)" ;;
 esac
 
-if [ -d "$tasks" ]; then say ok "$tasks"
-elif [ "$check" = 1 ]; then say missing "$tasks"; status=1
-else mkdir -p "$tasks"; say created "$tasks"
-fi
+ensure_tasks
 
 # Instance paths are supplied by the operator; never repoint the engine during hworks setup.
 hoffice_config=${HOFFICE_CONFIG_DIR:-$HOME/.config/hoffice}
