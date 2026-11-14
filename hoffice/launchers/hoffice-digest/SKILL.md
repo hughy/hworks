@@ -1,6 +1,7 @@
 ---
 name: hoffice-digest
 description: Summarize remote activity in a daily or weekly digest, optionally publish its running page, and open a PR for material changes. Use when the user says /hoffice-digest, "create a daily digest", "run the weekly digest", or "publish the activity digest". Runs only when the user asks to run the digest, never proactively; unattended mode requires an explicit --unattended invocation.
+disable-model-invocation: true
 ---
 
 # hoffice-digest

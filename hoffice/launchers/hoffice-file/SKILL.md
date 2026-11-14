@@ -1,6 +1,7 @@
 ---
 name: hoffice-file
 description: Save a session and approved state changes to a hoffice instance; use --pr for review. Use when the user says /hoffice-file, "save this session", "file a session summary", or "commit the session notes". Runs only when the user asks to save and ship the session, never proactively.
+disable-model-invocation: true
 ---
 
 # hoffice-file

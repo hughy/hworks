@@ -1,6 +1,7 @@
 ---
 name: hoffice-retro
 description: Draft and publish an agent-work retrospective in a hoffice instance; --draft skips publishing and --pr requests review. Use when the user says /hoffice-retro, "review how agents worked on this repo", or "draft an agent retrospective". Commits, pushes, and publication run only when the user asks for those actions, never proactively.
+disable-model-invocation: true
 ---
 
 # hoffice-retro

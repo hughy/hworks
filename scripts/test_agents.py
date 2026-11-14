@@ -39,15 +39,15 @@ class AgentSkillsTest(unittest.TestCase):
         with open(os.path.join(AGENTS, "coder.md")) as f:
             self.assertTrue("~/dev/hworks/skills/principle-laziness-protocol/SKILL.md" in f.read(), "coder.md must name the laziness principle")
 
-    def test_coder_can_monitor_long_commands_via_the_adapter(self):
+    def test_coder_can_monitor_long_commands(self):
         path = os.path.join(AGENTS, "coder.md")
         tools = re.split(r"[,\s]+", frontmatter(path).get("tools", ""))
         self.assertIn("bash", tools)
         self.assertIn("subagent_command", tools, "pi-subagents enables command monitoring only with bash and subagent_command")
         with open(path) as f:
-            self.assertIn("~/dev/hworks/adapters/pi.md", f.read())
-        with open(os.path.join(ROOT, "adapters", "pi.md")) as f:
-            self.assertIn("yieldTimeMs", f.read())
+            text = f.read()
+        self.assertIn("yieldTimeMs", text)
+        self.assertIn('subagent_command({ action: "status"', text)
 
 
 if __name__ == "__main__":

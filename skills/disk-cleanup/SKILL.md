@@ -1,6 +1,7 @@
 ---
 name: disk-cleanup
 description: Free disk space by removing mux worktrees untouched for 3+ days and old forge/anvil state, then clearing the go and npm caches. Use for "/skill:disk-cleanup", "free disk space", or "clean up old worktrees".
+disable-model-invocation: true
 ---
 
 # Disk cleanup

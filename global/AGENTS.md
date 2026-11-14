@@ -63,8 +63,7 @@ Review the branch's changeset and what it breaks. Do not expand to unrelated cod
 
 ## Pull Requests
 
-- Open a draft PR when the work is verified, without waiting to be asked; the operator should not have to approve PR creation. Skip it only when the repo's own AGENTS.md or the operator says not to open PRs.
-- When opening a PR, always open it as a draft (`gh pr create --draft`).
+- Open a draft PR (`gh pr create --draft`) when the work is verified, without waiting to be asked; the operator should not have to approve PR creation. Skip it only when the repo's own AGENTS.md or the operator says not to open PRs.
 - Find the repo's PR template with `~/dev/hworks/scripts/pr-template.sh`, which matches any letter case and the `docs/`, `.github/`, and `PULL_REQUEST_TEMPLATE/` locations. Never guess the filename. Fill in the template it prints; with none, say so in the reply.
 - Before creating a PR or pushing to a branch with an open PR, run the repo's checks on the head you will push and review the unpushed diff. For every name the diff deletes or renames, `git grep` the old name and fix each hit. The review covers what the diff breaks outside itself, not only the diff.
 - Stack dependent PRs with `gh stack` (the `github/gh-stack` extension). PRs are dependent when one needs the other's code, when both touch the same file (tests included), or when one changes behavior the other's tests assert. Before opening sibling PRs off trunk, compare their `git diff --name-only trunk...<branch>` lists and stack any overlap:
@@ -83,7 +82,6 @@ Cite where a claim came from (file:line, PR, or doc) so it is verifiable — an 
 
 - An issue describes the **problem to be solved**, not how to solve it. Lead with the problem statement, acceptance criteria, and relevant context.
 - Frame possible approaches as suggestions. Prescribe a solution only when the user asks.
-- **Why:** A prescriptive issue causes downstream agents to judge a valid PR as "not solving the issue" merely because it used a different (but acceptable) approach than the one prescribed.
 - When *evaluating* whether a PR solves an issue, judge against the problem and acceptance criteria — not literal adherence to any suggested approach.
 
 ## Commits
@@ -105,10 +103,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). F
 
 ## Datadog
 
-- Use the `pup` CLI (via bash) for all Datadog work: metrics, logs, monitors, traces, dashboards, incidents.
-- Do not call the Datadog MCP tools, even if they are available.
-- Run `pup --help` or `pup <domain> --help` to discover commands. Run `pup auth login` if auth fails.
-- Add `--no-agent` when writing scripts, aliases, or runbooks for me to run myself. Agent mode wraps output in a `{status,data,metadata}` envelope that my shell does not produce.
+Use the `pup` CLI for all Datadog work, never the Datadog MCP tools (`pup --help` lists commands; `pup auth login` fixes auth), and add `--no-agent` to scripts or runbooks I run myself.
 
 ## Rules and what enforces them
 
@@ -124,7 +119,7 @@ When the operator corrects a mistake, add its rule here with what enforces it. A
 
 ## hworks
 
-- This file is `~/dev/hworks/global/AGENTS.md`; `~/.pi/agent/AGENTS.md`, `~/.claude/CLAUDE.md`, and `~/.codex/AGENTS.md` link to it. Edits land in the hworks repo, which is public: keep employer-specific rules, names, and paths out of it, and commit changes there.
-- On pi, before following any skill under `~/dev/hworks/skills/`, read `~/dev/hworks/adapters/pi.md` once per session. It maps Cursor terms in pstack text to pi and names the agent for each role.
+- This file is `~/dev/hworks/global/AGENTS.md`, in the public hworks repo: commit edits there, and keep employer-specific rules, names, and paths out of it.
+- In a main pi session (not a subagent child), before following any skill under `~/dev/hworks/skills/`, read `~/dev/hworks/adapters/pi.md` once per session. It maps Cursor terms in pstack text to pi and names the agent for each role.
 - On Codex, before following any hworks skill or its linked pstack skills, read `../../adapters/codex.md` relative to the installed hughy-router skill directory. It maps playbook tools and roles to Codex.
 
