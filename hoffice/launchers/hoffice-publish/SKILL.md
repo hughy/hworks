@@ -1,6 +1,7 @@
 ---
 name: hoffice-publish
 description: Publish a project document and commit its verified publication record to the selected instance; use --pr for a draft PR. Use when the user says /hoffice-publish, "publish this document", "share this project document", or "update the published document". Runs only when the user asks to publish, never proactively.
+disable-model-invocation: true
 ---
 
 # hoffice-publish

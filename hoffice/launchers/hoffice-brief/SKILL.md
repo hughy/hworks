@@ -1,6 +1,7 @@
 ---
 name: hoffice-brief
 description: Brief the current project from a configured hoffice instance. Use when the user says /hoffice-brief, "brief me on this project", "where does this project stand", or "summarize the project context".
+disable-model-invocation: true
 ---
 
 # hoffice-brief
