@@ -103,7 +103,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). F
 
 ## Datadog
 
-Use the `pup` CLI for all Datadog work, never the Datadog MCP tools (`pup --help` lists commands; `pup auth login` fixes auth), and add `--no-agent` to scripts or runbooks I run myself.
+Use the `pup` CLI for all Datadog work, never the Datadog MCP tools (`pup --help` lists commands; `pup auth login` fixes auth), and add `--no-agent` to scripts, aliases, or runbooks I run myself.
 
 ## Rules and what enforces them
 
