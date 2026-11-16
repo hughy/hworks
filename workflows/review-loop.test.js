@@ -326,6 +326,7 @@ test("every child runs in the shared worktree, never an isolated one", async () 
   );
   assert.equal(calls.length, 7);
   for (const c of calls) assert.equal(c.worktree, false, c.key);
+  for (const c of calls) assert.equal(c.control?.activeNoticeAfterMs, 1_860_000, c.key);
 });
 
 test("a base that is not a commit SHA is rejected", async () => {

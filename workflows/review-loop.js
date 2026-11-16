@@ -202,8 +202,12 @@ function withOutput(item, name) {
 }
 
 // worktree: false overrides a global worktree default so coder commits land on the caller's branch.
+// The notice threshold sits past the 1800 s gate cap in extensions/gate-timeout.ts, so a gate queued
+// for a heavy-job slot does not raise an attention notice the child then reacts to.
+const GATE_NOTICE_MS = 1_860_000;
 function placed(item) {
   item.worktree = false;
+  item.control = { activeNoticeAfterMs: GATE_NOTICE_MS };
   if (args.cwd) item.cwd = args.cwd;
   return item;
 }
