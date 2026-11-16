@@ -115,7 +115,7 @@ When the operator corrects a mistake, add its rule here with what enforces it. A
 | A gate or test in foreground bash must not die on the bash timeout. | `extensions/gate-timeout.ts` raises `timeout` to 1800 s for gate and test commands; `extensions/gate-timeout.test.mts` replays past timed-out commands |
 | `subagent({ workflow: true })` needs a fence tagged `js workflow`. | `extensions/workflow-fence.ts`; `extensions/workflow-fence.test.mts` |
 | Put new logic in the script or module that owns the job, or share one; do not split it across new files. | review-loop reviewers block an unjustified new file (`workflows/review-loop.js`, asserted in `workflows/review-loop.test.js`); hughy-router's Mechanisms list requires a reason for each new script or module |
-| Do not add tests for one-off processes, for scripts whose own run or dry run shows the failure as fast, or that duplicate existing coverage; do not commit one-off scripts or codemods. | review-loop reviewers rule on every added file (`addedFiles`) and every added test, in new or existing files (`addedTests`, which names the mutant only that test catches); `workflows/review-loop.test.js` |
+| Follow the repo's testing rules; do not add test-only production code unless those rules allow it, or tests for one-off processes, for scripts whose own run or dry run shows the failure as fast, or that duplicate coverage; do not commit one-off scripts or codemods. | `agents/reviewer.md` items 2 and 5 require repo-rule and test-only production code checks in review-loop and review-fanout; review-loop reviewers rule on every added file (`addedFiles`) and test (`addedTests`, citing an excluding repo rule or the mutant only that test catches); `workflows/review-loop.test.js` |
 
 ## hworks
 

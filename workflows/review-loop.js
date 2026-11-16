@@ -161,9 +161,12 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
     "In `addedFiles`, list every path `git diff --diff-filter=A --name-only " + args.base + "...HEAD` prints ([] when none), " +
     "each with `keep` and the `reason`. Set `keep: false`, even when the brief names the file, for logic split into a new script, module, or file " +
     "that fits in or could share an existing one, or a committed one-off script or codemod. Each `keep: false` blocks. " +
+    "A production function, method, field, or export the diff adds whose only callers are tests is blocking unless the repo's testing rules allow it; name the real construction path, existing seam, or no test as the alternative. " +
     "In `addedTests`, list every test function or test case the diff adds, in new or existing files ([] when none), " +
     "each with `keep` and in `covers` the behavior only it catches: a mutant of the code, or the reverted fix, that fails it while every test " +
     "that existed at " + args.base + " passes, and the command you ran. Run each mutant on its own against the pre-existing tests, never one combined overlay. " +
+    "Before ruling on added tests, read the target repo's testing rules in `AGENTS.md`/`CLAUDE.md` on changed paths, `CONTRIBUTING`, and decision logs or ADRs (such as `docs/decisions.md`; `rg -il 'test'` over those files locates relevant rules). " +
+    "Set `keep: false` for a test those rules exclude, citing the rule's `file:line`; a killed mutant does not override a repo rule. " +
     "A mutant that changes only message or log text does not count unless a caller, test fixture, or documented contract depends on that exact text. " +
     "Set `keep: false` for a test that only re-checks what a lint or type check in the gate already enforces. Set `keep: false` when no such mutant exists " +
     "(name the existing test to extend instead), or for a test of a one-off process or of a script whose own run or dry run " +

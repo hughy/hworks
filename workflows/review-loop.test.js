@@ -99,6 +99,9 @@ test("clean on first review", async () => {
   assert.match(calls[1].task, /In `addedTests`, list every test function or test case the diff adds, in new or existing files/);
   assert.match(calls[1].task, /fails it while every test that existed at 0123abc passes/);
   assert.match(calls[1].task, /Run each mutant on its own against the pre-existing tests, never one combined overlay/);
+  assert.match(calls[1].task, /Before ruling on added tests, read the target repo's testing rules in `AGENTS\.md`\/`CLAUDE\.md` on changed paths, `CONTRIBUTING`, and decision logs or ADRs/);
+  assert.match(calls[1].task, /Set `keep: false` for a test those rules exclude, citing the rule's `file:line`; a killed mutant does not override a repo rule/);
+  assert.match(calls[1].task, /A production function, method, field, or export the diff adds whose only callers are tests is blocking unless the repo's testing rules allow it; name the real construction path, existing seam, or no test as the alternative/);
   assert.match(calls[1].task, /A mutant that changes only message or log text does not count unless a caller, test fixture, or documented contract depends on that exact text/);
   assert.match(calls[1].task, /Set `keep: false` for a test that only re-checks what a lint or type check in the gate already enforces/);
   assert.ok(state.sets.length > 0);
