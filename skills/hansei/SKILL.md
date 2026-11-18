@@ -42,7 +42,7 @@ A bare approval after the agent asked permission is usually `system`: guidance s
 
 ## Write the findings
 
-Write each finding as upward feedback: candid, specific, quoting the operator's own words. Give one concrete better prompt or habit, and at least one copy-paste prompt that queues the fix, for example `/skill:hughy-router ...`, `/skill:kaizen ...`, a brief to add a line to `global/AGENTS.md`, or a reusable prompt to save as a skill. List strengths only with evidence from the same window.
+Write each finding as upward feedback: candid, specific, quoting the operator's own words. Give one concrete better prompt or habit, and at least one copy-paste prompt that queues the fix, for example `/skill:review-loop ...`, `/skill:kaizen ...`, a brief to add a line to `global/AGENTS.md`, or a reusable prompt to save as a skill. List strengths only with evidence from the same window.
 
 ## Output
 

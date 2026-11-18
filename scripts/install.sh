@@ -78,6 +78,18 @@ link_codex() {
   fi
 }
 
+# A skill or extension deleted from hworks leaves a dangling link behind; remove links into $root/<sub> that no longer resolve.
+prune_links() {
+  local dir=$1 sub=$2 dest
+  for dest in "$dir"/*; do
+    [ -L "$dest" ] && [ ! -e "$dest" ] || continue
+    case "$(readlink "$dest")" in "$root/$sub"/*) ;; *) continue ;; esac
+    if [ "$check" = 1 ]; then say stale "$dest -> $(readlink "$dest")"; status=1
+    else rm "$dest"; say removed "$dest (dangling link into $root/$sub)"
+    fi
+  done
+}
+
 if [ "$root" != "$HOME/dev/hworks" ] && [ "$(resolved "$HOME/dev/hworks")" != "$root" ]; then
   say warn "global/AGENTS.md refers to ~/dev/hworks; clone there or link ~/dev/hworks to $root"
 fi
@@ -89,6 +101,7 @@ if [ "$codex_only" = 1 ]; then
     [ -f "$skill/SKILL.md" ] || continue
     link_codex "$skill" "$HOME/.agents/skills/${skill##*/}"
   done
+  prune_links "$HOME/.agents/skills" skills
   ensure_tasks
   if [ "$check" = 0 ] && [ "$status" = 0 ]; then echo "installed Codex skills; start a new Codex session"; fi
   exit "$status"
@@ -120,12 +133,14 @@ if [ "$amp" = 1 ]; then
     # Amp loads only the first skill by name. Keep a fallback even if shared roots are disabled.
     link "$skill" "$HOME/.config/amp/skills/$name"
   done
+  prune_links "$HOME/.config/amp/skills" skills
 fi
 link "$root/agents" "$pi/agents/hworks"
 for ext in "$root"/extensions/*.ts; do
   [ -e "$ext" ] || continue
   link "$ext" "$pi/extensions/$(basename "$ext")"
 done
+prune_links "$pi/extensions" extensions
 
 skills_path=$root/skills
 tilde='~'

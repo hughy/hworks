@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Apply a model profile: write each agent role's model to pi settings (subagents.agentOverrides.<role>.model)
-# and record the profile so hughy-router can read its slots. Profiles come from models.conf and models.d/*.conf.
+# and record the profile so the review args scripts can read its slots. Profiles come from models.conf and models.d/*.conf.
 # A role is an agent role when agents/<role>.md exists or HWORKS_MODEL_AGENTS names it (comma- or space-separated;
 # set in the environment or in adapters/local/*.env), for agents another package defines. Other roles are slots.
 # usage: models.sh show

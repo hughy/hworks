@@ -1,10 +1,10 @@
 # Split a branch and sync with its base
 
-Read this from the hughy-router Ship route when a reviewed branch is too large for one PR, or a branch needs its base's new commits.
+Read this when a reviewed branch is too large for one PR, or a branch needs its base's new commits.
 
 ## Split a reviewed branch
 
-The Build route decides one PR or a stack before building. Split after the fact only when a reviewed branch is too large anyway.
+Decide one PR or a stack before building: keep one PR when production changes are small (roughly under 400 changed lines and 15 files, not counting tests, fixtures, generated files, lockfiles, or docs), when merging only part would leave trunk unsafe, incomplete, or failing, or when the user asked for one; otherwise plan 2 to 4 layers that each merge alone, in order, leaving trunk building and passing, with tests beside the code they cover and no logical change split across layers. Split after the fact only when a reviewed branch is too large anyway.
 
 Skip the split when the PR already has human review threads or someone else pushed to the branch. Otherwise:
 

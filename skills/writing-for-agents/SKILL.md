@@ -10,7 +10,7 @@ Adapted from the `writing-for-agents` skill in mattpocock/skills (commit 49dd158
 
 ## Pointers
 
-A pointer is text always in context that names material out of context and the condition for reaching it: a skill's description, a line in `AGENTS.md` naming a file, a path in hughy-router. Its wording, not its target, decides when the agent reaches the material. When a needed file goes unread, sharpen the pointer first, and inline the material only if that fails.
+A pointer is text always in context that names material out of context and the condition for reaching it: a skill's description, a line in `AGENTS.md` naming a file, a path in another skill. Its wording, not its target, decides when the agent reaches the material. When a needed file goes unread, sharpen the pointer first, and inline the material only if that fails.
 
 A pointer states what the material is and lists the branches that should trigger it. A branch is a distinct case; synonyms for one case are one branch. A pointer loads every turn, so prune it hardest:
 
@@ -22,7 +22,7 @@ A pointer states what the material is and lists the branches that should trigger
 
 Context load is what always-loaded text costs: `AGENTS.md`, skill descriptions, agent prompts, and tool schemas spend tokens and attention every turn, whether they fire or not. `scripts/kaizen-tokens.py` measures it in token-turns.
 
-Cognitive load is what the operator pays to remember which documents exist and when to reach for each. Spend it where human judgment matters. hughy-router is the single entry point so the operator remembers one name.
+Cognitive load is what the operator pays to remember which documents exist and when to reach for each. Spend it where human judgment matters.
 
 ## Model-invoked, command, or read by path
 
@@ -30,7 +30,7 @@ pi lists every skill's name and description in the system prompt unless the fron
 
 - Make a skill model-invoked when the agent must reach it on its own. Write its description as a pointer with trigger branches.
 - Make it a command (`disable-model-invocation: true`) when only the operator starts it. Its description is one human-facing line with no trigger list.
-- Have another skill read it by path when a router or workflow needs it: hughy-router reads skills as `../<name>/SKILL.md`, which works for both kinds. Subagents see only the skills their agent file lists (`skills:` in `agents/*.md`), and pi-subagents drops hidden skills from that list, so an agent prompt or brief that needs a hidden skill names its absolute path and when to read it.
+- Have another skill read it by path when another skill or workflow needs it: a skill reads another as `../<name>/SKILL.md`, which works for both kinds. Subagents see only the skills their agent file lists (`skills:` in `agents/*.md`), and pi-subagents drops hidden skills from that list, so an agent prompt or brief that needs a hidden skill names its absolute path and when to read it.
 
 An agent prompt in `agents/*.md` loads into every run of that role. Treat each line as context load for every child.
 
