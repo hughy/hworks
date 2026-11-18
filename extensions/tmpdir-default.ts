@@ -1,16 +1,9 @@
-import childProcess from "node:child_process";
 import os from "node:os";
 
+// Modules such as pi-subagents resolve os.tmpdir() at import, before this
+// runs. Pin TMPDIR to that same value so child processes resolve the same
+// temp paths as this process; a different directory splits them.
 export default function (_pi: unknown) {
   if (process.env.PI_TMPDIR_DEFAULT === "0" || process.env.TMPDIR?.trim()) return;
-
-  let dir = "";
-  if (os.platform() === "darwin") {
-    try {
-      dir = childProcess.execFileSync("getconf", ["DARWIN_USER_TEMP_DIR"], {
-        encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-    } catch {}
-  }
-  process.env.TMPDIR = dir || os.tmpdir().trim() || "/tmp";
+  process.env.TMPDIR = os.tmpdir().trim() || "/tmp";
 }
