@@ -136,6 +136,7 @@ function coderTask(round, findings, gateFailure) {
       "If the brief is already met and the gate passes, return status `done` with the current head" +
       (onCodex ? ". " : " and make no new commit. ") +
       "Otherwise find the cause and fix it. Failure:\n" + gateFailure;
+    if (args.taskDir) task += "\nFull host gate output: " + gateLog(round, false);
   }
   return task;
 }
@@ -199,9 +200,58 @@ function reviewerTask(round, prior, priorHead, gateCheck) {
 const safeName = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, "-");
 
 // The label is capped so the basename stays under the 255-byte filename limit; the round suffix keeps it unique.
+function outputPath(name, extension) {
+  return args.taskDir.replace(/[\\/]+$/, "") + "/" + safeName(label).slice(0, 160) + "-" + name + "." + extension;
+}
+
 function withOutput(item, name) {
-  if (args.taskDir) item.output = args.taskDir.replace(/[\\/]+$/, "") + "/" + safeName(label).slice(0, 160) + "-" + name + ".md";
+  if (args.taskDir) item.output = outputPath(name, "md");
   return item;
+}
+
+const shellQuote = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+const gateLog = (round, retry) => outputPath("r" + round + "-gate" + (retry ? "-retry" : ""), "log");
+function gateCommand(round, retry) {
+  if (!args.taskDir) return args.gate;
+  const log = shellQuote(gateLog(round, retry));
+  return "(\n" + args.gate + "\n) >" + log + " 2>&1\n" +
+    "status=$?\nif [ \"$status\" -ne 0 ]; then\n" +
+    "printf '%s\\n' " + log + "\ntail -c 8000 " + log + "\nfi\nexit \"$status\"";
+}
+
+function launchAddedCheck(round, entries) {
+  const python = String.raw`import json, posixpath, re, subprocess, sys
+base, entries = sys.argv[1], json.loads(sys.argv[2])
+def git(*argv):
+    return subprocess.run(["git", *argv], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+diff = git("diff", "--diff-filter=A", "--name-only", "-z", base + "...HEAD")
+if diff.returncode:
+    sys.exit(diff.stderr.decode(errors="replace"))
+added = set(diff.stdout.decode().split("\0"))
+result = []
+for entry in entries:
+    file = posixpath.normpath(entry["file"])
+    is_added = file in added
+    if "test" in entry and not is_added:
+        old = git("show", base + ":" + file)
+        names = [entry["test"], re.split(r"::|\.", entry["test"])[-1]]
+        is_added = old.returncode != 0 or not any(re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", old.stdout.decode(errors="replace")) for name in names)
+    result.append(is_added)
+print(json.dumps({"added": result}))`;
+  const item = placed({
+    key: "added-check-" + round,
+    label: label + ": added check " + round,
+    agent: "explorer",
+    task: "Reply done without using tools.",
+    output: false,
+    gate: {
+      command: ["python3", "-c", python, args.base, JSON.stringify(entries)].map(shellQuote).join(" "),
+      output: "json",
+      schema: { type: "object", properties: { added: { type: "array", items: { type: "boolean" }, minItems: entries.length, maxItems: entries.length } }, required: ["added"] },
+      timeoutMs: gateTimeoutMs,
+    },
+  });
+  return runs.all([withOutput(item, "r" + round + "-added-check")]);
 }
 
 // worktree: false overrides a global worktree default so coder commits land on the caller's branch.
@@ -223,7 +273,7 @@ function launchCoder(key, round, findings, gateFailure) {
     task: coderTask(round, findings, gateFailure),
     // Explicit form of `gate`: report "on" puts the acceptance report in the schema-enforced
     // structured_output call, which coders do not skip the way they skip a fenced report block.
-    acceptance: { level: "verified", verify: [{ id: "gate", command: args.gate, timeoutMs: gateTimeoutMs }], report: "on" },
+    acceptance: { level: "verified", verify: [{ id: "gate", command: gateCommand(round, !!gateFailure), timeoutMs: gateTimeoutMs }], report: "on" },
     outputSchema: coderSchema,
   });
   if (args.coderModel) item.model = args.coderModel;
@@ -268,6 +318,7 @@ let failure = null;
 // One entry per reviewed round, for stopReasons; it never changes when the loop stops.
 const history = [];
 const rejected = [];
+const addedCheckFailures = [];
 
 function record(key, result) {
   runLog.push({ key, runId: result && result.runId ? result.runId : null, ok: !!(result && result.ok) });
@@ -288,7 +339,7 @@ function stopReasons() {
     if (after.repeated.length) reasons.push({ reason: "repeated-finding", round: after.round, detail: after.repeated.join("; ") });
   }
   rejected.forEach((r) => reasons.push({ reason: "review-rejected", round: r.round, detail: r.reviewer + ": " + r.problems.join("; ") }));
-  return reasons;
+  return reasons.concat(addedCheckFailures);
 }
 
 function finish(finalState) {
@@ -302,6 +353,7 @@ function progress(phase) {
 
 function coderFailed(finalState, key, result) {
   failure = { key, runId: result.runId || null, error: failureText(result) };
+  if (finalState === "gate-failed" && args.taskDir) failure.gateLog = gateLog(rounds, key.endsWith("-retry"));
   gateBy = null;
   return finalState;
 }
@@ -354,6 +406,8 @@ while (outcome === null) {
   blocking = [];
   nonBlocking = [];
   let reviewFailed = false;
+  const reviewFindings = [];
+  const refusals = [];
   for (let i = 0; i < reviews.length; i++) {
     let review = reviews[i];
     let reviewer = "review-" + rounds + "-" + (i + 1);
@@ -386,6 +440,7 @@ while (outcome === null) {
       ...refused(out.addedTests).map((a) => drop(a.file, a.name, "Added test " + a.name + " should not exist: " + a.covers, "addedTests verdict", a.origin)),
     ];
     const mine = [...out.findings, ...dropped].map((f) => Object.assign({ reviewer }, f));
+    refusals.push(...mine.slice(out.findings.length));
     let hard = mine.filter((f) => f.severity === "blocking");
     if (out.verdict === "blocked" && hard.length === 0) {
       hard.push({ reviewer, severity: "blocking", file: "", claim: "Reviewer returned blocked without a blocking finding.", evidence: String(review.output || "").slice(0, 2000) });
@@ -399,15 +454,35 @@ while (outcome === null) {
       }
       if (typeof out.head === "string" && out.head) head = out.head;
     }
-    // After round 1, only unfixed prior findings and regressions block, so the loop converges.
-    // A blocking finding without an origin still blocks: an untagged finding must not pass silently.
-    const soft = mine.filter((f) => f.severity !== "blocking");
-    if (rounds > 1) {
-      soft.push(...hard.filter((f) => f.origin === "new").map((f) => Object.assign({}, f, { severity: "non-blocking", downgraded: true })));
-      hard = hard.filter((f) => f.origin !== "new");
+    reviewFindings.push(...hard, ...mine.filter((f) => f.severity !== "blocking"));
+  }
+  if (refusals.length && !onCodex) {
+    const key = "added-check-" + rounds;
+    let check;
+    try {
+      [check] = await launchAddedCheck(rounds, refusals.map((f) => f.test === undefined ? { file: f.file } : { file: f.file, test: f.test }));
+    } catch (error) {
+      check = { ok: false, error: String(error) };
     }
-    blocking.push(...hard);
-    nonBlocking.push(...soft);
+    record(key, check);
+    const added = check && check.ok && check.structuredOutput && check.structuredOutput.added;
+    if (!Array.isArray(added) || added.length !== refusals.length || !added.every((a) => typeof a === "boolean")) {
+      addedCheckFailures.push({ reason: "added-check-failed", round: rounds, detail: check && check.ok ? "Malformed added-check result" : failureText(check) });
+    } else {
+      refusals.forEach((f, i) => {
+        if (added[i]) return;
+        f.severity = "non-blocking";
+        f.downgraded = true;
+        f.claim = "Not added in " + args.base + "...HEAD: " + f.claim;
+      });
+    }
+  }
+  for (const f of reviewFindings) {
+    // After round 1, only unfixed prior findings and regressions block, so the loop converges.
+    if (rounds > 1 && f.severity === "blocking" && f.origin === "new") {
+      nonBlocking.push(Object.assign({}, f, { severity: "non-blocking", downgraded: true }));
+    } else if (f.severity === "blocking") blocking.push(f);
+    else nonBlocking.push(f);
   }
   history.push({
     round: rounds,
