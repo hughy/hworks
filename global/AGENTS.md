@@ -13,9 +13,9 @@
 - Otherwise never block on human input mid-task: settle each question from evidence and keep going. If a question blocks all progress, finish the independent work, then ask. At the end of the final reply, list only the questions evidence could not settle, with options and a recommendation.
 - Record every decision you settle and every question you ask as one line in `$TASK_DIR/open-questions.md`: `- [<category>] <question> | <choice> | <evidence> | <how to reverse> | <state>`. Evidence names the files the choice touches (`path:line`). State is `deferred` (you decided and kept going) or `asked` (you asked up front). When the operator answers or overturns one, append `:kept` or `:reversed` to its state in that turn. Categories: `~/dev/hworks/scripts/blockers.sh --help`. Before explaining why a repo is shaped as it is or proposing a refactor of it, read its decision log: `blockers.sh --log --cwd-match <repo>`.
 - Do only what git on the working branch can undo. Discarding uncommitted work, rewriting or force-pushing history, deleting branches or stashes, removing untracked files, and acting outside the machine (deploys, data stores, messages) are not. Three exceptions: pushing a feature branch and opening a PR from it (close the PR); a push with `--force-with-lease=<branch>:<expected-sha>`; and a step the operator asked for in this session. When the only way forward is irreversible, skip that step, finish the rest, and list the skipped step first in the final reply.
-- End-of-run cleanup (stale branches, worktrees) is the exception: once the work, verification, and reviews are done, you may attempt it and let the harness ask the operator to approve each step. A denied step stays skipped and goes in the final reply.
+- End-of-run cleanup is the exception: once the work, verification, and reviews are done, you may attempt it and let the harness ask the operator to approve each step. A denied step stays skipped and goes in the final reply.
 - To undo your own change, edit it back or `git revert` the commit. For a before/after check, use `git show <rev>:<file>` or a temporary worktree, never `git stash` (all worktrees share one stash list). Never discard work with `git reset --hard`, `git checkout -- <path>`, or `git restore <path>`: they also wipe edits that are not yours.
-- On pi, the rules in this section bind only in long-running autonomous runs: a prompt that invokes `/skill:orchestrate` or passes `--unattended`, a session that has called `orchestrate.py --store`, or a subagent child; the trigger lasts for the session. In any other pi session the operator is at the keyboard: use `ask_user_question` for their choices, and run an irreversible step once they ask for or confirm it. When the operator asks for questions, use `ask_user_question` even in a guarded run.
+- On pi, the rules in this section bind only in long-running autonomous runs: a prompt that invokes `/skill:orchestrate` or passes `--unattended`, a session that has called `orchestrate.py --store`, or a subagent child; the trigger lasts for the session. In any other pi session the operator is at the keyboard: use `ask_user_question` for their choices, and run an irreversible step once they ask for or confirm it. When the operator asks for questions, use `ask_user_question` even in a guarded run. `/autonomy` and `PI_AUTONOMY=1` override these triggers.
 - In a guarded run, `autonomy.ts` blocks `ask_user_question` unless the operator's prompt asked for questions (never in a subagent child), so the up-front round goes in the reply text. It also blocks git commands that destroy history or uncommitted work unless the prompt grants them (never plain `--force`). It does not catch `rm` or `checkout --`; judge those yourself. A blocked call returns a reversible form; retry with it instead of another route. For end-of-run cleanup, call `autonomy_phase` with `cleanup` first, and with `work` before resuming substantive work.
 
 ## Friction
@@ -36,12 +36,12 @@
 ## Tool hygiene
 
 - Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands in the background so they wake you on exit or a log match, and use a PR tracker for CI and reviews. Never pass a short `timeout` to a gate or test run.
-- Read files with the harness's ranged-read tool. Pipe a command that may print more than 200 lines through `head`, `tail`, or a filter, but never filter a test, lint, or check run: run it unfiltered and search the saved output.
+- Read files with the ranged-read tool. Pipe a command that may print more than 200 lines through `head`, `tail`, or a filter, but never filter a test, lint, or check run: run it unfiltered and search the saved output.
 
 ## Comments
 
 - Default to no comments. Add one only when the why is non-obvious: a hidden constraint, a subtle invariant, or behavior that would surprise a reader.
-- Do not reference external context (issues, tickets, Slack threads, PR numbers) or history ("this used to do X").
+- Do not reference external context (tickets, Slack threads, PR numbers) or history ("this used to do X").
 
 ## Code
 
@@ -62,7 +62,7 @@ Label unverified reasoning as inference, and ground claims about code in actual 
 
 ## Linear Issues
 
-- An issue states the problem, acceptance criteria, and context, not how to solve it. Frame approaches as suggestions; prescribe one only when the user asks.
+- An issue states the problem, acceptance criteria, and context, not how to solve it. Frame approaches as suggestions unless the user asks for one.
 - Judge a PR against the issue's problem and acceptance criteria, not a suggested approach.
 
 ## Commits
