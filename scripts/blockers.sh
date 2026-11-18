@@ -18,6 +18,7 @@
 #     touches (internal/quote/price.go:40) so --grep <path> finds it. state: deferred or asked, then :kept or
 #     :reversed once the operator judges it (deferred:reversed); the report gives reversal rates by category.
 #   friction.md        - <YYYY-MM-DD> [<category>] <what happened> | <caught by> | <cost> | <what would have helped>
+#                        cost is what you observed (review rounds, reruns), not a time estimate
 #     category: missed-defect, wrong-assumption, test-gap, toolchain, environment, spec-gap, missing-tool,
 #     low-value-test (a test that duplicates existing coverage or cannot fail); add one only when none fits.
 #     caught by: operator, reviewer, test, ci, self. What would have helped names a tool, doc, check, or brief
