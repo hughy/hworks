@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # hoffice-retro
 
-Arguments: `[project] [repo] [--since YYYY-MM-DD] [--draft] [--pr]`. Discover roots, branch in an isolated instance worktree, follow `retro`, then `publish`, and rebase and fast-forward push the record to the instance's default branch. `--draft` skips publishing; `--pr` opens a draft PR instead of pushing to the default branch. All procedure approval gates still apply.
+Arguments: `[project] [repo] [--since YYYY-MM-DD] [--draft] [--pr]`. Discover roots, branch in an isolated instance worktree, follow `retro`, then `publish`, and rebase and fast-forward push the record to the instance's default branch. `--draft` skips publishing; `--pr` opens a PR instead of pushing to the default branch. All procedure approval gates still apply.
 
 ## 1. Find the engine and instance
 

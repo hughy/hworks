@@ -2,7 +2,7 @@
 
 ## Planning
 
-- Settle implementation details, constraints, and tradeoffs yourself from the code, docs, or a quick experiment, and record each decision in the plan as an assumption the user can overturn. If running something would answer a question, run it; never hand the operator a check you could run. Product direction, preferences, unstated requirements, and one-way-door choices are the operator's; Autonomy says when to ask. Offer options with a recommendation first.
+- Settle implementation details, constraints, and tradeoffs yourself from the code, docs, or a quick experiment, and record each decision in the plan as an assumption the user can overturn. If running something would answer a question, run it; never hand the operator a check you could run. Product direction, preferences, unstated requirements, and one-way-door choices are the operator's; Autonomy says when to ask.
 - Never write plans, progress, or review notes into a repo. Scratch files go in `$TASK_DIR`, the directory `~/dev/hworks/scripts/task-dir.sh <task-slug>` prints from inside the repo you are working on. Resolve it once at the start of a task and reuse that path for the whole task, even after switching branches or worktrees: `task-dir.sh` keys the path by branch. Reuse the slug when you resume a task.
 - Keep only notes in `$TASK_DIR`. Put clones, checkouts, dependency installs, build output, caches, and media in a `mktemp -d` dir under `$TMPDIR`. Never create dirs directly under the task root.
 
@@ -16,7 +16,7 @@
 - End-of-run cleanup (stale branches, worktrees) is the exception: once the work, verification, and reviews are done, you may attempt it and let the harness ask the operator to approve each step. A denied step stays skipped and goes in the final reply.
 - To undo your own change, edit it back or `git revert` the commit. For a before/after check, use `git show <rev>:<file>` or a temporary worktree, never `git stash` (all worktrees share one stash list). Never discard work with `git reset --hard`, `git checkout -- <path>`, or `git restore <path>`: they also wipe edits that are not yours.
 - On pi, the rules in this section bind only in long-running autonomous runs: a prompt that invokes `/skill:orchestrate` or passes `--unattended`, a session that has called `orchestrate.py --store`, or a subagent child; the trigger lasts for the session. In any other pi session the operator is at the keyboard: use `ask_user_question` for their choices, and run an irreversible step once they ask for or confirm it. When the operator asks for questions, use `ask_user_question` even in a guarded run. `/autonomy on|off|auto|status` overrides this per session, and `PI_AUTONOMY=1` guards every session.
-- In a guarded run, `autonomy.ts` blocks `ask_user_question` (so the up-front round goes in the reply text) and git commands that destroy history or uncommitted work, unless the operator's prompt grants them (never plain `--force`). It does not catch `rm` or `checkout --`; judge those yourself. A blocked call returns a reversible form; retry with it instead of another route. For end-of-run cleanup, call `autonomy_phase` with `cleanup` first, and with `work` before resuming substantive work.
+- In a guarded run, `autonomy.ts` blocks `ask_user_question` unless the operator's prompt asked for questions (never in a subagent child), so the up-front round goes in the reply text. It also blocks git commands that destroy history or uncommitted work unless the prompt grants them (never plain `--force`). It does not catch `rm` or `checkout --`; judge those yourself. A blocked call returns a reversible form; retry with it instead of another route. For end-of-run cleanup, call `autonomy_phase` with `cleanup` first, and with `work` before resuming substantive work.
 
 ## Friction
 
@@ -35,7 +35,7 @@
 
 ## Tool hygiene
 
-- Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands in the background so they wake you on exit or a log match, and use a PR tracker for CI and reviews. Do not pass a short `timeout` to a gate or test run in foreground bash.
+- Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands in the background so they wake you on exit or a log match, and use a PR tracker for CI and reviews.
 - Read files with the harness's ranged-read tool. Pipe a command that may print more than 200 lines through `head`, `tail`, or a filter, but never filter a test, lint, or check run: run it unfiltered and search the saved output if the harness truncates it.
 
 ## Comments
@@ -43,13 +43,15 @@
 - Default to no comments. Add one only when the why is non-obvious: a hidden constraint, a subtle invariant, or behavior that would surprise a reader.
 - Do not reference external context (issues, tickets, Slack threads, PR numbers) or history ("this used to do X"); those belong in commits and PR descriptions.
 
-## Code Review
+## Code
 
-Review the branch's changeset and what it breaks. Do not expand to unrelated code unless asked.
+- Put new logic in the script or module that owns the job, or share one; do not split it across new files.
+- Follow the repo's testing rules. Do not add test-only production code they do not allow, tests that duplicate coverage or cover one-off processes, or committed one-off scripts and codemods.
+- In a review, cover the branch's changeset and what it breaks; do not expand to unrelated code unless asked.
 
 ## Pull Requests
 
-- Open a PR (`gh pr create`) when the work is verified, without waiting to be asked; the operator should not have to approve PR creation. Open it ready for review, as a draft only when the operator asks. Skip it only when the repo's own AGENTS.md or the operator says not to open PRs.
+- Open a PR when the work is verified, without waiting to be asked. Open it ready for review, as a draft only when the operator asks. Skip it only when the repo's own AGENTS.md or the operator says not to open PRs.
 - Find the repo's PR template with `~/dev/hworks/scripts/pr-template.sh`; never guess the filename. Fill in the template it prints; with none, say so in the reply.
 - Before creating a PR or pushing to a branch with an open PR, follow "Pre-push and pre-merge review" in `~/dev/hworks/skills/review-fanout/SKILL.md`. For every name the diff deletes or renames, `git grep` the old name and fix each hit.
 - Stack dependent PRs with `gh stack`, following `~/dev/hworks/references/stacked-prs.md`. PRs are dependent when one needs the other's code, when both touch the same file (tests included), or when one changes behavior the other's tests assert. Before opening sibling PRs off trunk, compare their `git diff --name-only trunk...<branch>` lists and stack any overlap.
@@ -61,7 +63,7 @@ Label unverified reasoning as inference, and ground claims about code in actual 
 ## Linear Issues
 
 - An issue states the problem, acceptance criteria, and context, not how to solve it. Frame approaches as suggestions; prescribe one only when the user asks.
-- Judge whether a PR solves an issue against the problem and acceptance criteria, not adherence to a suggested approach.
+- Judge a PR against the issue's problem and acceptance criteria, not a suggested approach.
 
 ## Commits
 
