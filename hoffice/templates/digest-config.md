@@ -8,7 +8,7 @@ baseline_lookback_days: 7
 max_lookback_days: 14
 rolling_days: 14           # Maximum number of dated digests in the rolling page.
 open_pr_when_quiet: false
-draft_pr: true            # false opens the PR ready for review; absent defaults to true.
+draft_pr: false           # true opens a draft PR; absent defaults to false (ready for review).
 
 # Running publication. Only this slug may be authorized for unattended writes.
 slug: digest-<digest>

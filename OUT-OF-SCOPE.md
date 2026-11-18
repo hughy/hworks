@@ -90,7 +90,7 @@ The hands-off rate and small-sample display rules in `factory-metrics` and `fact
 | idea | reason |
 |---|---|
 | Graph DSL and editor with forks, joins, and version migration | pi-subagents workflows and host sessions cover them |
-| In-run self-modification patches with rebase | git and `kaizen-weekly` draft PRs cover them, with evidence |
+| In-run self-modification patches with rebase | git and `kaizen-weekly` PRs cover them, with evidence |
 | Hosted runner, database, leases, and a live UI | Multi-user infrastructure |
 | Factory assistant chat | Any session in the repo already does this |
 | Agent-written memory without review | Conflicts with the evidence rule in the `README.md` Rationale |

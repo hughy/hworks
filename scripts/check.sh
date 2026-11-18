@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the full hworks check with each part as its own process, up to CHECK_JOBS at once.
-# CHECK_ROOT overrides the repo root (its scripts/, skills/*/tests/, workflows/, and extensions/ are checked).
+# CHECK_ROOT overrides the repo root (its scripts/, skills/*/tests/, workflows/, extensions/, and global/AGENTS.md are checked).
 set -u
 
 root=${CHECK_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
@@ -43,6 +43,11 @@ for f in "$root"/extensions/*.test.mts; do
   [ -e "$f" ] || continue
   add "mts:$(basename "$f" .test.mts)" "$root" "node --experimental-strip-types extensions/$(basename "$f")"
 done
+
+# global/AGENTS.md loads in every session on every harness; the cap keeps it from regrowing.
+if [ -f "$root/global/AGENTS.md" ]; then
+  add "words:global/AGENTS.md" "$root" 'n=$(wc -w < global/AGENTS.md | tr -d "[:space:]"); echo "global/AGENTS.md: $n words, cap 1800"; [ "$n" -le 1800 ]'
+fi
 
 if [ -f "$root/hoffice/scripts/check.sh" ]; then
   add "hoffice" "$root/hoffice" "scripts/check.sh"

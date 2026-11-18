@@ -1,6 +1,6 @@
 # Unattended hoffice digest
 
-One scheduled run per digest and cadence. A run renders the rolling page, publishes only when authorized, and opens a PR when material changes occur (draft by default; ready for review when `draft_pr: false`). Scheduling belongs to `<instance>/extensions/scheduler.md`: read it for the host's schedule, execution environment, authentication, and failure reporting. Without it, run `/hoffice-digest` by hand; do not invent a scheduling tool.
+One scheduled run per digest and cadence. A run renders the rolling page, publishes only when authorized, and opens a PR when material changes occur (ready for review by default; draft when `draft_pr: true`). Scheduling belongs to `<instance>/extensions/scheduler.md`: read it for the host's schedule, execution environment, authentication, and failure reporting. Without it, run `/hoffice-digest` by hand; do not invent a scheduling tool.
 
 ## Before scheduling
 

@@ -88,6 +88,17 @@ class CheckTest(unittest.TestCase):
         self.assertNotIn("linked", p.stdout)
         self.assertIn("1 of 2 parts failed", p.stdout)
 
+    def test_global_agents_word_cap(self):
+        os.mkdir(os.path.join(self.root, "global"))
+        agents = os.path.join(self.root, "global", "AGENTS.md")
+        for words, rc, mark in ((1800, 0, "ok"), (1801, 1, "FAIL")):
+            with open(agents, "w") as f:
+                f.write("word " * words)
+            p = self.run_check(1)
+            self.assertEqual(p.returncode, rc, p.stdout + p.stderr)
+            self.assertRegex(p.stdout, mark + r" +words:global/AGENTS.md")
+        self.assertIn("1801 words, cap 1800", p.stdout)
+
     def test_empty_root_fails(self):
         p = self.run_check(1)
         self.assertEqual(p.returncode, 2)

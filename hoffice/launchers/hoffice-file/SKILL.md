@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # hoffice-file
 
-Arguments: `[--pr]`. Discover the instance, branch in an isolated worktree, follow the engine's content procedure, then rebase and fast-forward push to the instance's default branch. The approved state diff is the review. With `--pr`, push a branch and open a draft PR instead. All content and external-write approval gates still apply.
+Arguments: `[--pr]`. Discover the instance, branch in an isolated worktree, follow the engine's content procedure, then rebase and fast-forward push to the instance's default branch. The approved state diff is the review. With `--pr`, push a branch and open a PR instead. All content and external-write approval gates still apply.
 
 ## 1. Find the engine, instance, and project
 
@@ -54,7 +54,7 @@ git -C "$wt" push origin "HEAD:$default_branch"
 - On rebase conflicts, show every conflicted hunk and propose a resolution keeping both sessions' content. State stays one coherent rewrite, never two appended versions. Apply only after the user's approval, then `git -C "$wt" rebase --continue`. Never drop the other side to make it pass.
 - If push is rejected because the default branch moved, fetch, rebase, and retry the fast-forward push up to three times, then stop and report. Other push failures stop immediately. Never force-push.
 
-With `--pr`, instead push `git -C "$wt" push -u origin "$branch"`, then run `gh pr create --draft --base "$default_branch"` from inside `$wt`, targeting the instance's origin and its own forge. Derive any required host setting from that origin, never a hardcoded host or the source repo. Title: the commit subject. Body: the session's `What was done` and `Decisions`, approved state change summary (or `none`), and `DOCS.md rows added`, plus ship-extension additions. Follow the extension's post-PR step if present. Do not push to the default branch in PR mode.
+With `--pr`, instead push `git -C "$wt" push -u origin "$branch"`, then run `gh pr create --base "$default_branch"` from inside `$wt`, targeting the instance's origin and its own forge. Derive any required host setting from that origin, never a hardcoded host or the source repo. Title: the commit subject. Body: the session's `What was done` and `Decisions`, approved state change summary (or `none`), and `DOCS.md rows added`, plus ship-extension additions. Follow the extension's post-PR step if present. Do not push to the default branch in PR mode.
 
 ## 5. Clean up and report
 
