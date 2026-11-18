@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 process.env.TMPDIR = mkdtempSync(join(tmpdir(), "workflow-fence-test-"));
+process.umask(0o022);
 delete process.env.PI_WORKFLOW_FENCE;
 const { default: register } = await import("./workflow-fence.ts");
 
