@@ -27,7 +27,7 @@ for f in "$root"/scripts/test_*.py; do
   m=$(basename "$f" .py)
   add "py:$m" "$root/scripts" "python3 -m unittest $m"
 done
-# A skill's own tests, so a skill directory stays self-contained. Symlinked skills (pstack) are not hworks code.
+# A skill's own tests, so a skill directory stays self-contained. A symlinked skill is not hworks code.
 for f in "$root"/skills/*/tests/test_*.py; do
   [ -e "$f" ] || continue
   s=$(basename "$(dirname "$(dirname "$f")")")

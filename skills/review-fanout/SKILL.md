@@ -24,7 +24,7 @@ Read `verdict.json` after exit. Exit 0 means a result exists. Check `ok` and the
 
 Review runs once per commit. A clean review-loop with at least one reviewer, a pre-push review, and a pre-merge review each record the range they covered, and each later review covers only commits no review has covered.
 
-1. Build the args: `../../scripts/review-range.py args "$TASK_DIR" <trunk> <effort> "<intent>" --label <pre-push|pre-merge>`. It pins the range to the current HEAD, applies interrogate's rubric, and picks the effort's reviewers (the second on the `review2` slot). For a stacked PR, pass the PR's base branch as `<trunk>`. Exit 3 means nothing to review; ship only then.
+1. Build the args: `../../scripts/review-range.py args "$TASK_DIR" <trunk> <effort> "<intent>" --label <pre-push|pre-merge>`. It pins the range to the current HEAD, applies the rubric in `../../references/review/`, and picks the effort's reviewers (the second on the `review2` slot). For a stacked PR, pass the PR's base branch as `<trunk>`. Exit 3 means nothing to review; ship only then.
 2. Launch and read the result as in Steps below.
 3. Fix verified defects through review-loop, which reviews and records the fix. A fix committed any other way needs another `args` pass.
 4. Once nothing the review raised is open, run the `record` command `args` printed on stderr. It records the head the reviewers read, so commits that fix findings stay uncovered until a review reads them.

@@ -244,7 +244,7 @@
       "gate": "python3 -m unittest && test $(git rev-list --count main..HEAD) -ge 8",
       "base": "993fff59fa5e5ae2e89402967ea77be6857389b1",
       "reviewers": 1,
-      "rubricDir": "/home/user/hworks/skills/interrogate/references",
+      "rubricDir": "/home/user/hworks/references/review",
       "cwd": "/private/tmp/g05b-c",
       "label": "unit-c"
     },

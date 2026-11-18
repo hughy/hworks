@@ -2,16 +2,15 @@
 
 Resolve hworks paths from this file's checkout. In a child brief, give absolute paths to the relevant role file, references, and principles. The shared role instructions start after the frontmatter in `../agents/<role>.md`. Map paths under `~/dev/hworks` to this checkout. Skip pi tool and model settings in role files.
 
-| Playbook says | On Codex, do |
+| hworks says | On Codex, do |
 |---|---|
-| Cursor `Task`, pi `subagent`, or `poteto-agent` | Spawn a native subagent with a brief and the hworks role below. Wait for its result before using it. |
-| `readonly: true` | Use a native subagent if the parent is read-only. In a writable session, launch a separate read-only Codex run as described below. |
+| pi `subagent` or a role name | Spawn a native subagent with a brief and the hworks role below. Wait for its result before using it. |
+| A read-only role | Use a native subagent if the parent is read-only. In a writable session, launch a separate read-only Codex run as described below. |
 | Cloud worker or worktree isolation | For each concurrent writer, create a separate branch worktree and give its absolute path in the brief. If the native spawn tool cannot set the working directory, launch Codex from that worktree instead. |
-| Cursor model slug, `pstack-models.mdc`, or pi profile slot | Use the session's Codex model or an available Codex model override. Use low reasoning for quick, the configured default for standard, and high reasoning for exhaustive. For exhaustive, run two independent reviews and report whether they used the same model. |
+| A pi profile slot or model override | Use the session's Codex model or an available Codex model override. Use low reasoning for quick, the configured default for standard, and high reasoning for exhaustive. For exhaustive, run two independent reviews and report whether they used the same model. |
 | `AskQuestion` or `contact_supervisor` | Follow shared Autonomy guidance. A child reports a blocker to the parent, which owns decisions and user questions. |
 | PR tracker or watcher | Use available PR tools or authenticated `gh`. Open draft PRs only when authorized. |
-| Cursor or pi transcript, title, slash command, or hook | Use a Codex equivalent when available. Invoke skills by name (for example, `$hughy-router`) or read the linked skill file. |
-| `/deslop`, `/no-comments`, `/unslop`, or `/technical-writing` | Apply the shared prose and comment rules. |
+| A pi transcript, title, slash command, or hook | Use a Codex equivalent when available. Invoke skills by name (for example, `$hughy-router`) or read the linked skill file. |
 
 ## Roles
 
@@ -19,8 +18,6 @@ Resolve hworks paths from this file's checkout. In a child brief, give absolute 
 - `reviewer`: inspect the pinned diff and return cited findings and what was checked.
 - `explorer`: trace a narrow question and return cited evidence. Use a native explorer when available in a read-only session.
 - `synthesizer`: combine results and surface disagreements without changing source.
-
-Use `explorer` for `how` and `why` investigators, `synthesizer` for their final pass and the `arena` judge, and `reviewer` for `interrogate` reviewers. For `arena` candidates and `swarm` workers, choose the role by what the brief allows them to write.
 
 Custom Codex role definitions are optional. They inherit the parent sandbox. Role instructions alone cannot make a writable session read-only.
 

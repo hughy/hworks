@@ -1,39 +1,33 @@
-# Reading a pstack skill on pi
+# hworks on pi
 
-pstack was written for Cursor. When a skill under `pstack/skills/` names a Cursor mechanism, substitute the pi mechanism from this table. Nothing else in the skill changes.
+hughy-router, review-loop, orchestrate, and the agent prompts name roles and generic steps. This file maps them to pi.
 
-| pstack says | On pi, do |
+| Step | On pi, do |
 |---|---|
-| `Task` tool, `subagent_type: generalPurpose` | `subagent` with `agent: explorer` (read-only exploration), `agent: reviewer` (adversarial review), or `agent: coder` (writes) |
-| `subagent_type: "poteto-agent"` | `agent: coder` (alias resolves) |
-| `subagent_type: "Comment Sicko"` | not available; the `no-comments` skill is not linked |
-| `readonly: true` | pick a read-only agent (`explorer`, `reviewer`, `synthesizer`); their tool lists have no `edit` or `write` |
-| `run_in_background: true` | `async: true` (the default); consume results at the barrier |
-| `environment: "cloud"`, `cloud_base_branch` | run locally; use `worktree: true` for isolation |
-| `model: <Cursor slug>`, slug-fallback paragraphs, `pstack-models.mdc` role lines | ignore; `scripts/models.sh` sets each role's model. Override per call only with a slot from `scripts/models.sh show`, or an available model when no slot fits |
-| `AskQuestion`, "ask the user", "pause for approval" | record the question and your chosen default in `$TASK_DIR/open-questions.md`, keep going, and ask at the end of the final reply; large work with the operator present may get one up-front round in the reply text (`global/AGENTS.md`, Autonomy; `autonomy.ts` blocks `ask_user_question` only in long-running autonomous runs: orchestrate, `--unattended`, and subagent children; in an interactive hughy-router run, use `ask_user_question` for choices that are the operator's) |
-| `pstack/skills/poteto-mode/scripts/watch-pr/watch-pr`, `origin pr view --checks`, `origin pr thread list`, `gh api graphql` for review threads | the PR-tracking tool for check state and thread excerpts; the adapter's reader for full review-thread bodies |
-| `/loop`, watcher heartbeat | `bg_wait`, or a background-process or PR-tracking tool when the harness has one |
-| `agent-transcripts/`, `~/.cursor/projects/*/` | not available; skills that mine transcripts (`recall`, `reflect`, `automate-me`) are not linked |
-| `/deslop`, `/no-comments`, `/unslop`, `/technical-writing`, `create-skill` | skip the step; the global `AGENTS.md` owns prose and comments |
-| "open every PR ready, never as a draft" | open as a draft (`gh pr create --draft`) |
-| `gt`, Graphite, Origin CLI | not used; stay on `gh` |
+| Spawn a role | `subagent` with `agent: explorer` (read-only exploration), `reviewer` (adversarial review), `synthesizer` (judgment over explorer outputs), or `coder` (writes) |
+| A read-only child | `explorer`, `reviewer`, or `synthesizer`; their tool lists have no `edit` or `write` |
+| A background child | `async: true` (the default); consume results at the barrier |
+| Isolation for a writer | `worktree: true` |
+| A model for a role | `scripts/models.sh` sets each role's model. Override per call only with a slot from `scripts/models.sh show`, or an available model when no slot fits |
+| A question for the operator | record the question and your chosen default in `$TASK_DIR/open-questions.md`, keep going, and ask at the end of the final reply; large work with the operator present may get one up-front round in the reply text (`global/AGENTS.md`, Autonomy; `autonomy.ts` blocks `ask_user_question` only in long-running autonomous runs: orchestrate, `--unattended`, and subagent children; in an interactive hughy-router run, use `ask_user_question` for choices that are the operator's) |
+| PR check state and review threads | the PR-tracking tool for check state and thread excerpts; the adapter's reader for full review-thread bodies |
+| Waiting on a run | `bg_wait`, or a background-process or PR-tracking tool when the harness has one |
 
-## Role to agent
+## Roles
 
-| pstack role line | hworks agent |
+| Work | Agent |
 |---|---|
-| `how explorer`, `why investigators`, `swarm workers`, `arena runners` (cheap seats) | `explorer` |
-| `how explainer`, `why synthesizer`, `arena cross-judge`, `judgment and prose` | `synthesizer` |
-| `interrogate reviewers` | `reviewer`, two runs, the second on a different provider |
-| `feature, refactoring`, `bug-fix`, `perf-issue`, `hillclimb` | `coder` |
-| `hardest tasks` | `coder` with a per-call `model` override |
+| One slice of an investigation | `explorer` |
+| Judgment and prose over explorer outputs | `synthesizer` |
+| Review | `reviewer`; exhaustive effort runs two, the second on a different provider |
+| Feature, fix, refactor, performance | `coder` |
+| The hardest changes | `coder` with a per-call `model` override |
 
 Model names live only in `models.conf`, `models.d/*.conf`, and the pi settings overrides that `scripts/models.sh` writes. `scripts/models.sh show` prints the active profile, each role's model, and its slots; `scripts/models.sh <profile>` applies a profile.
 
 ## Verification
 
-Give every `coder` run a `gate` (the test command, typecheck, or the repo's verify skill). The gate result is the verification. The agent's summary is a report. A gate that did not run is not a pass, and tests it skipped for a missing build tag or env var did not run. Where a pstack skill or playbook asks for a failing-test commit before the fix, the child instead shows the test failing with the fix reverted; every commit passes the gate.
+Give every `coder` run a `gate` (the test command, typecheck, or the repo's verify skill). The gate result is the verification. The agent's summary is a report. A gate that did not run is not a pass, and tests it skipped for a missing build tag or env var did not run. A fix shows its new test failing with the fix reverted instead of committing a failing test first; every commit passes the gate.
 
 ## Long commands
 
@@ -42,7 +36,3 @@ A child whose tools include both `bash` and `subagent_command` can monitor a lon
 ## Workflow scripts
 
 `subagent({ workflow: true })` runs the one fenced block tagged exactly `js workflow` in the same reply; to run a file, such as `workflows/review-loop.js`, pass its absolute path as `workflow`. `extensions/workflow-fence.ts` runs a reply's single untagged `js` block from a temp file and blocks other untagged shapes with this redirect.
-
-## Enabling more of pstack
-
-All pstack principles are linked into `skills/` for on-demand reference. Follow hughy-router's principle-loading policy and hworks overrides; availability does not add automatic triggers. `scripts/skill.sh enable <name>` links another pstack skill into `skills/`. Playbooks need no enabling; reference them by path from `hughy-router`.

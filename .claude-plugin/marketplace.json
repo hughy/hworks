@@ -4,12 +4,12 @@
     "name": "hworks"
   },
   "metadata": {
-    "description": "hworks for Claude Code and Codex. Re-exports the pstack skills it keeps."
+    "description": "hworks skills for Claude Code and Codex."
   },
   "plugins": [
     {
       "name": "hworks",
-      "description": "A pruned personal layer over pstack.",
+      "description": "A personal agent layer.",
       "source": "./",
       "category": "Productivity"
     }
