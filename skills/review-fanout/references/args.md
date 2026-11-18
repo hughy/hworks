@@ -51,7 +51,7 @@ Two open PRs, each in its own worktree, plus a plan:
 
 ```json
 {
-  "task": "Apply the rubric at /abs/hworks/skills/interrogate/references/rubric.md.",
+  "task": "Apply the rubric at /abs/hworks/references/review/rubric.md.",
   "targets": [
     { "key": "pr-41", "cwd": "/abs/wt/pr-41", "base": "4f1c...40 hex", "task": "PR 41 adds retry with backoff to the fetch client. Check the retry bound and the tests." },
     { "key": "pr-42", "cwd": "/abs/wt/pr-42", "base": "9ab0...40 hex", "task": "PR 42 renames the config loader. Check every caller of the old name." },

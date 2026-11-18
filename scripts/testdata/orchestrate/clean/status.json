@@ -99,7 +99,7 @@
       "gate": "python3 -m unittest",
       "base": "main",
       "reviewers": 1,
-      "rubricDir": "/home/user/hworks/skills/interrogate/references",
+      "rubricDir": "/home/user/hworks/references/review",
       "label": "smoke"
     },
     "argsDigest": "bce86b9149c4c718e1f2df2af62f08ff8de6bc623a916a9581dbdb85bad5e988",

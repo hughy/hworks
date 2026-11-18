@@ -17,7 +17,7 @@ base    prints the commit to review from: the furthest commit on HEAD's first-pa
         covered when the diff from the current point to it is byte-identical to a recorded
         diff, or empty. Exit 3 when HEAD is covered (nothing new to review).
 args    prints the args JSON for workflows/review-fanout.js over the uncovered commits, pinned to
-        the current HEAD, with the interrogate rubric and the effort's reviewers: standard runs
+        the current HEAD, with the review rubric and the effort's reviewers: standard runs
         the reviewer role, exhaustive adds a second on the review2 slot. Prints the matching
         record command on stderr. Exit 3 when there is nothing to review: quick effort, or HEAD
         covered.
@@ -207,7 +207,7 @@ def build_args(task_dir, trunk, effort, intent, cwd, label):
         reviewers.append(second)
     scope = (f"Review only the commits after {base[:12]}: the commits before it, back to the merge-base "
              f"{mb[:12]}, already passed review." if base != mb else "Review the whole branch.")
-    rubric = os.path.join(ROOT, "skills", "interrogate", "references")
+    rubric = os.path.join(ROOT, "references", "review")
     pre_read = (f"Pre-read: run `python3 {os.path.join(ROOT, 'scripts', 'review-pre-read.py')} {base} {head}` in your cwd "
                 "and read its output before the diff. It is a map of the change: removed or renamed names with their "
                 "surviving references, related tests, and the diff. Verify a lead there from the code; do not report "

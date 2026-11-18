@@ -115,4 +115,4 @@ node -e '
   if (taskDir) args.taskDir = taskDir;
   if (gateTimeout) args.gateTimeoutMs = Number(gateTimeout);
   process.stdout.write(JSON.stringify(args) + "\n");
-' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/skills/interrogate/references" "$task_dir" "$gate_timeout" "$root/scripts/review-pre-read.py" "$root/scripts/heavy.py"
+' "$brief" "$gate" "$base_sha" "$reviewers" "$review2" "$coder_model" "$worktree" "$root/references/review" "$task_dir" "$gate_timeout" "$root/scripts/review-pre-read.py" "$root/scripts/heavy.py"
