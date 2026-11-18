@@ -1,6 +1,6 @@
 # hworks on pi
 
-hughy-router, review-loop, orchestrate, and the agent prompts name roles and generic steps. This file maps them to pi.
+review-loop, review-fanout, orchestrate, and the agent prompts name roles and generic steps. This file maps them to pi. Then read every file in `adapters/local/` if it exists (in a linked worktree without one, the main checkout's): local adapters map these terms to one harness's tools and win where they conflict.
 
 | Step | On pi, do |
 |---|---|
@@ -9,7 +9,7 @@ hughy-router, review-loop, orchestrate, and the agent prompts name roles and gen
 | A background child | `async: true` (the default); consume results at the barrier |
 | Isolation for a writer | `worktree: true` |
 | A model for a role | `scripts/models.sh` sets each role's model. Override per call only with a slot from `scripts/models.sh show`, or an available model when no slot fits |
-| A question for the operator | record the question and your chosen default in `$TASK_DIR/open-questions.md`, keep going, and ask at the end of the final reply; large work with the operator present may get one up-front round in the reply text (`global/AGENTS.md`, Autonomy; `autonomy.ts` blocks `ask_user_question` only in long-running autonomous runs: orchestrate, `--unattended`, and subagent children; in an interactive hughy-router run, use `ask_user_question` for choices that are the operator's) |
+| A question for the operator | record the question and your chosen default in `$TASK_DIR/open-questions.md`, keep going, and ask at the end of the final reply; large work with the operator present may get one up-front round in the reply text (`global/AGENTS.md`, Autonomy; `autonomy.ts` blocks `ask_user_question` only in long-running autonomous runs: orchestrate, `--unattended`, and subagent children; in an interactive session, use `ask_user_question` for choices that are the operator's) |
 | PR check state and review threads | the PR-tracking tool for check state and thread excerpts; the adapter's reader for full review-thread bodies |
 | Waiting on a run | `bg_wait`, or a background-process or PR-tracking tool when the harness has one |
 

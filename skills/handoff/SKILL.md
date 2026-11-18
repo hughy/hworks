@@ -37,7 +37,7 @@ To: <target repo path>, branch <name, or "new from <base>">
 
 ## Brief
 Goal: <the outcome, and the finding or request behind it>
-Effort: <quick, standard, or exhaustive>: <its phrase from hughy-router>
+Effort: <quick, standard, or exhaustive>: <its phrase: quick "One pass; stop at the first working fix.", standard "Be sure of the cause before you change code.", exhaustive "Spend what it takes; iterate until it holds up to review.">
 Verify: <the gate command, and the result that proves the goal>
 
 ## Settled
@@ -53,7 +53,7 @@ Verify: <the gate command, and the result that proves the goal>
 - <path or URL>: <what it holds>
 
 ## Skills
-- `/skill:hughy-router`, plus any skill the task needs
+- `/skill:review-loop` for a code change, plus any skill the task needs
 ```
 
 Redact secrets, tokens, and personal identifiers as `<REDACTED>`. Done when every section has content or "none", every pointer resolves, and nothing secret remains.

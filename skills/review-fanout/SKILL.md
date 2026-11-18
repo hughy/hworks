@@ -22,14 +22,22 @@ Read `verdict.json` after exit. Exit 0 means a result exists. Check `ok` and the
 
 ## Pre-push and pre-merge review
 
+Before `gh pr create`, and before every push to a branch with an open PR (addressing feedback or tidying an open PR counts):
+
+- The gate and the project's push gate, when it names one, pass on the head being pushed. Rerun both after any merge of the base into the branch.
+- The pre-push review below runs, unless step 1 exits 3 or the push only syncs a reviewed branch with its base (`../../references/split-and-sync.md`).
+- `../../scripts/review-pre-read.py <base> <head>` runs, and every surviving reference it lists is fixed or justified.
+
+Quick effort skips the review, never the gates or the pre-read. Say in the reply which of these ran and their results.
+
 Review runs once per commit. A clean review-loop with at least one reviewer, a pre-push review, and a pre-merge review each record the range they covered, and each later review covers only commits no review has covered.
 
-1. Build the args: `../../scripts/review-range.py args "$TASK_DIR" <trunk> <effort> "<intent>" --label <pre-push|pre-merge>`. It pins the range to the current HEAD, applies the rubric in `../../references/review/`, and picks the effort's reviewers (the second on the `review2` slot). For a stacked PR, pass the PR's base branch as `<trunk>`. Exit 3 means nothing to review; ship only then.
+1. Build the args: `../../scripts/review-range.py args "$TASK_DIR" <trunk> <effort> "<intent>" --label <pre-push|pre-merge>`. It pins the range to the current HEAD, applies the rubric in `../../references/review/`, and picks the effort's reviewers: none for quick, one for standard, two for exhaustive (the second on the `review2` slot, a different provider when the profile sets one). For a stacked PR, pass the PR's base branch as `<trunk>`. Exit 3 means nothing to review; ship only then.
 2. Launch and read the result as in Steps below.
 3. Fix verified defects through review-loop, which reviews and records the fix. A fix committed any other way needs another `args` pass.
 4. Once nothing the review raised is open, run the `record` command `args` printed on stderr. It records the head the reviewers read, so commits that fix findings stay uncovered until a review reads them.
 
-A rebase or base merge keeps coverage only when it replays a byte-identical diff, as after merging trunk once a squash-merged parent has landed. A sync with the base that touches the branch's files is recorded instead of reviewed, per `../hughy-router/references/split-and-sync.md`. `skills/hughy-router/SKILL.md` owns when this runs.
+A rebase or base merge keeps coverage only when it replays a byte-identical diff, as after merging trunk once a squash-merged parent has landed. A sync with the base that touches the branch's files is recorded instead of reviewed, per `../../references/split-and-sync.md`.
 
 ## Steps
 

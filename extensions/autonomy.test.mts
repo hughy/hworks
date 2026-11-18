@@ -6,7 +6,6 @@ const logPath = join(mkdtempSync(join(tmpdir(), "autonomy-test-")), "blockers.js
 process.env.HWORKS_BLOCKERS_LOG = logPath;
 delete process.env.PI_AUTONOMY;
 delete process.env.PI_SUBAGENT_CHILD;
-delete process.env.PI_HUGHY_MODE;
 const { classify, grantsFrom, guardedSkill, isOrchestrateCall, isUnattended, default: register } = await import("./autonomy.ts");
 const block = ["git reset --hard HEAD~1","git -C repo reset --hard","git clean -fdx","git push --force origin feat","git push -f","git push --force-with-lease origin feat","git push origin +feat","git branch -D old","git stash drop","git worktree remove --force ../wt","DROP TABLE users;","kubectl delete pod x","terraform apply","psql -c \"drop table users\"","cd \"my repo\" && git reset --hard","python3 - <<'EOF'\nprint(1)\nEOF\ngit reset --hard","git commit -m 'wip' && git push --force origin x"];
 const allow = ["git worktree remove --force /tmp/wt","rm -rf build","git checkout -- src/a.ts","rm -rf /tmp/foo","rm -f $TMPDIR/x","rm ~/.local/state/agent-tasks/t/a.md","find /tmp/x -delete","git rm src/old.ts","git status","git push origin feat","git restore --staged a.ts","git checkout -b new","git checkout main","git branch -d merged","git stash push","git reset HEAD~1","git reset --soft HEAD~1","grep -rn 'rm -rf' .","npm run format","git commit -m 'remove dead code'","echo terraform plan","agent -p \"run git reset --hard and report\"","git commit -m 'docs: never git reset --hard'","python3 - <<'EOF'\ns = 'never `git reset --hard`'\nEOF","cat > f.md <<EOF\nuse git push --force rarely\nEOF\necho ok","grep -n \"git-reset-hard\\|reset --hard\" log"];
@@ -159,7 +158,7 @@ expectBlock("session_start clears grants", "bash", { command: "git push --force-
 
 // Auto mode (the default): inactive until a guarded run starts, then active for the rest of the session.
 check("guardedSkill", guardedSkill('<skill name="orchestrate" location="/x">\nbody\n</skill>\n\ngo') === "orchestrate"
-  && guardedSkill('<skill name="hughy-router" location="/x">b</skill>') === null
+  && guardedSkill('<skill name="review-loop" location="/x">b</skill>') === null
   && guardedSkill('<skill name="edit-prose" location="/x">orchestrate</skill>') === null
   && guardedSkill("/skill:orchestrate") === null);
 for (const c of ['python3 $O --store "$S" init --repo .', "python3 ~/dev/hworks/scripts/orchestrate.py --store /t/s status", 'python3 "$O" --store x next'])
@@ -202,8 +201,7 @@ const interactive = (setup: (p: any, c: any) => void) => {
   const p = fakePi(); const c = ctxFor(p.branch); register(p); p.emit("session_start", {}, c); setup(p, c);
   return !p.emit("tool_call", { toolName: "ask_user_question", input: ask }, c)?.block && !p.emit("tool_call", { toolName: "bash", input: destructive }, c)?.block;
 };
-check("hughy-mode stays inactive", interactive((p, c) => { p.branch.push({ type: "custom", customType: "hughy-mode", data: { enabled: true } }); user(p, c, "fix the bug"); }));
-check("hughy-router stays inactive", interactive((p, c) => user(p, c, '<skill name="hughy-router" location="/x">\nbody\n</skill>\n\nfix it')));
+check("review-loop stays inactive", interactive((p, c) => user(p, c, '<skill name="review-loop" location="/x">\nbody\n</skill>\n\nfix it')));
 // An operator who asks for questions in a guarded run gets ask_user_question; destructive commands stay blocked.
 const asked = autoTest("orchestrate, then ask me", (p, c) => user(p, c, '<skill name="orchestrate" location="/x">\nbody\n</skill>\n\ndrive ENG-1'));
 user(asked.p, asked.c, "use ask_user_question for open questions");

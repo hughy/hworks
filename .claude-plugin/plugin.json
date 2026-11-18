@@ -1,6 +1,6 @@
 {
   "name": "hworks",
-  "description": "A personal agent layer: a short router and its skills. Agent roles load on pi only.",
+  "description": "A personal agent layer: skills and review workflows. Agent roles load on pi only.",
   "author": { "name": "Hugh Cunningham" },
   "license": "MIT"
 }

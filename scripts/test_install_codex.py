@@ -47,6 +47,17 @@ class InstallCodexTest(unittest.TestCase):
             self.assertEqual((skill / "SKILL.md").resolve(), shared / "SKILL.md")
             self.assertEqual((skill / "reference.md").read_text(), "Reference")
 
+            removed = home / ".agents/skills/removed"
+            removed.symlink_to(clone / "skills/removed")
+            foreign = home / ".agents/skills/foreign"
+            foreign.symlink_to(home / "elsewhere")
+            self.assertIn("stale", run(1, "--check"))
+            self.assertTrue(removed.is_symlink())
+            run(0)
+            self.assertFalse(removed.is_symlink())
+            self.assertTrue(foreign.is_symlink())
+            foreign.unlink()
+
             skill.unlink()
             skill.symlink_to(home / "other")
             self.assertIn("differs", run(1))

@@ -1,6 +1,6 @@
 # Untangle a repo
 
-Read this from the hughy-router Investigate route when asked what to refactor across a whole repo or subsystem, or to untangle one. The deliverable is a decision log of ranked fixes split into units; this phase changes no code. The Build route ships each unit, and Long run drives the program.
+Read this when asked what to refactor across a whole repo or subsystem, or to untangle one. The deliverable is a decision log of ranked fixes split into units; this phase changes no code. Each unit then ships as a review-loop change, and `orchestrate` or a run-until-done loop drives the program.
 
 Adapted from `untangle-codebase` in caldoai/skills, paraphrased (its license is unstated).
 
@@ -36,7 +36,7 @@ Write each into `$TASK_DIR/untangle/` before reading code, so explorers start fr
   ```
 
 - Special-case census: counts by file of swallowed errors, sleeps, skipped tests, and lint suppressions, production and test files counted apart, e.g. `rg -c 'time\.Sleep|//nolint|t\.Skip\(|_ = err\b' -g '!*_test.go'`. Keep the production total as a regression guard; its hits are often deliberate, so fixes may not lower it. Words like `retry` match prose and are noise.
-- Agents' decision log: `../../../scripts/blockers.sh --log --cwd-match <repo>`.
+- Agents' decision log: `../scripts/blockers.sh --log --cwd-match <repo>`.
 
 Done when every file exists, or the reply says which source was unavailable.
 
@@ -62,7 +62,7 @@ Done when every problem kept in step 3 sits under a fix or is dropped with a rea
 
 ## 5. Cut units
 
-Split each fix into units. A unit merges alone, keeps trunk passing the gate, and pins behavior before structure moves. Size PRs by the Build route's one-PR-or-stack rule. Subtraction units go first. Units of one fix that cannot land apart form a stack.
+Split each fix into units. A unit merges alone, keeps trunk passing the gate, and pins behavior before structure moves. Size PRs by the one-PR-or-stack rule in `split-and-sync.md`. Subtraction units go first. Units of one fix that cannot land apart form a stack.
 
 State the program's exit predicate in checkable terms: a search per fix that must return nothing (a named import edge, a deleted symbol), new tests that pass, and the census not above its baseline. Then plan the issues with an issue-planning skill when one is installed, or draft them in the reply, one per fix with its units listed.
 
