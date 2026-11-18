@@ -106,7 +106,6 @@ my-overlay/
   hooks/                    git hooks for your hworks clone, with a private deny list
   hoffice/                  a hoffice instance for project memory (optional)
   scripts/install.sh        links the files above into place
-  scripts/check.sh          the overlay's gate
 ```
 
 `install.sh` links `models.d/<name>.conf` into `<hworks>/models.d/` and `adapters/<harness>.md` into `<hworks>/adapters/local/`. It also links each skill into a skills directory that your harness loads, or you add `my-overlay/skills` to `skills` in pi settings. Read the hworks path from an environment variable with a default, and refuse to overwrite a destination that is not a symlink. The overlay depends on hworks. hworks never depends on the overlay.
@@ -115,7 +114,7 @@ The other parts are for content that must stay out of public hworks:
 
 - `global/AGENTS.md`: `install.sh` links it to `~/AGENTS.md`. pi loads that file after `~/.pi/agent/AGENTS.md` in any directory under `~`; Claude Code and Codex do not load it. Keep rules that name private systems here, not in hworks' `global/AGENTS.md`.
 - `hooks/`: a deny list of private terms cannot live in hworks, because the list would leak them itself. `install.sh` links each hook into `<hworks>/.git/hooks/`, where it scans commits and pushes to hworks. Git ignores `.git/hooks/` while `core.hooksPath` is set, so leave it unset for that clone or point it at the overlay's `hooks/`.
-- `hoffice/`: a directory instance whose projects, repo cards, and extension files may name private systems. Create it as `hoffice/README.md` describes under "New instance". `install.sh` registers it by running `<hworks>/hoffice/scripts/install.sh <overlay>/hoffice` when that script exists, and `scripts/check.sh` runs `<hworks>/hoffice/scripts/check-instance.sh hoffice`.
+- `hoffice/`: a directory instance whose projects, repo cards, and extension files may name private systems. Create it as `hoffice/README.md` describes under "New instance". `install.sh` registers it by running `<hworks>/hoffice/scripts/install.sh <overlay>/hoffice` when that script exists. Run `<hworks>/hoffice/scripts/check-instance.sh hoffice` to validate it.
 
 Set up a machine in this order, then start a new session:
 
@@ -152,7 +151,7 @@ An adapter can also override rows in `adapters/pi.md`, or add rules for its envi
 
 ## Check a change
 
-After you change hworks, run `scripts/check.sh`, which runs the Python script tests, the workflow tests, and the extension tests. Then:
+After you change hworks, run the tests that `AGENTS.md` names for the parts you changed. An overlay brings its own tests, or none. Then:
 
 - Confirm that each skill's frontmatter `name` matches its directory name.
 - Run `scripts/models.sh show` and confirm that each role has the model you expect.
