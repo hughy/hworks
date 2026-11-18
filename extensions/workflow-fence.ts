@@ -103,10 +103,10 @@ export function handleToolCall(event: any, ctx: any): { block: true; reason: str
     const d = decide(content);
     if (d.action === "block") return { block: true, reason: d.reason };
     if (d.action !== "rewrite") return;
-    const dir = join(tmpdir(), "hworks-workflows");
-    mkdirSync(dir, { recursive: true });
+    const dir = join(tmpdir(), `hworks-workflows-${process.getuid?.() ?? "user"}`);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
     const file = join(dir, `${String(event.toolCallId).replace(/[^A-Za-z0-9_-]/g, "_")}.js`);
-    writeFileSync(file, d.script);
+    writeFileSync(file, d.script, { mode: 0o600 });
     event.input.workflow = file;
   } catch {
     // A throwing tool_call handler blocks the tool; a failed repair must leave the call as it was.

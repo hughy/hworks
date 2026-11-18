@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 process.env.TMPDIR = mkdtempSync(join(tmpdir(), "workflow-fence-test-"));
 delete process.env.PI_WORKFLOW_FENCE;
@@ -43,6 +43,7 @@ function run(text: string, input: any, toolName = "subagent", id = `call-${n}`) 
   check("plain js rewritten", r === undefined && typeof path === "string" && path.startsWith("/") && existsSync(path) && readFileSync(path, "utf8") === body, { r, path });
   check("plain js keeps args", input.args?.a === 1);
   check("plain js file under tmp", typeof path === "string" && path.startsWith(join(process.env.TMPDIR!, "hworks-workflows")) && !path.includes("|"), path);
+  check("plain js staged privately", typeof path === "string" && (statSync(path).mode & 0o077) === 0 && (statSync(dirname(path)).mode & 0o077) === 0, path);
 }
 {
   const { r, input } = run(`${F}javascript\n${body}\n${F}`, { workflow: "true" });
