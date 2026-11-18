@@ -2,7 +2,7 @@
 
 ## Planning
 
-- Settle implementation details, constraints, and tradeoffs yourself from the code, docs, or a quick experiment, and record each decision in the plan as an assumption the user can overturn. If running something would answer a question, run it; never hand the operator a check you could run. Product direction, preferences, unstated requirements, and one-way-door choices are the operator's; Autonomy says when to ask.
+- Settle implementation details, constraints, and tradeoffs yourself from the code, docs, or a quick experiment, and record each decision in the plan as an assumption the user can overturn. If running something would answer a question, run it; never hand the operator a check you could run. Product direction, preferences, unstated requirements, and one-way-door choices are the operator's; Autonomy says when to ask. Offer options with a recommendation first.
 - Never write plans, progress, or review notes into a repo. Scratch files go in `$TASK_DIR`, the directory `~/dev/hworks/scripts/task-dir.sh <task-slug>` prints from inside the repo you are working on. Resolve it once at the start of a task and reuse that path for the whole task, even after switching branches or worktrees: `task-dir.sh` keys the path by branch. Reuse the slug when you resume a task.
 - Keep only notes in `$TASK_DIR`. Put clones, checkouts, dependency installs, build output, caches, and media in a `mktemp -d` dir under `$TMPDIR`. Never create dirs directly under the task root.
 
@@ -36,17 +36,17 @@
 ## Tool hygiene
 
 - Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands in the background so they wake you on exit or a log match, and use a PR tracker for CI and reviews.
-- Read files with the harness's ranged-read tool. Pipe a command that may print more than 200 lines through `head`, `tail`, or a filter, but never filter a test, lint, or check run: run it unfiltered and search the saved output if the harness truncates it.
+- Read files with the harness's ranged-read tool. Pipe a command that may print more than 200 lines through `head`, `tail`, or a filter, but never filter a test, lint, or check run: run it unfiltered and search the saved output.
 
 ## Comments
 
 - Default to no comments. Add one only when the why is non-obvious: a hidden constraint, a subtle invariant, or behavior that would surprise a reader.
-- Do not reference external context (issues, tickets, Slack threads, PR numbers) or history ("this used to do X"); those belong in commits and PR descriptions.
+- Do not reference external context (issues, tickets, Slack threads, PR numbers) or history ("this used to do X").
 
 ## Code
 
 - Put new logic in the script or module that owns the job, or share one; do not split it across new files.
-- Follow the repo's testing rules. Do not add test-only production code they do not allow, tests that duplicate coverage or cover one-off processes, or committed one-off scripts and codemods.
+- Follow the repo's testing rules. Do not add test-only production code they do not allow, tests that duplicate coverage, cover one-off processes, or check a script whose own run or dry run shows the failure as fast, or committed one-off scripts and codemods.
 - In a review, cover the branch's changeset and what it breaks; do not expand to unrelated code unless asked.
 
 ## Pull Requests
@@ -58,7 +58,7 @@
 
 ## Accuracy & Grounding
 
-Label unverified reasoning as inference, and ground claims about code in actual reads, PRs, or docs. Cite where each claim came from (file:line, PR, or doc); an unsourced "I checked" is not grounding. When the target repo, branch, or ticket is ambiguous, ask before analyzing. Check a performance number against `~/dev/hworks/references/benchmark-checklist.md` before reporting or acting on it.
+Label unverified reasoning as inference, and ground claims about code in actual reads, PRs, or docs. Cite where each claim came from (file:line, PR, or doc). When the target repo, branch, or ticket is ambiguous, ask before analyzing. Check a performance number against `~/dev/hworks/references/benchmark-checklist.md` before reporting or acting on it.
 
 ## Linear Issues
 
