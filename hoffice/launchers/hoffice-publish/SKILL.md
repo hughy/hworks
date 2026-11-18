@@ -1,6 +1,6 @@
 ---
 name: hoffice-publish
-description: Publish a project document and commit its verified publication record to the selected instance; use --pr for a draft PR. Use when the user says /hoffice-publish, "publish this document", "share this project document", or "update the published document". Runs only when the user asks to publish, never proactively.
+description: Publish a project document and commit its verified publication record to the selected instance; use --pr to open a PR. Use when the user says /hoffice-publish, "publish this document", "share this project document", or "update the published document". Runs only when the user asks to publish, never proactively.
 disable-model-invocation: true
 ---
 
@@ -30,7 +30,7 @@ Read `<engine>/procedures/publish/SKILL.md` and follow it with `$wt_instance` as
 
 Show `git -C "$wt" status` and the full repository diff; verify only the intended published source and DOCS.md inside `$wt_instance` changed or are staged. Stage those files explicitly with `git -C "$wt_instance" add -- <instance-relative files>`, then commit `publish: <project> <title> v<version>`, adding only the instance's ship requirements.
 
-With `--pr`, push the branch and open a draft PR against the default target, using the instance remote without a hardcoded host. Include URL, audience, first publication or replacement, and change summary. Follow `extensions/ship.md` after opening it, if present.
+With `--pr`, push the branch and open a PR against the default target, using the instance remote without a hardcoded host. Include URL, audience, first publication or replacement, and change summary. Follow `extensions/ship.md` after opening it, if present.
 
 Otherwise fetch origin, merge the updated default base into the worktree branch without rewriting commits, and push `HEAD:<default target>` only if fast-forward. On conflicts stop for the user, retaining both sides' information. On a non-fast-forward rejection, fetch and merge again up to three times, then stop. Never force-push. Report any sharing step from the publisher extension.
 

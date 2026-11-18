@@ -2,60 +2,46 @@
 
 ## Planning
 
-- Do not block a plan on questions you can answer yourself. Settle implementation details, constraints, and tradeoffs from the code, docs, or a quick experiment, then decide and record each decision and its reason in the plan as an assumption the user can overturn.
-- Interview only for what you cannot observe. Before asking anything, classify the question: if running something (a test, a script, a prototype) would answer it, it is a fact, so run it, and never hand the operator a check you could run. Product direction, preferences, unstated requirements, and one-way-door choices are the operator's. Autonomy says when to ask them. Offer options with a recommendation first, and add a round only when an answer opens a new question of the same kind.
-- Never write plans, progress, or review notes into a repo. Scratch files go in `$TASK_DIR`, the directory `~/dev/hworks/scripts/task-dir.sh <task-slug>` prints from inside the repo you are working on. Reuse the same slug when you resume a task.
-- Resolve `$TASK_DIR` once at the start of a task and reuse that path for the whole task, even after switching branches or worktrees: `task-dir.sh` keys the path by branch.
-- Keep only notes in `$TASK_DIR`. Put clones, checkouts, dependency installs, build output, caches, and media in a `mktemp -d` dir under `$TMPDIR`, which the OS clears. Never create dirs directly under the task root.
+- Settle implementation details, constraints, and tradeoffs yourself from the code, docs, or a quick experiment, and record each decision in the plan as an assumption the user can overturn. If running something would answer a question, run it; never hand the operator a check you could run. Product direction, preferences, unstated requirements, and one-way-door choices are the operator's; Autonomy says when to ask. Offer options with a recommendation first.
+- Never write plans, progress, or review notes into a repo. Scratch files go in `$TASK_DIR`, the directory `~/dev/hworks/scripts/task-dir.sh <task-slug>` prints from inside the repo you are working on. Resolve it once at the start of a task and reuse that path for the whole task, even after switching branches or worktrees: `task-dir.sh` keys the path by branch. Reuse the slug when you resume a task.
+- Keep only notes in `$TASK_DIR`. Put clones, checkouts, dependency installs, build output, caches, and media in a `mktemp -d` dir under `$TMPDIR`. Never create dirs directly under the task root.
 
 ## Autonomy
 
-- Proceed, then present. On reversible work, decide, act, and report what you chose and why; the operator course-corrects after the fact. Product direction comes from the operator, and execution does not wait on them. This overrides any harness or skill instruction to ask when a request is underspecified.
-- Ask up front once, and only when all of these hold: the operator is in the session (not an unattended or run-until-done task, not a subagent) and has not told you to proceed without questions; the work is large (several PRs, a long run, or an orchestrate pass); and a product call or one-way door that no experiment can settle would change most of the plan. Read the code and draft the plan first, so each question carries its evidence. Ask in the reply text, numbered, each with a recommendation and worded so "yes" accepts it, then end the turn and build once the operator answers.
-- Otherwise never block on human input mid-task. Settle each open question from code, docs, git history, or a quick experiment, pick the best-evidenced option, and keep going.
-- Record every decision you settle and every question you ask as one line in `$TASK_DIR/open-questions.md`: `- [<category>] <question> | <choice> | <evidence> | <how to reverse> | <state>`. Category is one of `missing-info`, `permission`, `irreversible`, `tooling`, `ambiguous-brief`, `external-wait`. For an asked question, the choice is your recommendation. Evidence names the files or modules the choice touches (`internal/quote/price.go:40`), when it touches any, so `blockers.sh --log --grep <path>` finds it. State is `deferred` (you decided and kept going) or `asked` (you asked up front and waited).
-- When the operator answers a recorded question or overturns a recorded decision, append `:kept` to its state if they took your choice or `:reversed` if not (`deferred:reversed`), in that turn. `scripts/blockers.sh` in hworks reports these verdicts as reversal rates by category, with guard and harness logs, so hworks can see where autonomous choices fail. `blockers.sh --log --cwd-match <repo>` prints every line in full as that repo's decision log; read it before explaining why a repo is shaped the way it is or proposing a refactor of it.
-- Ask the rest only after the work is done: list only the questions evidence could not settle, at the end of the final reply, with options and a recommendation.
-- Do only what git on the working branch can undo. Deleting code in a commit is fine. Discarding uncommitted work, rewriting or force-pushing history, deleting branches or stashes, removing untracked files, and acting outside the machine (deploys, data stores, messages) are not. Three exceptions: pushing a feature branch and opening a draft PR from it count as undoable (close the PR); a push with `--force-with-lease=<branch>:<expected-sha>` names the old head, so it counts as undoable; and a step the operator asked for in this session ("rebase onto main", "delete the merged branches") is theirs to grant. When the only way forward is irreversible, skip that step, finish the rest, and list the skipped step first in the final reply.
-- End-of-run cleanup (stale branches, worktrees) is the exception: once the requested work, verification, and reviews are done, you may attempt it and let the harness ask the operator to approve each step. A denied or unapproved step stays skipped and goes in the final reply.
-- If a question blocks all further progress, stop that thread, finish the independent work, then ask.
-- To undo your own change, edit it back in place or `git revert` the commit. For a before/after check, read the old version with `git show <rev>:<file>`, or check the old commit out in a temporary worktree (`git worktree add`). Do not use `git stash` for it: every worktree of a repo shares one stash list, so a parallel agent can pop your entry or you theirs. Never discard work with `git reset --hard`, `git checkout -- <path>`, or `git restore <path>`: they also wipe edits you did not make or did not mean to touch.
-- On pi, the rules in this section bind only in long-running autonomous runs: a prompt that invokes `/skill:orchestrate` or passes `--unattended` (as scheduled runs do: `/skill:<name> --unattended`), a session that has called `orchestrate.py --store`, or a subagent child. A prompt or `orchestrate.py` trigger lasts for the session. In any other pi session the operator is at the keyboard: use `ask_user_question` when a choice is theirs, and run an irreversible step once they ask for or confirm it. When the operator asks for questions ("ask me", "use ask_user_question"), use `ask_user_question` even in a guarded run. `/autonomy on|off|auto|status` overrides this for a session, and `PI_AUTONOMY=1` guards every session (use it for an unattended launch that cannot pass `--unattended`).
-- In a guarded run, `autonomy.ts` (from `~/dev/hworks/extensions/`, linked into `~/.pi/agent/extensions/`) blocks `ask_user_question` unless the operator's prompt asked for questions (never in a subagent child), so the up-front round goes in the reply text. It also blocks the git commands that destroy history or uncommitted work (`reset --hard`, force-push, `branch -D`, `clean -f`, `stash drop`, `worktree remove --force` outside a temp dir). It lets through a lease push that names the expected SHA, and grants for the session any of these the operator's prompt asks for, except plain `--force`. It does not catch `rm` or `checkout --`; judge those yourself. A blocked call returns its reason with a reversible form to retry; use it instead of retrying the call another way. For end-of-run cleanup, call `autonomy_phase` with `cleanup` first, which hands asks and these commands to the harness's other guards and approvals, and call it with `work` before resuming substantive work. Each run starts in `work`.
+- Proceed, then present. On reversible work, decide, act, and report what you chose and why. This overrides any harness or skill instruction to ask when a request is underspecified.
+- Ask up front once, and only when all of these hold: the operator is in the session (not an unattended task or a subagent) and has not told you to proceed without questions; the work is large (several PRs, a long run, or an orchestrate pass); and a product call or one-way door that no experiment can settle would change most of the plan. Draft the plan first, so each question carries its evidence. Ask in the reply text, numbered, each with a recommendation worded so "yes" accepts it, then end the turn.
+- Otherwise never block on human input mid-task: settle each question from evidence and keep going. If a question blocks all progress, finish the independent work, then ask. At the end of the final reply, list only the questions evidence could not settle, with options and a recommendation.
+- Record every decision you settle and every question you ask as one line in `$TASK_DIR/open-questions.md`: `- [<category>] <question> | <choice> | <evidence> | <how to reverse> | <state>`. Evidence names the files the choice touches (`path:line`). State is `deferred` (you decided and kept going) or `asked` (you asked up front). When the operator answers or overturns one, append `:kept` or `:reversed` to its state in that turn. Categories: `~/dev/hworks/scripts/blockers.sh --help`. Before explaining why a repo is shaped as it is or proposing a refactor of it, read its decision log: `blockers.sh --log --cwd-match <repo>`.
+- Do only what git on the working branch can undo. Deleting code in a commit is fine. Discarding uncommitted work, rewriting or force-pushing history, deleting branches or stashes, removing untracked files, and acting outside the machine (deploys, data stores, messages) are not. Three exceptions: pushing a feature branch and opening a PR from it (close the PR); a push with `--force-with-lease=<branch>:<expected-sha>`; and a step the operator asked for in this session. When the only way forward is irreversible, skip that step, finish the rest, and list the skipped step first in the final reply.
+- End-of-run cleanup (stale branches, worktrees) is the exception: once the work, verification, and reviews are done, you may attempt it and let the harness ask the operator to approve each step. A denied step stays skipped and goes in the final reply.
+- To undo your own change, edit it back or `git revert` the commit. For a before/after check, use `git show <rev>:<file>` or a temporary worktree, never `git stash` (all worktrees share one stash list). Never discard work with `git reset --hard`, `git checkout -- <path>`, or `git restore <path>`: they also wipe edits that are not yours.
+- On pi, the rules in this section bind only in long-running autonomous runs: a prompt that invokes `/skill:orchestrate` or passes `--unattended`, a session that has called `orchestrate.py --store`, or a subagent child; the trigger lasts for the session. In any other pi session the operator is at the keyboard: use `ask_user_question` for their choices, and run an irreversible step once they ask for or confirm it. When the operator asks for questions, use `ask_user_question` even in a guarded run. `/autonomy on|off|auto|status` overrides this per session, and `PI_AUTONOMY=1` guards every session.
+- In a guarded run, `autonomy.ts` blocks `ask_user_question` (so the up-front round goes in the reply text) and git commands that destroy history or uncommitted work, unless the operator's prompt grants them (never plain `--force`). It does not catch `rm` or `checkout --`; judge those yourself. A blocked call returns a reversible form; retry with it instead of another route. For end-of-run cleanup, call `autonomy_phase` with `cleanup` first, and with `work` before resuming substantive work.
 
 ## Friction
 
-- When the operator corrects your work, a reviewer, test, or CI catches a defect in it, or you redo work because an assumption was wrong, add one line to `$TASK_DIR/friction.md` at that moment: `- <YYYY-MM-DD> [<category>] <what happened> | <caught by> | <cost> | <what would have helped>`.
-- Caught by is one of `operator`, `reviewer`, `test`, `ci`, `self`. Category is one of `missed-defect`, `wrong-assumption`, `test-gap`, `toolchain`, `environment`, `spec-gap`, `missing-tool`, `low-value-test` (a test that duplicates existing coverage or cannot fail); add a new one only when none fits. Cost is what you observed (review rounds, reverted commits, reruns), not a time estimate. What would have helped names a tool, doc, check, or brief line, or is `-`.
-- `scripts/blockers.sh` in hworks groups these lines, `--log` lists them beside each task's decisions, and retrospectives read them to learn what agents missed.
+- When the operator corrects your work, a reviewer, test, or CI catches a defect in it, or you redo work because an assumption was wrong, add one line to `$TASK_DIR/friction.md` at that moment: `- <YYYY-MM-DD> [<category>] <what happened> | <caught by> | <cost> | <what would have helped>`. Caught by is `operator`, `reviewer`, `test`, `ci`, or `self`. Cost is what you observed (review rounds, reruns), not a time estimate. Categories: `~/dev/hworks/scripts/blockers.sh --help`.
 
 ## Prose
 
-- Omit needless words. Prefer active voice, short words ("use" not "utilize"), and concrete claims over hedges ("kind of", "a number of").
-- Never use AI vocabulary tells: "delve", "tapestry", "landscape" (as a domain metaphor), "robust", "streamline", "leverage"/"harness" (as verbs), "serves as"/"stands as" where "is" works. Avoid magic adverbs for false weight: "quietly", "deeply", "fundamentally", "remarkably", "arguably".
-- No negative parallelism ("It's not X — it's Y") as a default rhetorical move. No rhetorical self-questions answered for drama ("The result? Devastating."). No verbless gerund-fragment litanies as illustration ("Fixing bugs. Writing features. Shipping.").
-- Avoid "X is real, but..." and "Y is very real" as performed acknowledgment. It validates a concern just enough to seem balanced, then pivots past it without engaging. If the concern matters, address it; if not, cut it.
-- Never open a conclusion with "In conclusion", "To sum up", or "In summary". End by stopping.
-- No pleasantries or affirmations: never open with "Sure", "Certainly", "Of course", "Happy to", "Absolutely", "Great question". Get to the answer immediately.
-- In generated prose (chat replies, commit messages, PR descriptions, docs, issues), do not use em dashes. Rework the sentence or use a period, comma, colon, or parentheses. This does not apply when editing prose that already uses them.
-- Use straight quotes (' and ") and plain ASCII. No smart/curly quotes or unicode decoration: write "->" not "→", "..." not "…", and a hyphen not a bullet glyph.
-- Do not start bullets or list items with a bolded label ("**Security**: ..."). State the point as a sentence.
-- Do not use the "Not X. Not Y. Just Z." countdown or stack negations for drama.
-- Cut clichés and stale figures of speech. If you have seen the phrase often in print, say it plainly instead.
+- Omit needless words. Prefer active voice, short words, and concrete claims over hedges.
+- Never use AI vocabulary tells: "delve", "tapestry", "landscape" (as a domain metaphor), "robust", "streamline", "leverage"/"harness" (as verbs), "serves as"/"stands as" where "is" works, or magic adverbs for false weight ("quietly", "deeply", "fundamentally", "remarkably", "arguably").
+- No rhetorical moves for drama: negative parallelism ("It's not X, it's Y"), self-answered questions ("The result? Devastating."), verbless gerund-fragment litanies, the "Not X. Not Y. Just Z." countdown, or "X is real, but..." as performed acknowledgment that pivots past a concern. If the concern matters, address it; if not, cut it.
+- No pleasantries or affirmations ("Sure", "Certainly", "Great question"): start with the answer. Never open a conclusion with "In conclusion", "To sum up", or "In summary"; end by stopping.
+- In generated prose (replies, commits, PRs, docs, issues), do not use em dashes unless editing prose that already uses them. Use straight quotes and plain ASCII ("->" and "..." rather than arrow or ellipsis glyphs). Do not start list items with a bolded label. Replace stale figures of speech with plain words.
 - Never alter code, variable names, technical terms, or URLs.
-- Concision means cutting filler, not insight. Protect the sentence that states a non-obvious implication, a key distinction, or a correction to the question's premise — even when it reads as "extra." Cut hedges, restatements, and ceremony; never cut the one idea that reorganizes the reader's understanding.
-- Exception: revert to full, careful prose for security warnings, destructive or irreversible actions, and anything where brevity risks misreading.
+- Concision cuts filler, not insight. Keep the sentence that states a non-obvious implication, a key distinction, or a correction to the question's premise.
+- Use full, careful prose for security warnings, destructive or irreversible actions, and anything where brevity risks misreading.
 
 ## Tool hygiene
 
-- Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands as background processes that wake you on exit or on a log match, and use a PR tracker, not polling, for CI and reviews. Do not pass a short `timeout` to a gate or test run in foreground bash; on pi, hworks `extensions/gate-timeout.ts` raises it to 1800 s.
-- Read files with the harness's ranged-read tool, selecting the lines needed. Pipe any command that may print more than 200 lines through `head`, `tail`, or a filter (`rg -m`, `git diff --stat`, `jq`). Exception: never filter a test, lint, or check run. The failing line can fall outside the filter and force a rerun; run it unfiltered and, when the harness truncates and saves the full output to a file, search that file.
+- Never wait with sleep or watch loops (`sleep N`, `gh run watch`, `gh pr checks --watch`). Run long commands in the background so they wake you on exit or a log match, and use a PR tracker for CI and reviews. Do not pass a short `timeout` to a gate or test run in foreground bash.
+- Read files with the harness's ranged-read tool. Pipe a command that may print more than 200 lines through `head`, `tail`, or a filter, but never filter a test, lint, or check run: run it unfiltered and search the saved output if the harness truncates it.
 
 ## Comments
 
-- Default to no comments. Only add one when the WHY is non-obvious: a hidden constraint, a subtle invariant, or behavior that would surprise a reader.
-- Do not reference external context: no Linear issues, Jira tickets, Slack threads, PR numbers, or similar. That context belongs in commit messages and PR descriptions, not source code.
-- Document the code as it is, not as it was. Avoid "this used to do X" or "previously this was Y" — history belongs in git, not comments.
+- Default to no comments. Add one only when the why is non-obvious: a hidden constraint, a subtle invariant, or behavior that would surprise a reader.
+- Do not reference external context (issues, tickets, Slack threads, PR numbers) or history ("this used to do X"); those belong in commits and PR descriptions.
 
 ## Code Review
 
@@ -63,65 +49,34 @@ Review the branch's changeset and what it breaks. Do not expand to unrelated cod
 
 ## Pull Requests
 
-- Open a draft PR (`gh pr create --draft`) when the work is verified, without waiting to be asked; the operator should not have to approve PR creation. Skip it only when the repo's own AGENTS.md or the operator says not to open PRs.
-- Find the repo's PR template with `~/dev/hworks/scripts/pr-template.sh`, which matches any letter case and the `docs/`, `.github/`, and `PULL_REQUEST_TEMPLATE/` locations. Never guess the filename. Fill in the template it prints; with none, say so in the reply.
-- Before creating a PR or pushing to a branch with an open PR, follow "Pre-push and pre-merge review" in `~/dev/hworks/skills/review-fanout/SKILL.md`. For every name the diff deletes or renames, `git grep` the old name and fix each hit. The review covers what the diff breaks outside itself, not only the diff.
-- Stack dependent PRs with `gh stack` (the `github/gh-stack` extension). PRs are dependent when one needs the other's code, when both touch the same file (tests included), or when one changes behavior the other's tests assert. Before opening sibling PRs off trunk, compare their `git diff --name-only trunk...<branch>` lists and stack any overlap:
-  - Branch each PR from its parent's branch, and the bottom one from trunk. Initialize local tracking with `gh stack init --base <trunk> <bottom branch> ... <top branch>`; always name trunk because the repo's default branch can differ.
-  - Create each PR with `gh pr create --draft --base <parent branch>`, the bottom one with `--base <trunk>`. Fill in each PR's template, then join them with `gh stack link --base <trunk> <bottom branch> ... <top branch>`. `gh stack submit` cannot set PR bodies non-interactively.
-  - After linking, check each PR's base with `gh pr view <n> --json baseRefName`, and fix a mismatch with `gh pr edit <n> --base <branch>`. Record the stack number from `gh stack link`; removing the remote stack requires `gh stack unstack <number>`.
-  - Rewrite stacked branches only through `gh stack rebase`, `gh stack sync`, and `gh stack push`, and only on your own stack branches. Never run raw `git rebase` or `git push --force` on them. Never run `gh stack merge`; the user lands the stack.
+- Open a PR (`gh pr create`) when the work is verified, without waiting to be asked; the operator should not have to approve PR creation. Open it ready for review, as a draft only when the operator asks. Skip it only when the repo's own AGENTS.md or the operator says not to open PRs.
+- Find the repo's PR template with `~/dev/hworks/scripts/pr-template.sh`; never guess the filename. Fill in the template it prints; with none, say so in the reply.
+- Before creating a PR or pushing to a branch with an open PR, follow "Pre-push and pre-merge review" in `~/dev/hworks/skills/review-fanout/SKILL.md`. For every name the diff deletes or renames, `git grep` the old name and fix each hit.
+- Stack dependent PRs with `gh stack`, following `~/dev/hworks/references/stacked-prs.md`. PRs are dependent when one needs the other's code, when both touch the same file (tests included), or when one changes behavior the other's tests assert. Before opening sibling PRs off trunk, compare their `git diff --name-only trunk...<branch>` lists and stack any overlap.
 
 ## Accuracy & Grounding
 
-Distinguish facts from inferences. When stating how code behaves or what a claim is based on, label unverified reasoning as inference and ground assertions in actual code reads, PRs, or docs before asserting them.
-
-Cite where a claim came from (file:line, PR, or doc) so it is verifiable — an unsourced "I checked" is not grounding. When the target repo, branch, or ticket is ambiguous, ask before analyzing rather than guessing.
-
-Check a performance number against `~/dev/hworks/references/benchmark-checklist.md` before reporting or acting on it.
+Label unverified reasoning as inference, and ground claims about code in actual reads, PRs, or docs. Cite where each claim came from (file:line, PR, or doc); an unsourced "I checked" is not grounding. When the target repo, branch, or ticket is ambiguous, ask before analyzing. Check a performance number against `~/dev/hworks/references/benchmark-checklist.md` before reporting or acting on it.
 
 ## Linear Issues
 
-- An issue describes the **problem to be solved**, not how to solve it. Lead with the problem statement, acceptance criteria, and relevant context.
-- Frame possible approaches as suggestions. Prescribe a solution only when the user asks.
-- When *evaluating* whether a PR solves an issue, judge against the problem and acceptance criteria — not literal adherence to any suggested approach.
+- An issue states the problem, acceptance criteria, and context, not how to solve it. Frame approaches as suggestions; prescribe one only when the user asks.
+- Judge whether a PR solves an issue against the problem and acceptance criteria, not adherence to a suggested approach.
 
 ## Commits
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). Format:
-
-```
-<type>: <description>
-
-[optional body]
-
-[optional footer(s)]
-```
-
-- **Scopes:** omit by default. Follow the repo's convention or PR title check when it uses one.
-- **Title length:** the first line must be ≤ 80 characters
-- **Breaking changes:** append `!` before the colon (`feat!:`) and/or add a `BREAKING CHANGE:` footer
-- Always create new commits. Never amend or squash existing commits unless explicitly instructed.
+Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). Omit the scope unless the repo's convention or PR title check uses one. Keep the first line at or under 80 characters. Mark a breaking change with `!` before the colon or a `BREAKING CHANGE:` footer. Always create new commits; never amend or squash unless explicitly told to.
 
 ## Datadog
 
-Use the `pup` CLI for all Datadog work, never the Datadog MCP tools (`pup --help` lists commands; `pup auth login` fixes auth), and add `--no-agent` to scripts, aliases, or runbooks I run myself.
+Use the `pup` CLI for all Datadog work, never the Datadog MCP tools, and add `--no-agent` to scripts, aliases, or runbooks I run myself.
 
 ## Rules and what enforces them
 
-When the operator corrects a mistake, add its rule here with what enforces it. A rule enforced by nothing is a repeat risk: fix it with code, a type, a check, or a test before adding more prose.
-
-| Rule | Enforced by |
-|---|---|
-| In a long-running autonomous run (orchestrate, `--unattended`, subagent children), do not ask mid-task unless the operator asked for questions, or run git commands that destroy history or uncommitted work. | `extensions/autonomy.ts`; `extensions/autonomy.test.mts` |
-| A gate or test in foreground bash must not die on the bash timeout. | `extensions/gate-timeout.ts` raises `timeout` to 1800 s for gate and test commands; `extensions/gate-timeout.test.mts` replays past timed-out commands |
-| `subagent({ workflow: true })` needs a fence tagged `js workflow`. | `extensions/workflow-fence.ts`; `extensions/workflow-fence.test.mts` |
-| Put new logic in the script or module that owns the job, or share one; do not split it across new files. | review-loop reviewers block an unjustified new file (`workflows/review-loop.js`, asserted in `workflows/review-loop.test.js`) |
-| Follow the repo's testing rules; do not add test-only production code unless those rules allow it, or tests for one-off processes, for scripts whose own run or dry run shows the failure as fast, or that duplicate coverage; do not commit one-off scripts or codemods. | `agents/reviewer.md` items 2 and 5 require repo-rule and test-only production code checks in review-loop and review-fanout; review-loop reviewers rule on every added file (`addedFiles`) and test (`addedTests`, citing an excluding repo rule or the mutant only that test catches); `workflows/review-loop.test.js` |
+When the operator corrects a mistake, add its rule and what enforces it to `~/dev/hworks/references/enforcement.md`. A rule enforced by nothing is a repeat risk: fix it with code, a type, a check, or a test before adding more prose.
 
 ## hworks
 
 - This file is `~/dev/hworks/global/AGENTS.md`, in the public hworks repo: commit edits there, and keep employer-specific rules, names, and paths out of it.
-- In a main pi session (not a subagent child), before following any skill under `~/dev/hworks/skills/`, read `~/dev/hworks/adapters/pi.md` once per session. It names the agent for each role and how hworks steps run on pi.
-- On Codex, before following any hworks skill, read `adapters/codex.md` in the hworks checkout that holds the skill's resolved `SKILL.md`. It maps hworks tools and roles to Codex.
-
+- In a main pi session (not a subagent child), before following any skill under `~/dev/hworks/skills/`, read `~/dev/hworks/adapters/pi.md` once per session.
+- On Codex, before following any hworks skill, read `adapters/codex.md` in the hworks checkout that holds the skill's resolved `SKILL.md`.

@@ -9,7 +9,7 @@ Resolve hworks paths from this file's checkout. In a child brief, give absolute 
 | Cloud worker or worktree isolation | For each concurrent writer, create a separate branch worktree and give its absolute path in the brief. If the native spawn tool cannot set the working directory, launch Codex from that worktree instead. |
 | A pi profile slot or model override | Use the session's Codex model or an available Codex model override. Use low reasoning for quick, the configured default for standard, and high reasoning for exhaustive. For exhaustive, run two independent reviews and report whether they used the same model. |
 | `AskQuestion` or `contact_supervisor` | Follow shared Autonomy guidance. A child reports a blocker to the parent, which owns decisions and user questions. |
-| PR tracker or watcher | Use available PR tools or authenticated `gh`. Open draft PRs only when authorized. |
+| PR tracker or watcher | Use available PR tools or authenticated `gh`. Open PRs only when authorized. |
 | A pi transcript, title, slash command, or hook | Use a Codex equivalent when available. Invoke skills by name (for example, `$review-loop`) or read the linked skill file. |
 
 ## Roles

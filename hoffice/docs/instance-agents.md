@@ -97,7 +97,7 @@ Procedures live in the engine and take this instance root as input. Launchers in
 | `/hoffice-publish <project> <slug>` | `procedures/publish/SKILL.md` | Publish or replace a document |
 | `/hoffice-digest <digest> [daily\|weekly]` | `procedures/digest/SKILL.md` | Summarize activity for a configured period |
 
-Read engine `docs/extensions.md` for extension contracts. `extensions/sources/<kind>.md` supplies digest sources; missing sources become coverage gaps. `extensions/evidence.md` supplies friction and transcript evidence for retros and session summaries; without it, report those sources as coverage gaps. `extensions/scheduler.md` supplies scheduling; without it, run by hand. `extensions/ship.md` supplies extra commit and PR steps; without it, use plain commits and PRs. Unattended digests never edit `STATE.md` and open draft PRs for review.
+Read engine `docs/extensions.md` for extension contracts. `extensions/sources/<kind>.md` supplies digest sources; missing sources become coverage gaps. `extensions/evidence.md` supplies friction and transcript evidence for retros and session summaries; without it, report those sources as coverage gaps. `extensions/scheduler.md` supplies scheduling; without it, run by hand. `extensions/ship.md` supplies extra commit and PR steps; without it, use plain commits and PRs. Unattended digests never edit `STATE.md` and open PRs for review.
 
 ## Publishing
 

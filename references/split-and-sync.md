@@ -11,7 +11,7 @@ Skip the split when the PR already has human review threads or someone else push
 1. Record the reviewed tip: `ORIG=$(git rev-parse HEAD)`.
 2. Build 2 to 4 layers from `ORIG`. Each layer merges alone, in order, and passes the gate. Keep tests with the code they cover, and keep each logical change in one layer.
 3. Check that `git diff $ORIG <top layer>` is empty. The split moves code between commits and changes none of it.
-4. Publish each layer as its own PR based on the previous layer's branch, following `global/AGENTS.md` Pull Requests.
+4. Publish each layer as its own PR based on the previous layer's branch, following `stacked-prs.md`.
 
 Do not rerun review on each layer: the content was reviewed as a whole at `ORIG`, and step 3 proves the layers hold the same code. The layers are new commits the review ledger does not cover, so after step 3 record each one with `scripts/review-range.py record <layer task dir> <parent branch> <parent tip> <layer tip> split` before the pre-push review runs.
 
@@ -25,7 +25,7 @@ For any PR:
 
 A sync (merge or rebase) of a reviewed branch does not go back through review; the gate is its check. When it had conflicts, check each resolved file yourself: read the branch's reviewed change and the base commits that collided with it (`git log -p <old merge-base>..origin/<base> -- <file>`), and confirm the resolution keeps both. Then record the synced head so the pre-push review skips it: `scripts/review-range.py record "$TASK_DIR" origin/<base> $(git merge-base origin/<base> HEAD) HEAD sync`. Commits made after the sync get the normal review.
 
-For stacked branches, merge the parent branch (or trunk, once the parent has merged) the same way, per `global/AGENTS.md` Pull Requests.
+For stacked branches, merge the parent branch (or trunk, once the parent has merged) the same way, per `stacked-prs.md`.
 
 ## Signed commits
 

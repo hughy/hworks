@@ -11,6 +11,18 @@
 #   --grep keeps events whose task path or full entry text contains TEXT, case-insensitively (a file, module, or topic).
 #   --source and --kind keep events with that exact source or kind (e.g. --source friction --kind operator).
 #
+# Rows it reads (global/AGENTS.md says when to write them):
+#   open-questions.md  - [<category>] <question> | <choice> | <evidence> | <how to reverse> | <state>
+#     category: missing-info, permission, irreversible, tooling, ambiguous-brief, external-wait.
+#     For an asked question, choice is your recommendation. Evidence names the files or modules the choice
+#     touches (internal/quote/price.go:40) so --grep <path> finds it. state: deferred or asked, then :kept or
+#     :reversed once the operator judges it (deferred:reversed); the report gives reversal rates by category.
+#   friction.md        - <YYYY-MM-DD> [<category>] <what happened> | <caught by> | <cost> | <what would have helped>
+#     category: missed-defect, wrong-assumption, test-gap, toolchain, environment, spec-gap, missing-tool,
+#     low-value-test (a test that duplicates existing coverage or cannot fail); add one only when none fits.
+#     caught by: operator, reviewer, test, ci, self. What would have helped names a tool, doc, check, or brief
+#     line, or is -. Retrospectives read these to learn what agents missed.
+#
 # Sources (each optional; a missing one is reported, not fatal):
 #   HWORKS_BLOCKERS_LOG        autonomy.ts log (default $HWORKS_TASKS_DIR/blockers.jsonl)
 #   HWORKS_TASKS_DIR           open-questions.md and friction.md files (default $XDG_STATE_HOME/agent-tasks;
@@ -41,7 +53,7 @@ while [ $# -gt 0 ]; do
     --grep) grep="$grep${grep:+$'\n'}${2:?--grep needs a value}"; shift 2 ;;
     --source) source=${2:?--source needs a value}; shift 2 ;;
     --kind) kind=${2:?--kind needs a value}; shift 2 ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done

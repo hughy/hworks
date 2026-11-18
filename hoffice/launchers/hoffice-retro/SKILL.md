@@ -61,7 +61,7 @@ git -C "$wt" push origin "HEAD:$default_branch"
 - On rebase conflicts, show every conflicted hunk, propose a resolution preserving both sides, and wait for approval before applying it and running `git -C "$wt" rebase --continue`. Keep state a coherent rewrite and registry rows from both sessions. Never drop the other side to pass the rebase.
 - If push is rejected because the default branch moved, fetch, rebase, and retry the fast-forward push up to three times; then stop and report. Other push failures stop immediately. Never force-push.
 
-With `--pr`, instead run `git -C "$wt" push -u origin "$branch"`, then `gh pr create --draft --base "$default_branch"` from inside `$wt`, targeting the instance's origin on its own forge. Derive any required host setting from that origin, with no fixed host or carryover from evidence commands. Title: the commit subject. Body: published URL (or `draft, not published`), repo and window, missing evidence sources, and ship-extension additions. Follow its post-PR step when present. Do not push to the default branch in PR mode.
+With `--pr`, instead run `git -C "$wt" push -u origin "$branch"`, then `gh pr create --base "$default_branch"` from inside `$wt`, targeting the instance's origin on its own forge. Derive any required host setting from that origin, with no fixed host or carryover from evidence commands. Title: the commit subject. Body: published URL (or `draft, not published`), repo and window, missing evidence sources, and ship-extension additions. Follow its post-PR step when present. Do not push to the default branch in PR mode.
 
 ## 6. Clean up and report
 
