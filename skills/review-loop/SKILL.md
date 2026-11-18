@@ -48,7 +48,9 @@ Effort defaults to standard; the user sets another with a word ("quick", "exhaus
 |---|---|---|---|
 | quick | 0 | `:low` thinking | "One pass; stop at the first working fix." |
 | standard | 1 | agent default | "Be sure of the cause before you change code." |
-| exhaustive | 2, the second on the `review2` slot (a different provider when the profile sets one) | the `exhaustive` slot | "Spend what it takes; iterate until it holds up to review." |
+| exhaustive | 2, on different providers (the second on the `review2` slot) | the `exhaustive` slot | "Spend what it takes; iterate until it holds up to review." |
+
+Under the `inherit` profile every slot is the session model, so before an exhaustive run apply a profile that puts `review2` on another provider (`scripts/models.sh show` lists the slots), or set `review2Model` in the args.
 
 Fix rounds converge: after the first review, reviewers tag each finding `prior` (an earlier finding still unfixed), `regression` (introduced by the fix), or `new`. Only `prior` and `regression` findings block; a blocking `new` finding moves to `nonBlocking` with `downgraded: true`, and an untagged blocking finding still blocks. On pi, a host git check also downgrades file and test refusals that were not added in `<base>...HEAD`, marking them `downgraded: true` in `nonBlocking`. If the check fails, refusals still block and `stopReasons` includes `added-check-failed` with the error. Codex skips this check. Read downgraded findings before shipping.
 
