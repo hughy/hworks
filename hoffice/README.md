@@ -15,7 +15,7 @@ scripts/                            Launcher and procedure helpers; scripts/chec
 docs/extensions.md                  Extension points an instance fills in
 docs/instance-agents.md             Shared agent rules for instances
 docs/migrating.md                   Convert an existing repository into an instance
-tests/                              Run by scripts/check.sh
+tests/                              Shell (*.test.sh) and node (*.test.mjs) tests
 ```
 
 | Launcher | Procedure | When |
@@ -137,7 +137,7 @@ A session summary is evidence of what was discussed, not of what shipped.
 
 ## Working on hoffice
 
-Run `scripts/check.sh` before every commit.
+Before every commit, run each `bash tests/<name>.test.sh` and `node --test tests/*.test.mjs` (after `npm ci --ignore-scripts`).
 
 hoffice is public, so it keeps no list of private words (an employer's or a private instance's names): such a list would leak them itself. Keep yours in a private repo and point git at its hooks with `core.hooksPath`, globally or per clone; git ignores `.git/hooks/` while `core.hooksPath` is set. A clone that followed older instructions has a local `core.hooksPath hooks` that overrides yours and now points at nothing, so remove it:
 
