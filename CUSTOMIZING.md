@@ -1,40 +1,34 @@
 # Customizing hworks
 
-hworks is one engineer's layer over pstack. You can change it in two ways:
+hworks is one engineer's agent layer. You can change it in two ways:
 
-- Fork it to replace the opinions: the router, the allowlist, the prose skill, and the agent prompts.
+- Fork it to replace the opinions: the router, the skills, the prose skill, and the agent prompts.
 - Keep it and add an overlay repo for tool names, model rosters, and skills that are specific to one machine or employer, or that cannot be public.
 
 Fork when you disagree with how hworks works. Use an overlay when only your environment differs. Both can apply: a fork can have overlays of its own.
 
-Keep durable policy in shared guidance and skills, reference material in pstack, and runtime mechanics in the existing adapters, extensions, and workflows. The [consumer notes](README.md#other-consumers) distinguish installation support from verified runtime behavior. Optional external integrations belong in overlay skills and adapters, or hoffice instance extension files when they extend project memory; they do not require a new core layer.
+Keep durable policy in shared guidance and skills, reference material in `references/`, and runtime mechanics in the existing adapters, extensions, and workflows. The [consumer notes](README.md#other-consumers) distinguish installation support from verified runtime behavior. Optional external integrations belong in overlay skills and adapters, or hoffice instance extension files when they extend project memory; they do not require a new core layer.
 
 ## How the pieces fit
 
 ```text
-cursor/plugins/pstack            upstream, written for Cursor
-  -> hughy/pstack, upstream      byte-exact copy
-  -> hughy/pstack, main          upstream plus install fixes (see pstack/MIRROR.md)
-  -> hworks/pstack/              git subtree of the mirror's main; never edited here
-  -> hworks                      router, allowlist, roles, adapter, model roster
+hworks                           router, skills, references, roles, adapters, model roster
   -> adapters/local/, models.d/  gitignored overlays, usually linked in from another repo
 ```
 
 | Path | What it holds | When you fork |
 |---|---|---|
 | `global/AGENTS.md` | Global agent guidance, linked to `~/.pi/agent/AGENTS.md`, `~/.claude/CLAUDE.md`, and `~/.codex/AGENTS.md` | Replace it with your own rules; keep the Autonomy and scratch sections if you keep `autonomy.ts` and `blockers.sh` |
-| `skills/hughy-router/` | The router: routes, effort levels, and the deltas that override pstack playbooks | Rename it and rewrite the routes and deltas to match how you work |
+| `skills/hughy-router/` | The router: routes, effort levels, and deltas | Rename it and rewrite the routes and deltas to match how you work |
 | `skills/edit-prose/` | A prose skill that defers to `global/AGENTS.md` | Keep, replace, or delete it |
-| `skills/<name>` symlinks | The allowlist of pstack skills that load | Choose your own with `scripts/skill.sh` |
-| `DIVERGENCE.md` | Why each pstack skill is not linked | Rewrite the reasons to match your choices |
+| `references/` | Principles, the review rubric, and reference docs that agents, scripts, and the router read by path | Keep, edit, or delete them; keep `references/LICENSE` with any you keep |
 | `agents/` | The `coder`, `reviewer`, `explorer`, and `synthesizer` roles for pi-subagents | Keep the roles and edit the prompts |
 | `extensions/autonomy.ts` | pi guard that blocks mid-task questions and history-destroying git commands in long-running autonomous runs (orchestrate, `--unattended`, subagent children) | Keep, edit the patterns, or skip the symlink |
 | `extensions/runner-exit-guard.ts` | Keeps extensions from killing a pi-subagents async runner with `process.exit()` | Keep it if your extensions force-exit headless runs; otherwise skip the symlink |
-| `adapters/pi.md` | Maps Cursor terms in pstack to pi | Keep it unless you change harness |
+| `adapters/pi.md` | Maps hworks roles and steps to pi | Keep it unless you change harness |
 | `models.conf` | Model profiles | Replace the profiles with your own |
-| `scripts/` | `install.sh`, `skill.sh`, `models.sh`, `task-dir.sh`, and `blockers.sh` | Keep them. They resolve paths relative to the repo; only `global/AGENTS.md` names `~/dev/hworks`, so change that path if you clone elsewhere |
+| `scripts/` | `install.sh`, `models.sh`, `task-dir.sh`, and `blockers.sh` | Keep them. They resolve paths relative to the repo; only `global/AGENTS.md` names `~/dev/hworks`, so change that path if you clone elsewhere |
 | `.claude-plugin/`, `.codex-plugin/`, `LICENSE` | Plugin manifests and license | Change the plugin name and author, and add your copyright line |
-| `pstack/` | The mirror subtree | Do not edit it (see [Resync pstack](#resync-pstack)) |
 
 ## Requirements outside the repo
 
@@ -50,12 +44,11 @@ cursor/plugins/pstack            upstream, written for Cursor
 ## Fork into your own layer
 
 1. Fork the repo and clone it. Edit `global/AGENTS.md` (or replace its `~/dev/hworks` paths with your clone's), then run `scripts/install.sh`.
-2. Rename the router. Rename `skills/hughy-router/` and change the `name:` in its frontmatter to match the new directory name. Then run `git grep -n hughy-router -- ':!pstack'` and update each hit. The hits are in `README.md`, `CUSTOMIZING.md`, `DIVERGENCE.md`, `adapters/pi.md`, `agents/coder.md`, `models.conf`, and `scripts/models.sh`. Start a task with `/skill:<new-name> <task>`.
-3. Rename the plugin. Set `name` in `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`, and set `author` in both `plugin.json` files. Add your copyright line to `LICENSE`. Keep `pstack/LICENSE`, because pstack's MIT license requires its notice in copies.
-4. Choose the allowlist. `scripts/skill.sh list` shows which pstack skills are linked. `scripts/skill.sh enable <name>` links a skill and deletes its `DIVERGENCE.md` row. `scripts/skill.sh disable <name> "<reason>"` unlinks a skill and adds a row with the reason and the current mirror commit. pstack skills set `disable-model-invocation: true`, so the model never sees them in its catalog. You invoke one with `/skill:<name>`, or the router or an agent prompt reads one by path.
-5. Rewrite the router. Its effort table, routes, and deltas are opinions. Keep the brief format (goal, effort, verify) if it suits you. Playbooks under `pstack/skills/poteto-mode/playbooks/` need no enabling, because the router reads them by path.
+2. Rename the router. Rename `skills/hughy-router/` and change the `name:` in its frontmatter to match the new directory name. Then run `git grep -n hughy-router` and update each hit. Start a task with `/skill:<new-name> <task>`.
+3. Rename the plugin. Set `name` in `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`, and set `author` in both `plugin.json` files. Add your copyright line to `LICENSE`. Keep `references/LICENSE`, because the MIT license of those docs requires its notice in copies.
+4. Choose the skills. Add or delete directories under `skills/`. Command skills set `disable-model-invocation: true`, so the model never sees them in its catalog. You invoke one with `/skill:<name>`, or the router or an agent prompt reads one by path.
+5. Rewrite the router. Its effort table, routes, and deltas are opinions. Keep the brief format (goal, effort, verify) if it suits you.
 6. Set your models. See [Models](#models).
-7. Point resyncs at the mirror you follow. See [Resync pstack](#resync-pstack).
 
 ## Models
 
@@ -83,11 +76,11 @@ An agent file is markdown with frontmatter. The body is the system prompt. hwork
 
 | Field | hworks value | Effect |
 |---|---|---|
-| `tools` | No `edit` or `write` on read-only roles | `adapters/pi.md` maps pstack's `readonly: true` to those roles |
+| `tools` | No `edit` or `write` on read-only roles | `explorer`, `reviewer`, and `synthesizer` cannot change files |
 | `systemPromptMode` | `replace` | The body replaces pi's base prompt instead of being appended to it |
 | `inheritProjectContext`, `inheritGlobalContext` | `true` | The child loads the project's `AGENTS.md` and the global one, `~/.pi/agent/AGENTS.md` |
 | `inheritSkills` | `false` | The child gets no skill catalog. pi-subagents drops hidden skills (`disable-model-invocation: true`) from a `skills:` list without a warning, and every skill an hworks agent uses is hidden, so each agent prompt names its skills by absolute path and when to read them. `scripts/test_agents.py` fails if an agent lists a hidden skill |
-| `aliases` | For example, `poteto-agent` | pstack's agent names resolve to the hworks role |
+| `aliases` | For example, `implementer` | Other agent names resolve to the hworks role |
 | `acceptanceRole` | `writer` or `read-only` | Declares whether the role writes, for pi-subagents' acceptance checks |
 | `defaultContext` | `fresh` | Children start without the parent's transcript |
 
@@ -95,7 +88,7 @@ To add a role:
 
 1. Create `agents/<role>.md`. `scripts/models.sh` treats every file in `agents/` as a role.
 2. Add a row for the role to each profile in `models.conf`. A role missing from a profile runs on the session model.
-3. Map pstack roles to it in the tables in `adapters/pi.md`, and name it in the router where it should run.
+3. Add it to the roles table in `adapters/pi.md`, and name it in the router where it should run.
 
 ## Overlays
 
@@ -162,24 +155,10 @@ An adapter is a short table in the same shape as `adapters/pi.md`:
 
 An adapter can also override rows in `adapters/pi.md`, or add rules for its environment, such as which profile to apply.
 
-## Resync pstack
-
-`pstack/` is a squashed git subtree of the mirror's `main` branch:
-
-```bash
-git subtree pull --squash --prefix pstack https://github.com/hughy/pstack main
-```
-
-After each pull, review every row in `DIVERGENCE.md`. Diff the mirror for that skill between the commit the row records and the new one, and decide whether the reason still holds.
-
-Do not edit files under `pstack/`. A local edit conflicts at the next pull, and `skill.sh` and `DIVERGENCE.md` assume the subtree matches the mirror. Put opinions in hworks files instead. For example, a delta in the router overrides a playbook, and a row in `adapters/pi.md` replaces a Cursor mechanism. Send install fixes to the mirror and content changes to upstream pstack. To follow a different mirror, fork it and pull from your fork's URL.
-
 ## Check a change
 
 After you change hworks, run `scripts/check.sh`, which runs the Python script tests, the workflow tests, and the extension tests. Then:
 
-- Run `scripts/skill.sh list` and confirm that the linked set matches the `DIVERGENCE.md` rows.
-- Run `for l in skills/*; do [ -e "$l" ] || echo "broken: $l"; done` to find broken symlinks.
 - Confirm that each skill's frontmatter `name` matches its directory name.
 - Run `scripts/models.sh show` and confirm that each role has the model you expect.
 - Run `/reload` in pi, then run the router on a small task that spawns at least one agent.

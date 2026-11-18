@@ -37,7 +37,7 @@ class AgentSkillsTest(unittest.TestCase):
 
     def test_coder_names_the_laziness_principle(self):
         with open(os.path.join(AGENTS, "coder.md")) as f:
-            self.assertTrue("~/dev/hworks/skills/principle-laziness-protocol/SKILL.md" in f.read(), "coder.md must name the laziness principle")
+            self.assertTrue("~/dev/hworks/references/principles/laziness-protocol.md" in f.read(), "coder.md must name the laziness principle")
 
     def test_coder_can_monitor_long_commands(self):
         path = os.path.join(AGENTS, "coder.md")

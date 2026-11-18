@@ -262,7 +262,7 @@ class Args(Fixture):
                         t["task"])
         self.assertIn(f"Review only the commits after {self.c[2][:12]}", t["task"])
         self.assertEqual(a["reviewers"], [{"agent": "reviewer", "label": "reviewer"}])
-        self.assertIn(os.path.join(self.root, "skills", "interrogate", "references", "rubric.md"), a["task"])
+        self.assertIn(os.path.join(self.root, "references", "review", "rubric.md"), a["task"])
         self.assertEqual((a["label"], a["taskDir"]), ("pre-push", os.path.abspath(self.task)))
 
     def test_whole_branch_when_nothing_recorded(self):

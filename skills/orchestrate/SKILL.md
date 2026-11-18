@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # orchestrate
 
-This adapts pstack's orchestrate playbook (`../../pstack/skills/poteto-mode/playbooks/orchestrate.md`) to pi and Codex. It keeps the playbook's standing orders, status derived at each drain, verdicts keyed to a head SHA, a rolling window, a one-unit pilot, and retry by failure mode then park. It uses local workflows, one branch worktree per unit, and `scripts/orchestrate.py`. Follow this file.
+This runs a set of work units on pi and Codex. It keeps standing orders, status derived at each drain, verdicts keyed to a head SHA, a rolling window, a one-unit pilot, and retry by failure mode then park. It uses local workflows, one branch worktree per unit, and `scripts/orchestrate.py`. Follow this file.
 
 The session is the coordinator. It selects units, writes their briefs, dispatches workflows, reads results, and ships. `scripts/orchestrate.py` keeps what must survive a restart and refuses unsafe steps (a launch into a busy window or a foreign worktree, a result whose head moved, a relaunch that could start a second writer). Each unit runs the review loop; read `../review-loop/SKILL.md` first.
 

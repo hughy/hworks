@@ -14,7 +14,7 @@ base_sha=$(git -C "${worktree:-.}" merge-base "$base" HEAD)
 root=$(cd "$(dirname "$0")/../.." && pwd)
 q() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; }
 printf '{"base": %s, "brief": %s, "gate": %s, "reviewers": %d, "rubricDir": %s' \
-  "$(q "$base_sha")" "$(q "$brief")" "$(q "$gate")" "$reviewers" "$(q "$root/skills/interrogate/references")"
+  "$(q "$base_sha")" "$(q "$brief")" "$(q "$gate")" "$reviewers" "$(q "$root/references/review")"
 if [ -n "$worktree" ]; then printf ', "cwd": %s' "$(q "$worktree")"; fi
 if [ -n "$task_dir" ]; then mkdir -p "$task_dir"; printf ', "taskDir": %s' "$(q "$(cd "$task_dir" && pwd -P)")"; fi
 printf '}\n'
