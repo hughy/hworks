@@ -23,7 +23,7 @@ function fixture(t, mode = "clean") {
   const brief = join(dir, "brief.md");
   writeFileSync(brief, "Change the sample.");
   const fake = join(dir, "codex");
-  writeFileSync(fake, `#!${process.execPath}
+  writeFileSync(fake, `#!/usr/bin/env node
 const fs = require("node:fs");
 const git = (...args) => require("node:child_process").execFileSync("git", args, { encoding: "utf8" }).trim();
 const argv = process.argv.slice(2);

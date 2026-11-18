@@ -2,6 +2,8 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
+const { spawnSync, execFileSync } = require("node:child_process");
 
 const source = fs.readFileSync(path.join(__dirname, "review-loop.js"), "utf8");
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -21,7 +23,7 @@ function fakeRuns(results) {
   function resolve(key, params) {
     calls.push({ key, ...params });
     if (!(key in results)) throw new Error("unexpected child " + key);
-    const result = results[key];
+    const result = typeof results[key] === "function" ? results[key](params) : results[key];
     // The runtime rejects a structured output that lacks a required field before the workflow sees it.
     const out = result.ok && result.structuredOutput;
     const missing = out && ((params.outputSchema && params.outputSchema.required) || []).find((f) => !(f in out));
@@ -61,6 +63,7 @@ const checked = [{ claim: "loop ends clean", evidence: "a.js:9, review-loop.test
 const clean = { ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [], addedTests: [] } };
 const finding = { severity: "blocking", file: "a.js", line: 3, claim: "off by one", evidence: "a.js:3" };
 const note = { severity: "non-blocking", file: "b.js", line: 1, claim: "naming", evidence: "b.js:1" };
+const addedCheck = (added) => ({ ok: true, structuredOutput: { added } });
 const blocked = { ok: true, output: "", structuredOutput: { verdict: "blocked", findings: [finding, note] } };
 
 function run(results, args, state) {
@@ -99,6 +102,9 @@ test("clean on first review", async () => {
   assert.match(calls[1].task, /In `addedTests`, list every test function or test case the diff adds, in new or existing files/);
   assert.match(calls[1].task, /fails it while every test that existed at 0123abc passes/);
   assert.match(calls[1].task, /Run each mutant on its own against the pre-existing tests, never one combined overlay/);
+  assert.match(calls[1].task, /Before ruling on added tests, read the target repo's testing rules in `AGENTS\.md`\/`CLAUDE\.md` on changed paths, `CONTRIBUTING`, and decision logs or ADRs/);
+  assert.match(calls[1].task, /Set `keep: false` for a test those rules exclude, citing the rule's `file:line`; a killed mutant does not override a repo rule/);
+  assert.match(calls[1].task, /A production function, method, field, or export the diff adds whose only callers are tests is blocking unless the repo's testing rules allow it; name the real construction path, existing seam, or no test as the alternative/);
   assert.match(calls[1].task, /A mutant that changes only message or log text does not count unless a caller, test fixture, or documented contract depends on that exact text/);
   assert.match(calls[1].task, /Set `keep: false` for a test that only re-checks what a lint or type check in the gate already enforces/);
   assert.ok(state.sets.length > 0);
@@ -576,7 +582,7 @@ test("an added file the reviewer would not keep blocks an ok verdict, and blocks
   const kept = { path: "src/a.js", keep: true, reason: "the feature" };
   const split = { path: "scripts/b.py", keep: false, reason: "duplicates scripts/a.sh" };
   const okWith = (addedFiles) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles, addedTests: [] } });
-  const { out } = await run({ "code-1": coded("a1"), "review-1-1": okWith([kept, split]), "fix-2": coded("a2"), "review-2-1": okWith([split]) }, { maxRounds: 2 });
+  const { out } = await run({ "code-1": coded("a1"), "review-1-1": okWith([kept, split]), "added-check-1": addedCheck([true]), "fix-2": coded("a2"), "review-2-1": okWith([split]), "added-check-2": addedCheck([true]) }, { maxRounds: 2 });
   assert.equal(out.state, "unresolved");
   assert.equal(out.blocking.length, 1);
   assert.equal(out.blocking[0].file, "scripts/b.py");
@@ -588,7 +594,7 @@ test("an added test in an existing file that the reviewer would not keep blocks,
   const distinct = { file: "src/a_test.go", name: "TestRevertedFix", keep: true, covers: "fails with the fix reverted" };
   const pin = { file: "src/a_test.go", name: "TestPinAll", keep: false, covers: "no mutant fails it alone; extend TestStored" };
   const okWith = (addedTests) => ({ ok: true, output: "", structuredOutput: { verdict: "ok", findings: [], checked, addedFiles: [], addedTests } });
-  const { out } = await run({ "code-1": coded("a1"), "review-1-1": okWith([distinct, pin]), "fix-2": coded("a2"), "review-2-1": okWith([pin]) }, { maxRounds: 2 });
+  const { out } = await run({ "code-1": coded("a1"), "review-1-1": okWith([distinct, pin]), "added-check-1": addedCheck([true]), "fix-2": coded("a2"), "review-2-1": okWith([pin]), "added-check-2": addedCheck([true]) }, { maxRounds: 2 });
   assert.equal(out.state, "unresolved");
   assert.equal(out.blocking.length, 1);
   assert.equal(out.blocking[0].file, "src/a_test.go");
@@ -597,7 +603,7 @@ test("an added test in an existing file that the reviewer would not keep blocks,
   assert.match(out.blocking[0].claim, /extend TestStored/);
   const later = (origin) => ({ file: "src/a_test.go", name: "TestOther", keep: false, covers: "duplicates TestStored", origin });
   for (const [origin, state] of [["prior", "unresolved"], ["regression", "unresolved"], [undefined, "unresolved"], ["new", "clean"]]) {
-    const r = await run({ "code-1": coded("a1"), "review-1-1": okWith([pin]), "fix-2": coded("a2"), "review-2-1": okWith([later(origin)]) }, { maxRounds: 2 });
+    const r = await run({ "code-1": coded("a1"), "review-1-1": okWith([pin]), "added-check-1": addedCheck([true]), "fix-2": coded("a2"), "review-2-1": okWith([later(origin)]), "added-check-2": addedCheck([true]) }, { maxRounds: 2 });
     assert.equal(r.out.state, state, String(origin));
     assert.match(r.calls.find((c) => c.key === "review-2-1").task, /entry with `keep: false`; a renamed or moved entry from below is `prior`/);
   }
@@ -635,4 +641,107 @@ test("a coder output without risks counts as none", async () => {
   assert.equal(out.state, "clean");
   assert.deepEqual(out.risks, []);
   assert.doesNotMatch(calls[1].task, /open risks/);
+});
+
+test("host gate failures keep full logs and expose the tail and log path to the retry", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-loop-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const taskDir = path.join(root, "task's output");
+  fs.mkdirSync(taskDir);
+  const gate = "printf '%15000s' warnings; printf '\\nFINAL FAILURE\\n' >&2; exit 7 # trailing comment";
+  const verify = (params) => {
+    const result = spawnSync("sh", ["-c", params.acceptance.verify[0].command], { encoding: "utf8" });
+    assert.equal(result.status, 7, result.stderr);
+    return { ok: false, error: "Acceptance verification 'gate' failed\n" + (result.stdout + result.stderr).slice(0, 12000) };
+  };
+  const { out, calls } = await run({ "code-1": verify, "code-1-retry": verify }, { taskDir, label: "unit: 7", gate });
+  assert.equal(out.state, "gate-failed");
+  assert.equal(out.failure.gateLog, path.join(taskDir, "unit--7-r1-gate-retry.log"));
+  const log = fs.readFileSync(out.failure.gateLog, "utf8");
+  assert.ok(log.length > 12000);
+  assert.match(log, /warnings\nFINAL FAILURE\n$/);
+  assert.ok(out.failure.error.includes(out.failure.gateLog));
+  assert.match(out.failure.error, /FINAL FAILURE/);
+  assert.ok(calls[1].task.includes(path.join(taskDir, "unit--7-r1-gate.log")));
+  assert.ok(calls[0].task.includes("The gate `" + gate + "`"));
+  const success = await run({ "code-1": (params) => {
+    const result = spawnSync("sh", ["-c", params.acceptance.verify[0].command], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+    return coded("passed");
+  } }, { taskDir, gate: "printf 'successful output'", reviewers: 0 });
+  assert.equal(success.out.state, "clean");
+  assert.equal(fs.readFileSync(path.join(taskDir, "review-loop-r1-gate.log"), "utf8"), "successful output");
+});
+
+test("refusals only block additions, and a failed or malformed added check fails closed", async () => {
+  const review = { ok: true, structuredOutput: { verdict: "blocked", findings: [], addedFiles: [{ path: "existing.js", keep: false, reason: "split" }] } };
+  const { out, calls } = await run({ "code-1": coded("a1"), "review-1-1": review, "added-check-1": addedCheck([false]) }, { cwd: "/work/tree", taskDir: "/tmp/task", label: "unit", maxRounds: 1 });
+  assert.equal(out.state, "clean");
+  assert.deepEqual(out.blocking, []);
+  assert.equal(out.nonBlocking[0].file, "existing.js");
+  assert.equal(out.nonBlocking[0].downgraded, true);
+  assert.equal(out.nonBlocking[0].severity, "non-blocking");
+  assert.match(out.nonBlocking[0].claim, /Not added in 0123abc\.\.\.HEAD/);
+  assert.deepEqual(out.runs.at(-1), { key: "added-check-1", runId: "run-added-check-1", ok: true });
+  const check = calls.at(-1);
+  assert.equal(check.agent, "explorer");
+  assert.equal(check.cwd, "/work/tree");
+  assert.equal(check.worktree, false);
+  assert.equal(check.output, "/tmp/task/unit-r1-added-check.md");
+  assert.equal(check.gate.output, "json");
+  assert.equal(check.gate.timeoutMs, 2400000);
+  for (const result of [addedCheck([true]), { ok: false, error: "git failed" }, addedCheck([]), addedCheck(["false"]), { ok: true }]) {
+    const r = await run({ "code-1": coded("a1"), "review-1-1": review, "added-check-1": result }, { maxRounds: 1 });
+    assert.equal(r.out.state, "unresolved");
+    assert.equal(r.out.blocking[0].file, "existing.js");
+    assert.equal(r.calls.at(-1).output, false);
+    if (result.structuredOutput?.added?.[0] === true) assert.deepEqual(r.out.stopReasons, []);
+    else {
+      assert.equal(r.out.stopReasons[0].reason, "added-check-failed");
+      assert.match(r.out.stopReasons[0].detail, /git failed|Malformed/);
+    }
+  }
+  const codex = await run({ "code-1": coded("a1"), "review-1-1": review }, { runtime: "codex", maxRounds: 1 });
+  assert.equal(codex.out.state, "unresolved");
+  assert.deepEqual(codex.calls.map((c) => c.key), ["code-1", "review-1-1"]);
+  const noRefusals = await run({ "code-1": coded("a1"), "review-1-1": clean });
+  assert.equal(noRefusals.out.state, "clean");
+  assert.deepEqual(noRefusals.calls.map((c) => c.key), ["code-1", "review-1-1"]);
+});
+
+test("the typed added check reads the pinned git base with quoted paths and whole test names", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "review-loop-git-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const git = (...argv) => execFileSync("git", argv, { cwd: root, encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.com");
+  const existing = "test's file.py";
+  fs.writeFileSync(path.join(root, existing), "def test_existing(): pass\ndef test_part_suffix(): pass\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "change");
+  const added = "new 'file; $(false).py";
+  fs.writeFileSync(path.join(root, added), "new file\n");
+  git("add", ".");
+  git("commit", "-qm", "addition");
+  const addedFiles = [existing, "./" + added].map((p) => ({ path: p, keep: false, reason: "refused" }));
+  const cases = [
+    [existing, "test_existing"], [existing, "Suite.test_existing"], [existing, "Suite::test_existing"],
+    [existing, "test_part"], [existing, "test_missing' ; $(false)"], ["absent.py", "test_existing"], [added, "test_existing"],
+  ];
+  const addedTests = cases.map(([file, name]) => ({ file, name, keep: false, covers: "refused" }));
+  const review = { ok: true, structuredOutput: { verdict: "blocked", findings: [], addedFiles, addedTests } };
+  const { out } = await run({ "code-1": coded("a1"), "review-1-1": review, "added-check-1": (params) => {
+    const result = spawnSync("sh", ["-c", params.gate.command], { cwd: root, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    const json = JSON.parse(result.stdout);
+    assert.deepEqual(json, { added: [false, true, false, false, false, true, true, true, true] });
+    return { ok: true, structuredOutput: json };
+  } }, { base, cwd: root, maxRounds: 1 });
+  assert.equal(out.state, "unresolved");
+  assert.deepEqual(out.nonBlocking.map((f) => f.test || f.file), [existing, "test_existing", "Suite.test_existing", "Suite::test_existing"]);
+  assert.deepEqual(out.blocking.map((f) => f.test || f.file), ["./" + added, "test_part", "test_missing' ; $(false)", "test_existing", "test_existing"]);
 });
