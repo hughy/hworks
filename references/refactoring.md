@@ -1,8 +1,8 @@
 ### Refactoring
 
-**You own the contract. The structure changes. The behavior does not.** Distinct from Feature, which adds behavior, and Bug fix, which corrects it.
+**You own the contract. The structure changes. The behavior does not.** Distinct from a feature, which adds behavior, and a bug fix, which corrects it.
 
-If the cleanup reveals a missing feature or a real bug, split it out and ship the structural change first against the pinned contract. A redesign is allowed, but name it and route to Feature. Large or cross-cutting structural work needs its own plan of units first. This playbook is the focused-to-medium change.
+If the cleanup reveals a missing feature or a real bug, split it out and ship the structural change first against the pinned contract. A redesign is allowed, but name it and treat it as new behavior. Large or cross-cutting structural work needs its own plan of units first. This playbook is the focused-to-medium change.
 
 1. Pin the behavior contract first. Learn the contract of the affected subsystem, then write a characterization test, snapshot, or equivalence harness that captures current behavior before any structure moves. If the area has no coverage, write the pin before touching structure. Type check and lint are not a pin.
 2. Name the structure the code is missing per **principle-model-the-domain**. Boring code stays when the shape is already clear and local. The reshape must delete branches or invalid states, not add indirection.
