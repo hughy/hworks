@@ -2,7 +2,7 @@
 name: coder
 description: The writer role for hughy-router. Implements a scoped change against a goal, effort, and verify brief, runs the gate, and reports what it ran. Fresh context. Override model per call for the hardest changes (cross-cutting design, concurrency, subtle algorithms).
 advertise: true
-aliases: poteto-agent, implementer
+aliases: implementer
 thinking: high
 tools: read, grep, find, ls, bash, subagent_command, edit, write, contact_supervisor
 defaultContext: fresh

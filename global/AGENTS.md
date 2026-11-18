@@ -120,6 +120,6 @@ When the operator corrects a mistake, add its rule here with what enforces it. A
 ## hworks
 
 - This file is `~/dev/hworks/global/AGENTS.md`, in the public hworks repo: commit edits there, and keep employer-specific rules, names, and paths out of it.
-- In a main pi session (not a subagent child), before following any skill under `~/dev/hworks/skills/`, read `~/dev/hworks/adapters/pi.md` once per session. It maps Cursor terms in pstack text to pi and names the agent for each role.
-- On Codex, before following any hworks skill or its linked pstack skills, read `../../adapters/codex.md` relative to the installed hughy-router skill directory. It maps playbook tools and roles to Codex.
+- In a main pi session (not a subagent child), before following any skill under `~/dev/hworks/skills/`, read `~/dev/hworks/adapters/pi.md` once per session. It names the agent for each role and how hworks steps run on pi.
+- On Codex, before following any hworks skill, read `../../adapters/codex.md` relative to the installed hughy-router skill directory. It maps hworks tools and roles to Codex.
 

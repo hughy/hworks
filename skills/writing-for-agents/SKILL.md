@@ -62,7 +62,7 @@ A prohibition names the behavior it bans. Prefer stating the target behavior ("w
 
 - Keep one meaning in one place. Point at `global/AGENTS.md` instead of restating it.
 - Treat the environment as a source of truth: `--help` output, config files, the directory layout. A document that restates it is a cache, worth its load only for what the agent cannot find by looking: an unwritten convention, the reason behind a choice, a gotcha.
-- Hunt no-ops sentence by sentence. A line the model already obeys changes nothing. The test is relative to the model's default, so settle a dispute by running the document with and without the line. Delete the whole sentence, not words from it. `DIVERGENCE.md` drops pstack principles on this test.
+- Hunt no-ops sentence by sentence. A line the model already obeys changes nothing. The test is relative to the model's default, so settle a dispute by running the document with and without the line. Delete the whole sentence, not words from it.
 - Prune as you edit. Stale layers settle because adding feels safe and deleting feels risky, so each edit checks nearby lines for ones that went stale.
 
 ## Before you finish

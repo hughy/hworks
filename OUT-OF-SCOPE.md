@@ -1,6 +1,6 @@
 # Out of scope
 
-Ideas hworks has judged against the Rationale in `README.md` and not taken, from outside skill collections and from its own reviews. pstack skills that hworks does not link live in `DIVERGENCE.md`, which `scripts/skill.sh` maintains.
+Ideas hworks has judged against the Rationale in `README.md` and not taken, from outside skill collections and from its own reviews.
 
 - Watching: plausible, but no observed failure or measured gain yet. Each row names the evidence that would admit it. kaizen checks these rows every run; a row whose condition is met becomes a fix and leaves this file.
 - Declined: judged and rejected. A later proposal that matches a row needs evidence the row did not have.
@@ -34,19 +34,19 @@ Add a row when you defer or decline an idea, and remove it when the idea lands o
 | skill | reason |
 |---|---|
 | `grill-me`, `grill-with-docs`, `grilling` | Interview before work; Autonomy defers questions to the end. The parts that change runs already live in `global/AGENTS.md` Planning: facts are the agent's job, a recommendation first, one batched round |
-| `domain-modeling` | Writes `GLOSSARY.md` and ADRs into repos hworks does not own; a team decision. `principle-model-the-domain` is excluded in `DIVERGENCE.md` for the same default behavior |
+| `domain-modeling` | Writes `GLOSSARY.md` and ADRs into repos hworks does not own; a team decision |
 | `to-spec`, `to-tickets`, `triage`, `wayfinder`, `setup-matt-pocock-skills` | Issue-tracker workflows belong in an overlay repo, since hworks is public and tracker-neutral. `to-tickets`' expand-migrate-contract rule for wide refactors is worth carrying to an overlay planning skill |
 | `implement`, `implement-spec` | `orchestrate` and `review-loop` cover them, with per-unit review, gates, and restart recovery |
-| `tdd` | Needs the user to confirm test seams, which conflicts with Autonomy. hworks `tdd` plus the `mutate.py` revert check proves more. Its tautology anti-pattern is in `principle-test-behavior-not-implementation` |
+| `tdd` | Needs the user to confirm test seams, which conflicts with Autonomy. hworks `tdd` plus the `mutate.py` revert check proves more. Its tautology anti-pattern is in `references/principles/test-behavior-not-implementation.md` |
 | `code-review` | The `reviewer` agent checks intent first and diversity comes from models, not axes. The smell baseline is default model behavior. No observed failure |
-| `research` | `explorer`, `synthesizer`, and `why` cover it |
-| `prototype` | pstack's `prototype.md` playbook covers it: throwaway, variants behind a switcher, observation as the test |
+| `research` | `explorer` and `synthesizer` cover it |
+| `prototype` | hughy-router's Build route covers it: settle a design decision with a throwaway prototype instead of asking |
 | `ask-matt` | hughy-router is the router, and `kaizen-setup.py` reports stale references. Its phase-boundary tree (`/clear`, `/compact`, hand-off) is harness-specific |
 | `retro` | kaizen, `/skill:correct`, and `friction.md` cover the retrospective. Its review-side split is in Watching |
-| `wait-what` | Same job as `bro` |
-| `teach` | Multi-session tutoring workspace; hworks `teach` explains a body of work, a different job |
+| `wait-what` | Same job as `bro`, which hworks dropped after two uses in 60 days |
+| `teach` | Multi-session tutoring workspace; not a job hworks does |
 | `to-questionnaire` | An operator-only flow with no change to agent runs |
-| `codebase-design`, `improve-codebase-architecture` | `correct` (architecture first) and `how` cover the survey; the deep-module vocabulary is pretrained |
+| `codebase-design`, `improve-codebase-architecture` | `correct` (architecture first) and hughy-router's untangle reference cover the survey; the deep-module vocabulary is pretrained |
 | `chief-of-staff`, `claude-handoff`, `loop-me`, `setup-ts-deep-modules`, `writing-beats`, `writing-fragments`, `writing-shape` | Unshipped upstream (`in-progress/`); covered by `orchestrate` or personal workflows outside hworks' scope |
 | `git-guardrails-claude-code`, `migrate-to-shoehorn`, `scaffold-exercises`, `setup-pre-commit` | Frozen upstream (`misc/`). `extensions/autonomy.ts` covers the git guard on pi; the rest are project-specific setup |
 
@@ -71,7 +71,7 @@ The smallest-complete-change ladder and the never-cut floor were adopted into `a
 | idea | reason |
 |---|---|
 | Install the plugin as-is | Its always-on prompt duplicates the coder ladder, its reply ending competes with the hughy-router Reply, and its `shortcut:` comments conflict with the `global/AGENTS.md` comment default. Its benchmark measures a bare agent with Bash off, so it says nothing about the gain over hworks |
-| `/ponytail` mode extension and lite/full/ultra levels | Same mechanism as `extensions/hughy-mode.ts`; hughy-router effort levels and `principle-attack-the-premise` cover the levels |
+| `/ponytail` mode extension and lite/full/ultra levels | Same mechanism as `extensions/hughy-mode.ts`; hughy-router effort levels cover the levels |
 | `ponytail-review`, `ponytail-audit` | The `reviewer` agent, `review-fanout`, and `correct` cover them; reviewer item 4 traces call frequency more strictly than its scale check |
 | Band, board, and `ponytail-gain` | Covered by `kaizen-tokens.py`; the gain page restates the benchmark |
 

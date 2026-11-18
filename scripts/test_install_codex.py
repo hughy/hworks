@@ -11,12 +11,10 @@ class InstallCodexTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory).resolve()
             clone = home / "dev/hworks"
-            shared = clone / "pstack/skills/example"
+            shared = clone / "skills/example"
             shared.mkdir(parents=True)
             (shared / "SKILL.md").write_text("---\nname: example\ndescription: Example\n---\n")
             (shared / "reference.md").write_text("Reference")
-            (clone / "skills").mkdir()
-            (clone / "skills/example").symlink_to("../pstack/skills/example")
             (clone / "global").mkdir()
             (clone / "global/AGENTS.md").write_text("Guidance")
             (clone / "scripts").mkdir()
