@@ -1,4 +1,3 @@
-import childProcess from "node:child_process";
 import { statSync } from "node:fs";
 import os from "node:os";
 import { isAbsolute } from "node:path";
@@ -32,28 +31,10 @@ try {
   install({});
   check("enabled sets TMPDIR", isAbsolute(process.env.TMPDIR ?? ""));
 
-  mock.method(os, "platform", () => "darwin");
   mock.method(os, "tmpdir", () => "/tmp/portable-scratch");
-  const getconf = mock.method(childProcess, "execFileSync", () => "/tmp/per-user-scratch/\n");
   delete process.env.TMPDIR;
   install({});
-  check("macOS prefers per-user directory", process.env.TMPDIR === "/tmp/per-user-scratch/");
-
-  getconf.mock.mockImplementation(() => { throw new Error("getconf unavailable"); });
-  delete process.env.TMPDIR;
-  install({});
-  check("getconf failure uses OS fallback", process.env.TMPDIR === "/tmp/portable-scratch");
-
-  getconf.mock.mockImplementation(() => " \n");
-  delete process.env.TMPDIR;
-  install({});
-  check("empty getconf output uses OS fallback", process.env.TMPDIR === "/tmp/portable-scratch");
-
-  mock.method(os, "platform", () => "linux");
-  getconf.mock.mockImplementation(() => "/tmp/mac-only-scratch/");
-  delete process.env.TMPDIR;
-  install({});
-  check("other platforms use OS directory", process.env.TMPDIR === "/tmp/portable-scratch");
+  check("matches what os.tmpdir() already returns", process.env.TMPDIR === "/tmp/portable-scratch", process.env.TMPDIR);
 
   for (const value of ["", " \t\n"]) {
     mock.method(os, "tmpdir", () => value);

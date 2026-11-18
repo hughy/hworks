@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 process.env.TMPDIR = mkdtempSync(join(tmpdir(), "workflow-fence-test-"));
+process.umask(0o022);
 delete process.env.PI_WORKFLOW_FENCE;
 const { default: register } = await import("./workflow-fence.ts");
 
@@ -43,6 +44,9 @@ function run(text: string, input: any, toolName = "subagent", id = `call-${n}`) 
   check("plain js rewritten", r === undefined && typeof path === "string" && path.startsWith("/") && existsSync(path) && readFileSync(path, "utf8") === body, { r, path });
   check("plain js keeps args", input.args?.a === 1);
   check("plain js file under tmp", typeof path === "string" && path.startsWith(join(process.env.TMPDIR!, "hworks-workflows")) && !path.includes("|"), path);
+  check("plain js staged privately", typeof path === "string" && (statSync(path).mode & 0o077) === 0 && (statSync(dirname(path)).mode & 0o077) === 0, path);
+  const again = run(`Running it.\n\n${F}js\n${body}\n${F}\n`, { workflow: true }, "subagent", "toolu|01:x").input.workflow;
+  check("each repair gets a fresh dir", typeof again === "string" && dirname(again) !== dirname(path), { path, again });
 }
 {
   const { r, input } = run(`${F}javascript\n${body}\n${F}`, { workflow: "true" });
